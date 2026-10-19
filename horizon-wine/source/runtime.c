@@ -4300,7 +4300,8 @@ int main( int argc, char **argv )
     horizon_server_profile_enabled = runtime_profile;
     open_game_log( target );
     log_line( "wine-nx-runtime: generic Wine ntdll PE loader path" );
-    log_line( "[BUILD] %s", WINE_NX_RUNTIME_BUILD );
+    log_line( "[BUILD] %s (address space %d bits)", WINE_NX_RUNTIME_BUILD, runtime_address_space_bits() );
+    log_line( "[LOWVA] forwarder title %016llx", runtime_title_id() );
     runtime_boost_thread_limit();
     log_line( "[SYNC] %s", horizon_fast_sync_enabled ? "Horizon queued waits" : "Standard" );
     wine_nx_thread_configure_cores( runtime_four_cores );

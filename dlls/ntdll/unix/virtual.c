@@ -5001,6 +5001,22 @@ static void set_large_address_space(void)
 }
 
 
+/* Where a native-only mapping is put. Above 4 GB when the address space has
+ * any, out of the way of the guest's range below it; the 32-bit forwarder's
+ * address space ends at 4 GB, where nothing is above, and native mappings
+ * belong in the window horizon_reserve_guest_address_space left at the top of
+ * the stack region for thread stacks, code memory and this. */
+static void native_only_limits( ULONG_PTR *low, ULONG_PTR *high )
+{
+    *low = (ULONG_PTR)limit_4g;
+    *high = 0;
+    if (horizon_native_window_start && (ULONG_PTR)horizon_native_window_end <= (ULONG_PTR)limit_4g)
+    {
+        *low = (ULONG_PTR)horizon_native_window_start;
+        *high = (ULONG_PTR)horizon_native_window_end;
+    }
+}
+
 /***********************************************************************
  *           virtual_alloc_first_thread_data
  */
@@ -5010,6 +5026,7 @@ struct thread_data *virtual_alloc_first_thread_data(void)
     struct thread_data *thread_data;
     struct file_view *view;
     SIZE_T size = signal_stack_mask + 1;
+    ULONG_PTR native_low, native_high;
 #ifndef __SWITCH__
     size += kernel_stack_size;
 #endif
@@ -5026,8 +5043,9 @@ struct thread_data *virtual_alloc_first_thread_data(void)
         exit(1);
     }
 
+    native_only_limits( &native_low, &native_high );
     status = map_view( &view, NULL, size, MEM_TOP_DOWN,
-                       VPROT_READ | VPROT_WRITE | VPROT_COMMITTED, limit_4g, 0, 0 );
+                       VPROT_READ | VPROT_WRITE | VPROT_COMMITTED, native_low, native_high, 0 );
     if (status)
     {
         ERR( "wine: failed to allocate initial thread data: %08x\n", status );
@@ -5172,12 +5190,14 @@ struct thread_data *virtual_alloc_thread_data(void)
     struct file_view *view;
     struct thread_data *data = NULL;
     SIZE_T size = signal_stack_mask + 1;
+    ULONG_PTR native_low, native_high;
 #ifndef __SWITCH__
     size += kernel_stack_size;
 #endif
 
+    native_only_limits( &native_low, &native_high );
     server_enter_uninterrupted_section( &virtual_mutex, &sigset );
-    status = map_view( &view, NULL, size, 0, VPROT_READ | VPROT_WRITE | VPROT_COMMITTED, limit_4g, 0, 0 );
+    status = map_view( &view, NULL, size, 0, VPROT_READ | VPROT_WRITE | VPROT_COMMITTED, native_low, native_high, 0 );
     if (!status)
     {
 #if defined(__SWITCH__) && defined(WINE_NX_SWAP_POC)
