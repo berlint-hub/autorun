@@ -2,6 +2,7 @@
 #include <math.h>
 #include <sys/stat.h>
 #include "input_profile.h"
+#include "games/controls.h"
 #include "key_names.h"
 
 const struct input_source input_sources[INPUT_SOURCE_COUNT] =
@@ -164,6 +165,9 @@ int input_profile_program( const char *root, const char *program, int keyboard_a
     struct launcher_kv global;
     size_t len = strlen( program );
     if (!input_profile_global( root, keyboard_auto, profile, &global, path, size )) return 0;
+    /* A game recognised here (games/controls.h) gets its recommended layout
+     * over the player's global controls and under their own per-game file. */
+    game_controls_apply( profile, game_controls_find( program ) );
     if (len > 4 && !strcasecmp( program + len - 4, ".exe" ))
     {
         if ((size_t)snprintf( path, size, "%.*s.keys.txt", (int)len - 4, program ) >= size ||

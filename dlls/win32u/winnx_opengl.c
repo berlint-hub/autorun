@@ -28,6 +28,7 @@
 #include "wine/opengl_driver.h"
 #include "wine/debug.h"
 #include "../../horizon-wine/source/osk.h"
+#include "../../horizon-wine/source/controls_overlay.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(wgl);
 
@@ -187,7 +188,9 @@ unsigned long long wine_nx_gl_swap_time;  /* 100 ns */
 /* The floating keyboard (horizon-wine/source/osk.c), put into the back
  * buffer just before it is shown: its picture in a texture of each context's
  * own, blitted from a framebuffer of its own onto the window's. Everything
- * the blit and the upload depend on is put back as the program left it. */
+ * the blit and the upload depend on is put back as the program left it.
+ * The controls overlay draws through the same calls, so this is whichever
+ * overlay is up. */
 struct nx_osk_gl
 {
     EGLContext context;
@@ -215,7 +218,7 @@ static void nx_osk_draw( struct opengl_drawable *base )
     GLboolean scissor, srgb;
     unsigned int i;
 
-    if (!wine_nx_osk_visible()) return;
+    if (!wine_nx_osk_visible() && !wine_nx_controls_overlay_visible()) return;
     if (!funcs->p_eglQuerySurface( egl->display, base->surface, EGL_WIDTH, &width ) ||
         !funcs->p_eglQuerySurface( egl->display, base->surface, EGL_HEIGHT, &height ) ||
         !wine_nx_osk_frame( width, height, &frame ) || !(context = funcs->p_eglGetCurrentContext()))

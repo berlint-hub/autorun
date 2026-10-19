@@ -30,7 +30,11 @@ copies to the SD card and start them from Autorun's library.
   [which games have one](https://github.com/autorunhq/autorun-game-fixes/blob/main/FIXES.md).
 - **USB drives** show up in games as drives D: to H:.
 - **A launcher** with artwork, per-game settings, controls and HOME menu
-  shortcuts for games.
+  shortcuts for games. Controls remap while a game runs too: Minus and the
+  left stick click open the mapping over the game. Mouse-driven classics such
+  as Septerra Core and Harbinger start with a ready-made layout -- the right
+  stick moves the mouse, ZL left-clicks, the right stick's click
+  right-clicks.
 
 > **Autorun is experimental.** Some games run well, many start and then stop on
 > something that isn't done yet. Every run writes a log that says where. A game

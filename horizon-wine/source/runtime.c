@@ -45,6 +45,7 @@
 #include "pointer_cursor.h"
 #include "compositor.h"
 #include "osk.h"
+#include "controls_overlay.h"
 #include "std_stream_lines.h"
 #include "thread_profile.h"
 #include "dxvk_releases.h"
@@ -530,6 +531,11 @@ int wine_nx_display_devices = 1;
 int wine_nx_swkbd_auto_enabled = 1;
 struct input_profile wine_nx_input_profile;
 uint64_t wine_nx_input_swallowed;
+/* Where the controls overlay (controls_overlay.c) writes what it changes: the
+ * runtime directory and the program the runtime started, kept from the load
+ * below so remapping while the game runs lands in the same per-game file. */
+static char wine_nx_input_root[256];
+static char wine_nx_input_program[768];
 
 /***********************************************************************
  * Framebuffer platform hooks used by the win32u Switch display driver
@@ -833,6 +839,9 @@ uint64_t wine_nx_osk_clock( void )
 
 void wine_nx_keyboard_open( void )
 {
+    /* Whichever overlay is up gives way to the keyboard the program asked
+     * for; it opened first only if nothing else is on the screen. */
+    wine_nx_controls_overlay_show( 0, 0, NULL, NULL );
     if (!wine_nx_osk_visible()) log_line( "[OSK] opened by the program" );
     wine_nx_osk_show( 1, __atomic_load_n( &osk_last_held, __ATOMIC_RELAXED ) );
 }
@@ -855,7 +864,7 @@ int wine_nx_pointer_poll( int *x, int *y, unsigned int *buttons )
     const struct input_profile *profile = &wine_nx_input_profile;
     u64 now, held, all_held, elapsed;
     int moved = 0, keyboard = 0, on_keyboard = 0, leave = 0, emulate;
-    static int osk_combo;
+    static int osk_combo, remap_combo;
     static u64 swallowed, quit_since, wheel_next;
     static unsigned int last_wheels;
 
@@ -881,17 +890,35 @@ int wine_nx_pointer_poll( int *x, int *y, unsigned int *buttons )
     }
     {
         const u64 osk = HidNpadButton_Minus | HidNpadButton_StickR;
+        /* Minus and the left stick click open the controls overlay instead:
+         * remapping where the game is, rather than back in the launcher. */
+        const u64 remap = HidNpadButton_Minus | HidNpadButton_StickL;
         unsigned int bits = osk_buttons( held );
-        if ((held & osk) == osk && !osk_combo && !wine_nx_osk_visible())
+        if ((held & osk) == osk && !osk_combo && !wine_nx_osk_visible() && !wine_nx_controls_overlay_visible())
             wine_nx_osk_show( 1, bits );
         osk_combo = (held & osk) == osk;
+        if ((held & remap) == remap && !remap_combo)
+        {
+            if (wine_nx_controls_overlay_visible()) wine_nx_controls_overlay_show( 0, bits, NULL, NULL );
+            else if (!wine_nx_osk_visible() &&
+                     !wine_nx_controls_overlay_show( 1, bits, wine_nx_input_root, wine_nx_input_program ))
+                log_line( "[INPUT] could not read controller settings for the controls overlay" );
+        }
+        remap_combo = (held & remap) == remap;
         __atomic_store_n( &osk_last_held, bits, __ATOMIC_RELAXED );
-        if (wine_nx_osk_visible())
+        if (wine_nx_osk_visible() || wine_nx_controls_overlay_visible())
         {
             int touching = hidGetTouchScreenStates( &touch, 1 ) && touch.count > 0;
-            on_keyboard = wine_nx_osk_input( bits, raw.axis[0], raw.axis[1], touching,
-                                             touching ? (int)touch.touches[0].x : 0,
-                                             touching ? (int)touch.touches[0].y : 0, armTicksToNs( now ) );
+            if (wine_nx_osk_visible())
+                on_keyboard = wine_nx_osk_input( bits, raw.axis[0], raw.axis[1], touching,
+                                                 touching ? (int)touch.touches[0].x : 0,
+                                                 touching ? (int)touch.touches[0].y : 0, armTicksToNs( now ) );
+            else
+                on_keyboard = wine_nx_controls_overlay_input( bits, raw.axis[0], raw.axis[1],
+                                                              raw.axis[2], raw.axis[3], touching,
+                                                              touching ? (int)touch.touches[0].x : 0,
+                                                              touching ? (int)touch.touches[0].y : 0,
+                                                              armTicksToNs( now ) );
             keyboard = 1;
             swallowed = held;
         }
@@ -899,7 +926,7 @@ int wine_nx_pointer_poll( int *x, int *y, unsigned int *buttons )
         __atomic_store_n( &wine_nx_input_swallowed, swallowed, __ATOMIC_RELAXED );
         raw.buttons = held & ~swallowed;
         static unsigned int drawn_generation;
-        unsigned int generation = wine_nx_osk_generation();
+        unsigned int generation = wine_nx_osk_generation() ^ wine_nx_controls_overlay_generation();
         if (generation != drawn_generation)
         {
             drawn_generation = generation;
@@ -1944,6 +1971,10 @@ static RTL_USER_PROCESS_PARAMETERS *runtime_create_process_params( const char *t
                                    &wine_nx_input_profile, &kv, input_path, sizeof(input_path) );
         if (!loaded) log_line( "[INPUT] could not read controller settings" );
         wine_nx_swkbd_auto_enabled = wine_nx_input_profile.keyboard_auto;
+        /* Kept for the controls overlay, which reads and writes the same
+         * per-game controls while the program runs. */
+        snprintf( wine_nx_input_root, sizeof(wine_nx_input_root), "%s", RUNTIME_DIR );
+        snprintf( wine_nx_input_program, sizeof(wine_nx_input_program), "%s", target[1] == ':' ? "" : target );
     }
     /* Its own Box64 options, read when its first x86 code runs: SPEED2.box64.txt. */
     {
