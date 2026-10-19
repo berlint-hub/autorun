@@ -113,6 +113,23 @@ jobs:
           sudo docker images | tr '\n' ';' | sed 's/%/%25/g' | cut -c1-1500 | xargs -0 -I{} echo "::notice::images: {}"
           exit 1
 
+      # The three NCAs a forwarder is made of, built and taken apart again: the
+      # loader's NPDM comes out of the build dir just made, since it is what the
+      # address space is patched into.
+      - name: Check the forwarder NCAs
+        run: |
+          npdm=""
+          for dir in horizon-wine/build-switch-wow64-mesa-switch horizon-wine/build-switch-amd64; do
+            [ -f "$dir/hbl-main.npdm" ] && { npdm="$dir/hbl-main.npdm"; break; }
+          done
+          test -n "$npdm"
+          mkdir -p "$RUNNER_TEMP/switch-shim" "$RUNNER_TEMP/ncas"
+          cp horizon-wine/tests/switch_shim.h "$RUNNER_TEMP/switch-shim/switch.h"
+          cc -std=gnu11 -Wall -Wextra -Werror -Wno-unused-parameter -Wno-format-truncation -O1 -g \
+            -I horizon-wine/tests -I "$RUNNER_TEMP/switch-shim" \
+            horizon-wine/tests/forwarder_build.c -o "$RUNNER_TEMP/forwarder_build"
+          "$RUNNER_TEMP/forwarder_build" "$npdm" horizon-wine/assets/autorun.jpg "$RUNNER_TEMP/ncas"
+
       - name: Save toolchains and boot payloads
         if: always()
         uses: actions/cache/save@v4

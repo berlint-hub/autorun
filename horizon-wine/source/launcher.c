@@ -1815,7 +1815,7 @@ static int confirm_forwarder( struct launcher *l )
     return ui_confirm( ui, "Install forwarder", message, "Install" );
 }
 
-static void make_forwarder( struct launcher *l )
+static void make_forwarder( struct launcher *l, unsigned int address_space )
 {
     struct ui *ui = &l->ui;
     const char *step = NULL;
@@ -1833,7 +1833,7 @@ static void make_forwarder( struct launcher *l )
     ui_text_centered( ui, ui->large, ui->width / 2, ui->height / 2 - 30, "Installing...", ui->value );
     ui_present( ui );
 
-    rc = l->options->install_forwarder( &step );
+    rc = l->options->install_forwarder( address_space, &step );
     ui_start_screen( ui );
     if (rc)
     {
@@ -1982,8 +1982,16 @@ static int next_state( int state, int direction )
 
 static int address_space_fits( struct launcher *l, struct program *p )
 {
-    return l->options->address_space_bits == 39 &&
-           (l->options->low_window || launcher_program_address_space( p->path ) != LAUNCHER_ADDRESS_LOW);
+    int bits = l->options->address_space_bits;
+
+    /* A fixed-address image is linked for one address in the low 4 GB: a
+     * 32-bit address space has every mapping there, the 39-bit one reaches
+     * those addresses through the low window the Atmosphere patch opens.
+     * Anything else runs wherever it is put, but a 32-bit address space
+     * cannot host a 64-bit program. */
+    if (launcher_program_address_space( p->path ) == LAUNCHER_ADDRESS_LOW)
+        return bits == 32 || (bits == 39 && l->options->low_window);
+    return bits != 32 || p->machine != 0x8664;
 }
 
 static int prepare_program_graphics( struct launcher *l, struct program *p )
@@ -2016,9 +2024,13 @@ static int start_program( struct launcher *l, struct program *p, char *target, s
     }
     if (!address_space_fits( l, p ))
     {
-        ui_message( ui, "Address space unavailable", l->options->address_space_bits != 39
-                    ? "Start Autorun from its 39-bit forwarder. You can install it in Settings > System."
-                    : "This game requires the Atmosphere low-address patch. Restart with the patched loader and Mesosphere." );
+        ui_message( ui, "Address space unavailable",
+                    l->options->address_space_bits == 32
+                    ? "64-bit programs need the 39-bit forwarder. You can install it in Settings > System."
+                    : l->options->address_space_bits == 39
+                    ? "This game needs low memory. Install the Atmosphere low-address patch (Quick setup), "
+                      "or start Autorun from the 32-bit forwarder in Settings > System."
+                    : "Start Autorun from its 39-bit forwarder. You can install it in Settings > System." );
         return 0;
     }
     /* Autorun ships no Windows DLLs: a card without them is offered them here. */
@@ -3083,7 +3095,7 @@ enum settings_row
 {
     SET_HIDDEN, SET_HIDE_MISSING, SET_DXVK_ON_ADD, SET_VERBOSE, SET_PROFILE, SET_WINDOWS,
     SET_INPUT, SET_INPUT_END = SET_INPUT + INPUT_ROW_COUNT - 1, SET_STEAMGRIDDB, SET_DOWNLOAD_COVERS,
-    SET_DLLS, SET_UPDATE, SET_SETUP, SET_REOPEN, SET_MAKE_MAIN,
+    SET_DLLS, SET_UPDATE, SET_SETUP, SET_REOPEN, SET_MAKE_MAIN, SET_MAKE_32,
 #ifdef WINE_NX_SWAP_POC
     SET_SWAP_SIZE,
 #endif
@@ -3292,6 +3304,7 @@ static void settings_menu( struct launcher *l )
             [SET_UPDATE] = SET_SECTION_SYSTEM,
             [SET_SETUP] = SET_SECTION_SYSTEM,
             [SET_MAKE_MAIN] = SET_SECTION_SYSTEM,
+            [SET_MAKE_32] = SET_SECTION_SYSTEM,
 #ifdef WINE_NX_SWAP_POC
             [SET_SWAP_SIZE] = SET_SECTION_SYSTEM,
 #endif
@@ -3379,9 +3392,18 @@ static void settings_menu( struct launcher *l )
         snprintf( rows[SET_MAKE_MAIN].value, sizeof(rows[0].value), "%s",
                   l->options->install_forwarder ? "Autorun" : "Unavailable" );
         rows[SET_MAKE_MAIN].help = "Installs the 39-bit Autorun forwarder. Fixed-address Win32 games also "
-                                   "require the Atmosphere low-address patch. Use emuMMC only.";
+                                   "require the Atmosphere low-address patch, or the 32-bit forwarder below. "
+                                   "Use emuMMC only.";
         rows[SET_MAKE_MAIN].adjustable = 0;
         rows[SET_MAKE_MAIN].disabled = !l->options->install_forwarder;
+        snprintf( rows[SET_MAKE_32].label, sizeof(rows[0].label), "Make a 32-bit Autorun forwarder" );
+        snprintf( rows[SET_MAKE_32].value, sizeof(rows[0].value), "%s",
+                  l->options->install_forwarder ? "Autorun (32-bit)" : "Unavailable" );
+        rows[SET_MAKE_32].help = "Installs a forwarder whose 32-bit address space has every mapping in the "
+                                 "low 4 GB: fixed-address Win32 games run through it without the Atmosphere "
+                                 "low-address patch. 64-bit games need the 39-bit forwarder. Use emuMMC only.";
+        rows[SET_MAKE_32].adjustable = 0;
+        rows[SET_MAKE_32].disabled = !l->options->install_forwarder;
 #ifdef WINE_NX_SWAP_POC
         {
             int size = launcher_kv_get_int( &l->look, "swap-mb", 0 );
@@ -3453,7 +3475,10 @@ static void settings_menu( struct launcher *l )
             ui_start_screen( ui );
             break;
         case SET_MAKE_MAIN:
-            if (action == UI_ACTION_CHOOSE) make_forwarder( l );
+            if (action == UI_ACTION_CHOOSE) make_forwarder( l, 3 );
+            break;
+        case SET_MAKE_32:
+            if (action == UI_ACTION_CHOOSE) make_forwarder( l, 2 );
             break;
 
 #ifdef WINE_NX_SWAP_POC

@@ -3733,23 +3733,24 @@ static void log_line_plain( const char *line )
     log_line( "%s", line );
 }
 
-static unsigned int launcher_install_forwarder( const char **step )
+static unsigned int launcher_install_forwarder( unsigned int address_space, const char **step )
 {
     struct wine_nx_forwarder request =
     {
         .nro_path = RUNTIME_DIR "/wine-nx-runtime.nro",
         .args = NULL,
-        .name = "Autorun",
+        .name = address_space == 2 ? "Autorun (32-bit)" : "Autorun",
         .author = "ticoverse.com",
         .icon = wine_nx_icon_any,
         .icon_size = wine_nx_icon_any_size,
+        .address_space = address_space,
     };
     unsigned int rc;
 
     wine_nx_forwarder_report = log_line_plain;
     rc = wine_nx_forwarder_install( &request, step );
     log_line( "[LAUNCHER] forwarder %016llx: rc=0x%x%s%s",
-              wine_nx_forwarder_title_id( request.nro_path, NULL ), rc,
+              wine_nx_forwarder_title_id_as( request.nro_path, NULL, address_space ), rc,
               rc && step && *step ? " at " : "", rc && step && *step ? *step : "" );
     return rc;
 }
@@ -3763,9 +3764,12 @@ static unsigned int launcher_install_game_forwarder( const struct wine_nx_forwar
     *step = "checking the Autorun forwarder";
     if (R_FAILED( rc = nsInitialize() )) return rc;
     rc = nsIsAnyApplicationEntityInstalled( AUTORUN_TITLE_ID, &installed );
+    if (R_SUCCEEDED( rc ) && !installed)
+        rc = nsIsAnyApplicationEntityInstalled( wine_nx_forwarder_title_id_as( AUTORUN_NRO, NULL, 2 ),
+                                                &installed );
     nsExit();
     if (R_FAILED( rc )) return rc;
-    if (!installed && (rc = launcher_install_forwarder( step ))) return rc;
+    if (!installed && (rc = launcher_install_forwarder( 3, step ))) return rc;
     wine_nx_forwarder_report = log_line_plain;
     return wine_nx_forwarder_install( request, step );
 }
@@ -4085,7 +4089,8 @@ int main( int argc, char **argv )
             .address_space_bits = runtime_address_space_bits(),
             .low_window = low_window_available,
             .four_cores_available = wine_nx_four_cores_available(),
-            .own_forwarder = runtime_title_id() == wine_nx_forwarder_title_id( RUNTIME_DIR "/wine-nx-runtime.nro", NULL ),
+            .own_forwarder = runtime_title_id() == wine_nx_forwarder_title_id( RUNTIME_DIR "/wine-nx-runtime.nro", NULL ) ||
+                             runtime_title_id() == wine_nx_forwarder_title_id_as( RUNTIME_DIR "/wine-nx-runtime.nro", NULL, 2 ),
             .reopen_launcher = runtime_reopen_launcher,
             .dxvk_on_add = runtime_dxvk_on_add,
             .install_forwarder = launcher_install_forwarder,
