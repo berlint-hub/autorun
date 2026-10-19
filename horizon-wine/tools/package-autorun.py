@@ -15,6 +15,7 @@ from zipfile import ZipFile, ZIP_DEFLATED
 import argparse
 import json
 import os
+import platform
 import re
 import shutil
 import subprocess
@@ -27,7 +28,20 @@ build = horizon_wine / 'build-autorun'
 stage_root = build / 'sd-card'
 stage = stage_root / 'switch/wine'
 marker = re.search(r'nx-wow64-dynarec-(\d+)', (horizon_wine / 'source/runtime.c').read_text()).group(1)
-toolchain = horizon_wine / 'toolchains/llvm-mingw-20260505-ucrt-macos-universal/bin'
+# The toolchain build.sh fetches: its release name is per-platform, and the
+# build exports WINE_NX_LLVM_MINGW with the one it chose. Anything already
+# fetched will do as a last resort.
+llvm_version = '20260505'
+machine = 'aarch64' if platform.machine() in ('aarch64', 'arm64') else 'x86_64'
+name = ('llvm-mingw-%s-ucrt-macos-universal' % llvm_version if platform.system() == 'Darwin'
+        else 'llvm-mingw-%s-ucrt-ubuntu-22.04-%s' % (llvm_version, machine))
+toolchain = (Path(os.environ['WINE_NX_LLVM_MINGW']) / 'bin' if os.environ.get('WINE_NX_LLVM_MINGW')
+             else horizon_wine / 'toolchains' / name / 'bin')
+if not (toolchain / 'i686-w64-mingw32-clang').is_file():
+    toolchain = next((p / 'bin' for p in sorted((horizon_wine / 'toolchains').glob('llvm-mingw-*'))
+                      if (p / 'bin' / 'i686-w64-mingw32-clang').is_file()), toolchain)
+assert (toolchain / 'i686-w64-mingw32-clang').is_file(), \
+    f'No llvm-mingw toolchain in {horizon_wine / "toolchains"}; run build.sh, or set WINE_NX_LLVM_MINGW.'
 # The FEX build when there is one, as build-amd64-components.sh names it.
 default_amd64 = next((path for path in (horizon_wine / f'build-switch-amd64/wine-nx-amd64-box64{kind}-mesa-dxvk-vkd3d.zip'
                                         for kind in ('-fex', '')) if path.is_file()),

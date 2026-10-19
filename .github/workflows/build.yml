@@ -88,14 +88,15 @@ jobs:
       # they were built against, and the boot payload's own sources say when it
       # is time to build them again. Only what the build reuses is kept: the
       # payload build's own checkouts are dropped, so a restored cache never
-      # lands git on files another user made.
-      - name: Cache toolchains and boot payloads
-        uses: actions/cache@v4
+      # lands git on files another user made. Saved even when the build fails.
+      - name: Restore toolchains and boot payloads
+        uses: actions/cache/restore@v4
         with:
           path: |
             horizon-wine/toolchains/llvm-mingw-*
             horizon-wine/toolchains/boot-payloads/bundle
           key: toolchains-${{ hashFiles('horizon-wine/switch-dev.txt', 'horizon-wine/build-boot-bundle.sh', 'horizon-wine/mesosphere/**') }}
+          restore-keys: toolchains-
 
       # build.sh tees to build.log so a failure can say why in annotations,
       # which the job's checks carry even when the log archive is out of reach.
@@ -111,6 +112,15 @@ jobs:
           df -h | tr '\n' ';' | sed 's/%/%25/g' | xargs -0 -I{} echo "::notice::disk: {}"
           sudo docker images | tr '\n' ';' | sed 's/%/%25/g' | cut -c1-1500 | xargs -0 -I{} echo "::notice::images: {}"
           exit 1
+
+      - name: Save toolchains and boot payloads
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            horizon-wine/toolchains/llvm-mingw-*
+            horizon-wine/toolchains/boot-payloads/bundle
+          key: toolchains-${{ hashFiles('horizon-wine/switch-dev.txt', 'horizon-wine/build-boot-bundle.sh', 'horizon-wine/mesosphere/**') }}-${{ github.run_id }}
 
       - name: Upload the SD card archive
         uses: actions/upload-artifact@v4

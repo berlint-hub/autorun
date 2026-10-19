@@ -7,7 +7,17 @@
 set -eu
 root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 pe="$root/horizon-wine/build-wine-amd64-pe"
-export PATH="$root/horizon-wine/toolchains/llvm-mingw-20260505-ucrt-macos-universal/bin:/opt/homebrew/opt/bison/bin:$PATH"
+# The toolchain build.sh fetches: its name is per-platform, and the build
+# exports WINE_NX_LLVM_MINGW with the one it chose.
+if [ -z "${WINE_NX_LLVM_MINGW:-}" ]; then
+    case "$(uname -s)-$(uname -m)" in
+        Darwin-*) llvm_name="llvm-mingw-20260505-ucrt-macos-universal" ;;
+        Linux-aarch64|Linux-arm64) llvm_name="llvm-mingw-20260505-ucrt-ubuntu-22.04-aarch64" ;;
+        *) llvm_name="llvm-mingw-20260505-ucrt-ubuntu-22.04-x86_64" ;;
+    esac
+    WINE_NX_LLVM_MINGW="$root/horizon-wine/toolchains/$llvm_name"
+fi
+export PATH="$WINE_NX_LLVM_MINGW/bin:/opt/homebrew/opt/bison/bin:$PATH"
 if [ ! -f "$pe/Makefile" ]; then
     echo "No Wine tree in build-wine-amd64-pe; build-amd64-components.sh configures it." >&2
     exit 1
