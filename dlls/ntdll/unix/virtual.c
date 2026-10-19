@@ -5040,6 +5040,18 @@ struct thread_data *virtual_alloc_first_thread_data(void)
     if (status)
     {
         ERR( "wine: failed to map the shared user data: %08x\n", status );
+#ifdef __SWITCH__
+        {
+            char msg[160];
+
+            if (&wine_nx_runtime_trace)
+            {
+                snprintf( msg, sizeof(msg), "[FAIL] map shared user data %p status=%08x",
+                          user_shared_data, status );
+                wine_nx_runtime_trace( msg );
+            }
+        }
+#endif
         exit(1);
     }
 
@@ -5049,6 +5061,19 @@ struct thread_data *virtual_alloc_first_thread_data(void)
     if (status)
     {
         ERR( "wine: failed to allocate initial thread data: %08x\n", status );
+#ifdef __SWITCH__
+        {
+            char msg[176];
+
+            if (&wine_nx_runtime_trace)
+            {
+                snprintf( msg, sizeof(msg),
+                          "[FAIL] map first thread data size=%#lx limits=%p-%p status=%08x",
+                          (unsigned long)size, (void *)native_low, (void *)native_high );
+                wine_nx_runtime_trace( msg );
+            }
+        }
+#endif
         exit(1);
     }
 #if defined(__SWITCH__) && defined(WINE_NX_SWAP_POC)

@@ -17268,6 +17268,12 @@ int horizon_server_connect(void)
 
         errno = err;
         fprintf( stderr, "wine: failed to create Horizon server bootstrap pipes: %s\n", strerror(err) );
+        {
+            char msg[160];
+
+            snprintf( msg, sizeof(msg), "[FAIL] server bootstrap pipes: %s", strerror(err) );
+            wine_nx_runtime_trace( msg );
+        }
         exit(1);
     }
 
@@ -17279,6 +17285,7 @@ int horizon_server_connect(void)
         close( request_pipe[1] );
         errno = ENOMEM;
         fprintf( stderr, "wine: failed to allocate Horizon server connection.\n" );
+        wine_nx_runtime_trace( "[FAIL] server connection allocation failed" );
         exit(1);
     }
 
@@ -17297,6 +17304,12 @@ int horizon_server_connect(void)
         free( connection );
         errno = err;
         fprintf( stderr, "wine: failed to start Horizon server thread: %s\n", strerror(err) );
+        {
+            char msg[160];
+
+            snprintf( msg, sizeof(msg), "[FAIL] server thread start: %s", strerror(err) );
+            wine_nx_runtime_trace( msg );
+        }
         exit(1);
     }
     pthread_detach( thread );

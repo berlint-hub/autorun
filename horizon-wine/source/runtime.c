@@ -202,6 +202,7 @@ static int log_line_is_urgent( const char *line )
 {
     return !strncmp( line, "[EXC]", 5 ) || !strncmp( line, "[EXIT]", 6 ) ||
            !strncmp( line, "[FAIL]", 6 ) || !strncmp( line, "[PE32 TEST]", 11 ) ||
+           !strncmp( line, "[INIT]", 6 ) || !strncmp( line, "[IMAGE]", 7 ) ||
            !strncmp( line, "[LIFECYCLE] final", 17 ) || !strncmp( line, "[LIFECYCLE] verdict", 19 );
 }
 
@@ -319,6 +320,37 @@ static void *log_flusher( void *arg )
         wine_nx_sd_cache_flush();
     }
     return NULL;
+}
+
+/* KUSER_SHARED_DATA sits at 0x7ffe0000, where every 32-bit program's ntdll
+ * reads it. Under the 32-bit address space the kernel heap region -- this
+ * runtime's whole memory budget -- starts at 0x62200000 and runs straight past
+ * that address: the shared data had no free page to land on, and the program
+ * died right after 'virtual memory ready' every time. End the heap below it
+ * (SetHeapSize sizes are 2 MiB multiples, so 0x7fe00000). A 32-bit program
+ * cannot see past 4 GB anyway, and the games this forwarder exists for were
+ * made for far less. */
+static void keep_shared_data_address_free(void)
+{
+    u64 heap_base = 0, heap_size = 0, want;
+    const uintptr_t shared = 0x7ffe0000, end = 0x7fe00000;
+    extern char *fake_heap_end;
+    void *out;
+
+    svcGetInfo( &heap_base, InfoType_HeapRegionAddress, CUR_PROCESS_HANDLE, 0 );
+    svcGetInfo( &heap_size, InfoType_HeapRegionSize, CUR_PROCESS_HANDLE, 0 );
+    if (!heap_size || heap_base >= shared || heap_base + heap_size <= shared + 0x1000) return;
+    if (end <= heap_base || end - heap_base < 64 * 1048576) return;
+    want = end - heap_base;
+    if (R_FAILED( svcSetHeapSize( &out, want ) ))
+    {
+        log_line( "[FAIL] could not end the heap below 0x7ffe0000; the shared data will not map" );
+        return;
+    }
+    if ((uintptr_t)fake_heap_end > end) fake_heap_end = (char *)end;
+    log_line( "[INIT] heap ended at 0x%llx (region 0x%llx+0x%llx) so 0x7ffe0000 stays free for the shared data",
+              (unsigned long long)(heap_base + want), (unsigned long long)heap_base,
+              (unsigned long long)heap_size );
 }
 
 /* A running thread keeps its stack, which libnx maps out of the heap, lent to
@@ -4383,6 +4415,7 @@ int main( int argc, char **argv )
         }
     }
 #endif
+    keep_shared_data_address_free();
     wine_nx_runtime_platform_init();
     log_line( "[INIT] Wine paths/unix bridge ready" );
     virtual_init();
@@ -4396,8 +4429,14 @@ int main( int argc, char **argv )
     {
         extern void wine_nx_profile_start( void );
         wine_nx_profile_start();
+        log_line( "[INIT] profiler sampler started" );
     }
-    server_init_process( virtual_alloc_first_thread_data() );
+    {
+        void *first_data = virtual_alloc_first_thread_data();
+
+        log_line( "[INIT] first thread data %p", first_data );
+        server_init_process( first_data );
+    }
     log_line( "[INIT] server process initialized" );
 
     wine_nx_runtime_environment_init();
