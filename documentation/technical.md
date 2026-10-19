@@ -213,8 +213,9 @@ Requirements:
   tests. It is devkitA64 with a newer libnx, mesa-switch (Mesa 26: OpenGL and
   NVK Vulkan), LSFG-VK's Horizon port and libusbhsfs with UASP in portlibs,
   each from a pinned revision.
-- LLVM-MinGW 20260505 in `horizon-wine/toolchains/llvm-mingw-20260505-ucrt-macos-universal`,
-  and bison (Homebrew's), for Wine's PE modules.
+- LLVM-MinGW 20260505 in `horizon-wine/toolchains/`, fetched as the platform's
+  release (`llvm-mingw-20260505-ucrt-macos-universal` on a Mac), and bison
+  (Homebrew's), for Wine's PE modules.
 
 Autorun builds the runtime; the Windows modules it runs are the DLL
 repository's, [autorun-horizon-dlls](https://github.com/autorunhq/autorun-horizon-dlls),
