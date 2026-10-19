@@ -63,12 +63,20 @@ jobs:
         with:
           submodules: true   # horizon-dlls is checked against, game-fixes is packed in
 
+      # switch-dev and the runtime's build trees are large: give Docker the big
+      # scratch disk and drop the tools this build does not use.
       - name: Free disk space
         run: |
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
-            /opt/hostedtoolcache/CodeQL /usr/local/share/boost
+            /opt/hostedtoolcache /usr/local/share/boost /usr/share/swift \
+            /opt/microsoft /usr/local/graalvm /usr/local/.ghcup
           sudo docker image prune -af
-          df -h /
+          sudo systemctl stop docker docker.socket
+          sudo mkdir -p /mnt/docker
+          sudo rsync -a /var/lib/docker/ /mnt/docker/
+          echo '{"data-root":"/mnt/docker"}' | sudo tee /etc/docker/daemon.json
+          sudo systemctl start docker
+          df -h / /mnt
 
       - name: Install build tools
         run: |
@@ -78,15 +86,31 @@ jobs:
       # The llvm-mingw toolchain and the boot payloads build.sh makes once are
       # the slowest part to fetch or make again; the switch-dev image names what
       # they were built against, and the boot payload's own sources say when it
-      # is time to build them again.
+      # is time to build them again. Only what the build reuses is kept: the
+      # payload build's own checkouts are dropped, so a restored cache never
+      # lands git on files another user made.
       - name: Cache toolchains and boot payloads
         uses: actions/cache@v4
         with:
-          path: horizon-wine/toolchains
+          path: |
+            horizon-wine/toolchains/llvm-mingw-*
+            horizon-wine/toolchains/boot-payloads/bundle
           key: toolchains-${{ hashFiles('horizon-wine/switch-dev.txt', 'horizon-wine/build-boot-bundle.sh', 'horizon-wine/mesosphere/**') }}
 
+      # build.sh tees to build.log so a failure can say why in annotations,
+      # which the job's checks carry even when the log archive is out of reach.
       - name: Build
-        run: sh build.sh --jobs "$(nproc)"
+        shell: bash
+        run: |
+          set -o pipefail
+          if sh build.sh --jobs "$(nproc)" 2>&1 | tee build.log; then
+            exit 0
+          fi
+          tail -n 12 build.log | tr '\n' '\v' | sed 's/%/%25/g; s/\v/%0A/g' | cut -c1-3400 | \
+            xargs -0 -I{} echo "::error::build.log tail: {}"
+          df -h | tr '\n' ';' | sed 's/%/%25/g' | xargs -0 -I{} echo "::notice::disk: {}"
+          sudo docker images | tr '\n' ';' | sed 's/%/%25/g' | cut -c1-1500 | xargs -0 -I{} echo "::notice::images: {}"
+          exit 1
 
       - name: Upload the SD card archive
         uses: actions/upload-artifact@v4
