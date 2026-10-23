@@ -17250,6 +17250,29 @@ unsigned int horizon_server_protocol_version(void)
     return SERVER_PROTOCOL_VERSION;
 }
 
+/* Whether [addr, addr+size) is already mapped and writable according to the
+ * kernel. KUSER_SHARED_DATA has to sit at 0x7ffe0000, which on a 32-bit
+ * address space is inside the heap region -- this runtime's whole memory
+ * budget -- and those pages cannot be taken away (the loader's lent pages in
+ * the same region block every heap shrink). The shared data adopts the page
+ * where it stands instead of mapping its own. */
+int horizon_page_is_mapped_rw( void *addr, size_t size )
+{
+    unsigned long long a = (unsigned long long)(uintptr_t)addr, end = a + size;
+
+    while (a < end)
+    {
+        MemoryInfo info = {0};
+        u32 page_info = 0;
+
+        if (R_FAILED( svcQueryMemory( &info, &page_info, a ) )) return 0;
+        if (info.type == MemType_Unmapped || (info.perm & Perm_Rw) != Perm_Rw) return 0;
+        if (info.addr + info.size <= a) return 0;
+        a = info.addr + info.size;
+    }
+    return 1;
+}
+
 int horizon_server_connect(void)
 {
     int control_pipe[2] = {-1, -1};

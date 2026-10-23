@@ -324,33 +324,27 @@ static void *log_flusher( void *arg )
 
 /* KUSER_SHARED_DATA sits at 0x7ffe0000, where every 32-bit program's ntdll
  * reads it. Under the 32-bit address space the kernel heap region -- this
- * runtime's whole memory budget -- starts at 0x62200000 and runs straight past
- * that address: the shared data had no free page to land on, and the program
- * died right after 'virtual memory ready' every time. End the heap below it
- * (SetHeapSize sizes are 2 MiB multiples, so 0x7fe00000). A 32-bit program
- * cannot see past 4 GB anyway, and the games this forwarder exists for were
- * made for far less. */
-static void keep_shared_data_address_free(void)
+ * runtime's whole memory budget -- runs straight past that address, and the
+ * page cannot be taken away again: the loader's lent pages share the region,
+ * and the kernel refuses to shrink the heap through them. What is left is to
+ * keep the pool from ever handing that page out -- the shared data adopts it
+ * where it stands -- by ending the pool below it. */
+static void cap_heap_pool_for_shared_data(void)
 {
-    u64 heap_base = 0, heap_size = 0, want;
+    u64 heap_base = 0, heap_size = 0;
     const uintptr_t shared = 0x7ffe0000, end = 0x7fe00000;
-    extern char *fake_heap_end;
-    void *out;
+    extern char *fake_heap_start, *fake_heap_end;
 
     svcGetInfo( &heap_base, InfoType_HeapRegionAddress, CUR_PROCESS_HANDLE, 0 );
     svcGetInfo( &heap_size, InfoType_HeapRegionSize, CUR_PROCESS_HANDLE, 0 );
     if (!heap_size || heap_base >= shared || heap_base + heap_size <= shared + 0x1000) return;
-    if (end <= heap_base || end - heap_base < 64 * 1048576) return;
-    want = end - heap_base;
-    if (R_FAILED( svcSetHeapSize( &out, want ) ))
+    if ((uintptr_t)fake_heap_start >= end) return;
+    if ((uintptr_t)fake_heap_end > end)
     {
-        log_line( "[FAIL] could not end the heap below 0x7ffe0000; the shared data will not map" );
-        return;
+        fake_heap_end = (char *)end;
+        log_line( "[INIT] heap pool ends at 0x%llx (region 0x%llx+0x%llx); 0x7ffe0000 stays out of the allocator",
+                  (unsigned long long)end, (unsigned long long)heap_base, (unsigned long long)heap_size );
     }
-    if ((uintptr_t)fake_heap_end > end) fake_heap_end = (char *)end;
-    log_line( "[INIT] heap ended at 0x%llx (region 0x%llx+0x%llx) so 0x7ffe0000 stays free for the shared data",
-              (unsigned long long)(heap_base + want), (unsigned long long)heap_base,
-              (unsigned long long)heap_size );
 }
 
 /* A running thread keeps its stack, which libnx maps out of the heap, lent to
@@ -3965,6 +3959,8 @@ int main( int argc, char **argv )
             return 0;
         }
     }
+    /* Before the first allocation can reach it: see cap_heap_pool_for_shared_data. */
+    cap_heap_pool_for_shared_data();
     /* The launcher can access SteamGridDB before a game is selected. */
     log_memory_map( "start-up" );
     log_line( "[MAP] start-up: %d regions the loader already had lent", loader_lent_count );
@@ -4415,7 +4411,6 @@ int main( int argc, char **argv )
         }
     }
 #endif
-    keep_shared_data_address_free();
     wine_nx_runtime_platform_init();
     log_line( "[INIT] Wine paths/unix bridge ready" );
     virtual_init();

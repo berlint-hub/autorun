@@ -2823,7 +2823,29 @@ static NTSTATUS map_view( struct file_view **view_ret, void *base, size_t size,
         if (limit_low && base < (void *)limit_low) return STATUS_CONFLICTING_ADDRESSES;
         if (limit_high && is_beyond_limit( base, size, (void *)limit_high )) return STATUS_CONFLICTING_ADDRESSES;
         if (is_beyond_limit( base, size, host_addr_space_limit )) return STATUS_CONFLICTING_ADDRESSES;
-        if ((status = map_fixed_area( base, size, unix_prot ))) return status;
+        if ((status = map_fixed_area( base, size, unix_prot )))
+        {
+#ifdef __SWITCH__
+            /* KUSER_SHARED_DATA has to sit at 0x7ffe0000, where on a 32-bit
+             * address space the kernel heap region already holds a page (the
+             * runtime's whole memory budget lives in that region, and the
+             * loader's lent pages keep the heap from being shrunk away from
+             * this one). The pool is kept from handing the page out, so it is
+             * ours and idle: the shared data takes it where it stands. */
+            if (status == STATUS_CONFLICTING_ADDRESSES && base == (void *)user_shared_data &&
+                size == page_size && horizon_page_is_mapped_rw( base, size ))
+            {
+                extern void wine_nx_runtime_trace( const char *msg ) __attribute__((weak));
+
+                memset( base, 0, size );
+                if (&wine_nx_runtime_trace)
+                    wine_nx_runtime_trace( "[INIT] the shared data page adopted where the heap already holds it" );
+                ptr = base;
+                goto done;
+            }
+#endif
+            return status;
+        }
         if (is_beyond_limit( base, size, working_set_limit )) working_set_limit = address_space_limit;
         ptr = base;
     }
