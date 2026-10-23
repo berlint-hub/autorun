@@ -461,7 +461,6 @@ static BOOL wine_nx_surface_flush( struct window_surface *surface, const RECT *r
     int sh = abs( color_info->bmiHeader.biHeight );
     int fbw = 0, fbh = 0, fbstride = 0;
     DWORD *fb;
-    int sy, sx;
 
     (void)rect;
 
@@ -485,25 +484,43 @@ static BOOL wine_nx_surface_flush( struct window_surface *surface, const RECT *r
     nxdrv_trace_hot( "[NXDRV] fb_lock -> fb=%d fbw=%d fbh=%d stride=%d", fb ? 1 : 0, fbw, fbh, fbstride );
     if (!fb) return TRUE;
 
-    for (sy = blit.top; sy < blit.bottom; sy++)
+    /* The desktop may be larger than the panel; the same fit the compositor
+     * and the OpenGL presents use maps this window onto it, centred. */
     {
-        int v = sy;
-        int dy = nx_surface->screen_origin.y + sy;
-        const DWORD *src;
-        DWORD *dst;
+        extern void wine_nx_desktop_size( int *width, int *height );
+        extern void wine_nx_present_fit( int src_w, int src_h, int src_x, int src_y,
+                                         int *dst_x, int *dst_y, int *dst_w, int *dst_h );
+        extern void wine_nx_panel_to_screen( int px, int py, double *x, double *y );
+        extern void wine_nx_screen_to_panel( double x, double y, int *px, int *py );
+        int desktop_w, desktop_h, px0, py0, px1, py1, px, py;
 
-        if (v < 0 || v >= sh || dy < 0 || dy >= fbh) continue;
-        src = (const DWORD *)color_bits + (size_t)v * sw;
-        dst = fb + (size_t)dy * fbstride;
-        for (sx = blit.left; sx < blit.right; sx++)
+        wine_nx_desktop_size( &desktop_w, &desktop_h );
+        wine_nx_present_fit( desktop_w, desktop_h, 0, 0, NULL, NULL, NULL, NULL );
+        wine_nx_screen_to_panel( nx_surface->screen_origin.x + blit.left,
+                                 nx_surface->screen_origin.y + blit.top, &px0, &py0 );
+        wine_nx_screen_to_panel( nx_surface->screen_origin.x + blit.right,
+                                 nx_surface->screen_origin.y + blit.bottom, &px1, &py1 );
+        for (py = max( py0, 0 ); py < min( py1, fbh ); py++)
         {
-            int u = sx;
-            int dx = nx_surface->screen_origin.x + sx;
-            DWORD p;
-            if (u < 0 || u >= sw || dx < 0 || dx >= fbw) continue;
-            p = src[u];
-            /* BGRX (0x00RRGGBB) -> RGBA8888 (R,G,B,A bytes), opaque */
-            dst[dx] = 0xff000000u | (p & 0x0000ff00u) | ((p >> 16) & 0xffu) | ((p & 0xffu) << 16);
+            DWORD *dst = fb + (size_t)py * fbstride;
+
+            for (px = max( px0, 0 ); px < min( px1, fbw ); px++)
+            {
+                double dx, dy;
+                int u, v;
+                const DWORD *src;
+                DWORD p;
+
+                wine_nx_panel_to_screen( px, py, &dx, &dy );
+                u = (int)dx - nx_surface->screen_origin.x;
+                v = (int)dy - nx_surface->screen_origin.y;
+                if (u < blit.left || u >= blit.right || v < blit.top || v >= blit.bottom) continue;
+                if (u < 0 || u >= sw || v < 0 || v >= sh) continue;
+                src = (const DWORD *)color_bits + (size_t)v * sw;
+                p = src[u];
+                /* BGRX (0x00RRGGBB) -> RGBA8888 (R,G,B,A bytes), opaque */
+                dst[px] = 0xff000000u | (p & 0x0000ff00u) | ((p >> 16) & 0xffu) | ((p & 0xffu) << 16);
+            }
         }
     }
 
@@ -539,36 +556,44 @@ static const struct window_surface_funcs wine_nx_surface_funcs =
 /**********************************************************************
  *           wine_nx_drv_UpdateDisplayDevices
  *
- * Report a single 1280x720 primary monitor so win32u has a real virtual
- * screen; without it the desktop is 0x0 and every window clips to nothing.
+ * Report one primary monitor of the desktop's size so win32u has a real
+ * virtual screen; without it the desktop is 0x0 and every window clips to
+ * nothing.  The desktop need not be the panel's 1280x720: games choose
+ * their own resolution and the runtime presents the desktop onto the panel
+ * fitted and centred (horizon-wine/source/runtime.c).
  */
-#define WINE_NX_SCREEN_W 1280
-#define WINE_NX_SCREEN_H 720
+extern void wine_nx_desktop_size( int *width, int *height );
 
 UINT wine_nx_drv_UpdateDisplayDevices( const struct gdi_device_manager *dm, void *param )
 {
     static const DWORD source_flags = DISPLAY_DEVICE_ATTACHED_TO_DESKTOP |
                                       DISPLAY_DEVICE_PRIMARY_DEVICE | DISPLAY_DEVICE_VGA_COMPATIBLE;
-    RECT rc = { 0, 0, WINE_NX_SCREEN_W, WINE_NX_SCREEN_H };
+    int screen_w = 1280, screen_h = 720;
     struct pci_id pci_id = { 0 };
-    struct gdi_monitor monitor = { .rc_monitor = rc, .rc_work = rc };
+    RECT rc = {0};
+    struct gdi_monitor monitor = {0};
     DEVMODEW mode =
     {
         .dmSize   = sizeof(mode),
         .dmFields = DM_DISPLAYORIENTATION | DM_PELSWIDTH | DM_PELSHEIGHT | DM_BITSPERPEL |
                     DM_DISPLAYFLAGS | DM_DISPLAYFREQUENCY,
-        .dmBitsPerPel = 32, .dmPelsWidth = WINE_NX_SCREEN_W, .dmPelsHeight = WINE_NX_SCREEN_H,
-        .dmDisplayFrequency = 60,
+        .dmBitsPerPel = 32, .dmDisplayFrequency = 60,
     };
     UINT dpi = NtUserGetSystemDpiForProcess( NULL );
-    DEVMODEW current = mode;
+    DEVMODEW current;
+
+    wine_nx_desktop_size( &screen_w, &screen_h );
+    rc.right = screen_w; rc.bottom = screen_h;
+    monitor.rc_monitor = rc; monitor.rc_work = rc;
+    mode.dmPelsWidth = screen_w; mode.dmPelsHeight = screen_h;
+    current = mode;
 
     dm->add_gpu( "Tegra X1 GM20B", &pci_id, NULL, param );
     dm->add_source( "Default", source_flags, dpi, param );
     dm->add_monitor( &monitor, param );
     current.dmFields |= DM_POSITION;
     dm->add_modes( &current, 1, &mode, param );
-    nxdrv_trace( "[NXDRV] UpdateDisplayDevices -> %dx%d", WINE_NX_SCREEN_W, WINE_NX_SCREEN_H, 0, 0 );
+    nxdrv_trace( "[NXDRV] UpdateDisplayDevices -> %dx%d", screen_w, screen_h, 0, 0 );
     return STATUS_SUCCESS;
 }
 

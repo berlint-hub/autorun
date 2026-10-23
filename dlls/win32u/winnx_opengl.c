@@ -541,6 +541,17 @@ UINT wine_nx_drv_OpenGLInit( UINT version, const struct opengl_funcs *opengl_fun
     if (!opengl_funcs->egl_handle) return STATUS_NOT_SUPPORTED;
     funcs = opengl_funcs;
 
+    /* The panel is a fixed 1280x720 while games choose their own window
+     * resolution (a widescreen-patched game asks for 1920x1080).  Every
+     * window drawable must render into win32u's framebuffer surface so that
+     * presents land in blit_framebuffer_surface, which fits them onto the
+     * panel, centred, with input mapping through the same transform
+     * (horizon-wine/source/runtime.c).  Without this the program's viewport
+     * (its window's size) is clipped by the panel-sized surface and the
+     * picture shows as a crop. */
+    emulate_modeset = TRUE;
+    nx_log( "[NXGL] window surfaces present through the fitted framebuffer" );
+
     nx_driver_funcs.p_get_proc_address = (*driver_funcs)->p_get_proc_address;
     nx_driver_funcs.p_init_pixel_formats = (*driver_funcs)->p_init_pixel_formats;
     nx_driver_funcs.p_describe_pixel_format = (*driver_funcs)->p_describe_pixel_format;

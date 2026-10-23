@@ -52,6 +52,7 @@
 #include "horizon_dlls.h"
 #include "horizon_dll_features.h"
 #include "game_fixes.h"
+#include "screen_fit.h"
 #ifdef WINE_NX_SWAP_POC
 #include "swap_file.h"
 #include "horizon_swap.h"
@@ -571,16 +572,164 @@ static char wine_nx_input_program[768];
 #define WINE_NX_FB_W 1280
 #define WINE_NX_FB_H 720
 
+/* The Wine desktop ("screen") may be larger than the panel: games pick their
+ * own resolution (a widescreen-patched game asks for 1920x1080 on a 1280x720
+ * screen), and a window bigger than the desktop would clip: the cursor could
+ * never leave the desktop, and the picture would present as a crop.  So the
+ * desktop is its own size, and every present maps it onto the panel, fitted
+ * and centred; input maps through the same transform.  sdmc:/switch/wine/
+ * desktop.txt ("1920x1080") overrides the default. */
+static int wine_nx_desktop_w = 1920, wine_nx_desktop_h = 1080;
+
+/* The transform the last present used: panel = screen * scale + offset. */
+static pthread_mutex_t wine_nx_fit_mutex = PTHREAD_MUTEX_INITIALIZER;
+static double wine_nx_fit_scale = 1.0, wine_nx_fit_off_x, wine_nx_fit_off_y;
+static int wine_nx_fit_ready;
+
+static void wine_nx_desktop_init( void )
+{
+    static int done;
+    char text[64] = {0};
+    FILE *f;
+    int w, h;
+
+    if (done) return;
+    done = 1;
+    if ((f = fopen( "sdmc:/switch/wine/desktop.txt", "r" )))
+    {
+        size_t n = fread( text, 1, sizeof(text) - 1, f );
+        (void)n;
+        fclose( f );
+        if (sscanf( text, "%d x %d", &w, &h ) == 2 && w >= 320 && h >= 240 && w <= 4096 && h <= 4096)
+        {
+            wine_nx_desktop_w = w;
+            wine_nx_desktop_h = h;
+        }
+    }
+    log_line( "[INIT] the desktop is %dx%d, the panel %dx%d", wine_nx_desktop_w, wine_nx_desktop_h,
+              WINE_NX_FB_W, WINE_NX_FB_H );
+}
+
+void wine_nx_desktop_size( int *width, int *height )
+{
+    wine_nx_desktop_init();
+    if (width) *width = wine_nx_desktop_w;
+    if (height) *height = wine_nx_desktop_h;
+}
+
+/* Fit a src_w x src_h picture into the panel, centred, and return where it
+ * lands (dst_x/dst_y are the offsets from the panel's left and TOP -- the
+ * fit is centred, so the top and bottom bars match and the GL blit, whose
+ * origin is the bottom-left, reads the same numbers).  src_x/src_y are the
+ * presented window's origin in desktop coordinates; together with the fitted
+ * rect this is the desktop -> panel transform that input maps through. */
+void wine_nx_present_fit( int src_w, int src_h, int src_x, int src_y,
+                          int *dst_x, int *dst_y, int *dst_w, int *dst_h )
+{
+    double scale;
+    int w, h, x, y;
+
+    screen_fit_rect( src_w, src_h, WINE_NX_FB_W, WINE_NX_FB_H, &x, &y, &w, &h );
+    scale = (double)w / (src_w < 1 ? 1 : src_w);
+
+    pthread_mutex_lock( &wine_nx_fit_mutex );
+    wine_nx_fit_scale = scale;
+    wine_nx_fit_off_x = x - (double)src_x * scale;
+    wine_nx_fit_off_y = y - (double)src_y * scale;
+    wine_nx_fit_ready = 1;
+    pthread_mutex_unlock( &wine_nx_fit_mutex );
+
+    if (dst_x) *dst_x = x;
+    if (dst_y) *dst_y = y;
+    if (dst_w) *dst_w = w;
+    if (dst_h) *dst_h = h;
+}
+
+/* The present's scale, so stick speeds can mean panel pixels per second no
+ * matter how large the desktop is. */
+double wine_nx_fit_scale_now( void )
+{
+    double scale;
+
+    pthread_mutex_lock( &wine_nx_fit_mutex );
+    scale = wine_nx_fit_ready ? wine_nx_fit_scale : 0.0;
+    pthread_mutex_unlock( &wine_nx_fit_mutex );
+    if (scale <= 0)
+    {
+        int fx, fy, fw, fh;
+        screen_fit_rect( wine_nx_desktop_w, wine_nx_desktop_h, WINE_NX_FB_W, WINE_NX_FB_H,
+                         &fx, &fy, &fw, &fh );
+        scale = (double)fw / (wine_nx_desktop_w < 1 ? 1 : wine_nx_desktop_w);
+    }
+    return scale > 0 ? scale : 1.0;
+}
+
+/* Where a point of the desktop lands on the panel, and the way back (the way
+ * input needs: a finger touches a panel pixel, the program wants the desktop
+ * coordinate the picture at that pixel came from). */
+void wine_nx_screen_to_panel( double x, double y, int *px, int *py )
+{
+    double scale = 1.0, off_x = 0, off_y = 0;
+
+    pthread_mutex_lock( &wine_nx_fit_mutex );
+    if (wine_nx_fit_ready)
+    {
+        scale = wine_nx_fit_scale;
+        off_x = wine_nx_fit_off_x;
+        off_y = wine_nx_fit_off_y;
+    }
+    else
+    {
+        /* No present yet: the default fit of the whole desktop. */
+        int fx, fy, fw, fh;
+        screen_fit_rect( wine_nx_desktop_w, wine_nx_desktop_h, WINE_NX_FB_W, WINE_NX_FB_H,
+                         &fx, &fy, &fw, &fh );
+        scale = (double)fw / (wine_nx_desktop_w < 1 ? 1 : wine_nx_desktop_w);
+        off_x = fx;
+        off_y = fy;
+    }
+    pthread_mutex_unlock( &wine_nx_fit_mutex );
+    if (px) *px = (int)(x * scale + off_x + 0.5);
+    if (py) *py = (int)(y * scale + off_y + 0.5);
+}
+
+void wine_nx_panel_to_screen( int px, int py, double *x, double *y )
+{
+    double scale = 1.0, off_x = 0, off_y = 0;
+
+    pthread_mutex_lock( &wine_nx_fit_mutex );
+    if (wine_nx_fit_ready)
+    {
+        scale = wine_nx_fit_scale;
+        off_x = wine_nx_fit_off_x;
+        off_y = wine_nx_fit_off_y;
+    }
+    else
+    {
+        int fx, fy, fw, fh;
+        screen_fit_rect( wine_nx_desktop_w, wine_nx_desktop_h, WINE_NX_FB_W, WINE_NX_FB_H,
+                         &fx, &fy, &fw, &fh );
+        scale = (double)fw / (wine_nx_desktop_w < 1 ? 1 : wine_nx_desktop_w);
+        off_x = fx;
+        off_y = fy;
+    }
+    pthread_mutex_unlock( &wine_nx_fit_mutex );
+    if (scale <= 0) scale = 1.0;
+    if (x) *x = (px - off_x) / scale;
+    if (y) *y = (py - off_y) / scale;
+}
+
 /* The drawn cursor, guarded by wine_nx_fb_mutex. */
 static struct pointer_cursor wine_nx_cursor =
     { .x = WINE_NX_FB_W / 2, .y = WINE_NX_FB_H / 2, .width = WINE_NX_FB_W, .height = WINE_NX_FB_H };
 static int wine_nx_cursor_moved;
 static int wine_nx_cursor_visible = 1;  /* 0 while the program hides the mouse cursor */
 static int wine_nx_gl_window;  /* an OpenGL window surface owns the screen's NWindow */
-/* Controller and touchscreen state, guarded by wine_nx_pointer_mutex. */
+/* Controller and touchscreen state, guarded by wine_nx_pointer_mutex.  The
+ * pointer lives in desktop coordinates (what Wine and the program see); a
+ * touch arrives in panel pixels and is mapped through the present's fit. */
 static pthread_mutex_t wine_nx_pointer_mutex = PTHREAD_MUTEX_INITIALIZER;
-static struct pointer_cursor wine_nx_pointer =
-    { .x = WINE_NX_FB_W / 2, .y = WINE_NX_FB_H / 2, .width = WINE_NX_FB_W, .height = WINE_NX_FB_H };
+static struct pointer_cursor wine_nx_pointer;
 static PadState wine_nx_pad;
 static u64 wine_nx_pointer_tick;
 static int wine_nx_pointer_ready;
@@ -593,6 +742,26 @@ static int wine_nx_pointer_placed;
  * Half a centimetre of a 1280-pixel screen, so that a tap is not a direction. */
 /* The position Wine last had, from a take or the program's SetCursorPos. */
 static int wine_nx_pointer_sent_x = WINE_NX_FB_W / 2, wine_nx_pointer_sent_y = WINE_NX_FB_H / 2;
+
+/* The pointer belongs to the desktop, whose size is known once.  SetCursorPos
+ * arrives on the program's own thread, so the one-time init is a once. */
+static pthread_once_t wine_nx_pointer_once = PTHREAD_ONCE_INIT;
+
+static void wine_nx_pointer_setup_cb( void )
+{
+    wine_nx_desktop_init();
+    wine_nx_pointer.width = wine_nx_desktop_w;
+    wine_nx_pointer.height = wine_nx_desktop_h;
+    wine_nx_pointer.x = wine_nx_desktop_w / 2.0;
+    wine_nx_pointer.y = wine_nx_desktop_h / 2.0;
+    wine_nx_pointer_sent_x = wine_nx_desktop_w / 2;
+    wine_nx_pointer_sent_y = wine_nx_desktop_h / 2;
+}
+
+static void wine_nx_pointer_setup( void )
+{
+    pthread_once( &wine_nx_pointer_once, wine_nx_pointer_setup_cb );
+}
 
 /* Take the screen from the text console and bring up a linear framebuffer. */
 int wine_nx_fb_init(void)
@@ -790,6 +959,8 @@ void wine_nx_fb_present(void)
 
 static void wine_nx_cursor_move( int x, int y )
 {
+    /* x,y are desktop coordinates; the arrow is painted on the panel. */
+    wine_nx_screen_to_panel( x, y, &x, &y );
     pthread_mutex_lock( &wine_nx_fb_mutex );
     if (x != (int)wine_nx_cursor.x || y != (int)wine_nx_cursor.y)
     {
@@ -884,6 +1055,7 @@ void wine_nx_request_quit( const char *why );
 
 int wine_nx_pointer_poll( int *x, int *y, unsigned int *buttons )
 {
+    wine_nx_pointer_setup();
     HidTouchScreenState touch = {0};
     struct input_pad raw = {0};
     struct input_output output = {0};
@@ -964,7 +1136,9 @@ int wine_nx_pointer_poll( int *x, int *y, unsigned int *buttons )
     if (!on_keyboard && hidGetTouchScreenStates( &touch, 1 ) && touch.count > 0)
     {
         int old_x = wine_nx_pointer.x, old_y = wine_nx_pointer.y;
-        pointer_cursor_place( &wine_nx_pointer, touch.touches[0].x, touch.touches[0].y );
+        double tx, ty;
+        wine_nx_panel_to_screen( (int)touch.touches[0].x, (int)touch.touches[0].y, &tx, &ty );
+        pointer_cursor_place( &wine_nx_pointer, tx, ty );
         moved = (int)wine_nx_pointer.x != old_x || (int)wine_nx_pointer.y != old_y;
         wine_nx_pointer_placed |= moved;
         output.buttons |= WINE_NX_POINTER_LEFT;
@@ -978,8 +1152,9 @@ int wine_nx_pointer_poll( int *x, int *y, unsigned int *buttons )
         output.wheels = mapped.wheels;
         output.mouse_x = mapped.mouse_x;
         output.mouse_y = mapped.mouse_y;
-        /* The profile's mouse-speed scales the built-in cursor speed. */
-        wine_nx_pointer.speed = POINTER_CURSOR_SPEED * profile->mouse_speed / 100.0;
+        /* The profile's mouse-speed scales the built-in cursor speed, which
+         * counts panel pixels per second whatever the desktop's size. */
+        wine_nx_pointer.speed = POINTER_CURSOR_SPEED * profile->mouse_speed / 100.0 / wine_nx_fit_scale_now();
         moved |= pointer_cursor_step( &wine_nx_pointer, output.mouse_x, output.mouse_y, elapsed );
     }
     input_key_edges_update( &runtime_key_edges, output.keys );
@@ -1014,6 +1189,7 @@ void wine_nx_input_take( struct input_snapshot *out )
     struct input_key_edges edges;
     struct pointer_buttons buttons;
 
+    wine_nx_pointer_setup();
     pthread_mutex_lock( &wine_nx_pointer_mutex );
     out->x = wine_nx_pointer_sent_x = (int)wine_nx_pointer.x;
     out->y = wine_nx_pointer_sent_y = (int)wine_nx_pointer.y;
@@ -1037,6 +1213,7 @@ void wine_nx_input_take( struct input_snapshot *out )
  * motion Wine has not been handed yet (pointer_cursor_warp). */
 void wine_nx_pointer_set_pos( int x, int y )
 {
+    wine_nx_pointer_setup();
     pthread_mutex_lock( &wine_nx_pointer_mutex );
     wine_nx_pointer_moved = pointer_cursor_warp( &wine_nx_pointer, wine_nx_pointer_sent_x,
                                                  wine_nx_pointer_sent_y, x, y );
@@ -1055,6 +1232,7 @@ void wine_nx_pointer_set_pos( int x, int y )
  * not in where the arrow happens to be. */
 void wine_nx_pointer_follow( int x, int y )
 {
+    wine_nx_pointer_setup();
     pthread_mutex_lock( &wine_nx_pointer_mutex );
     pointer_cursor_place( &wine_nx_pointer, x, y );
     wine_nx_pointer_sent_x = x;

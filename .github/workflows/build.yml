@@ -30,6 +30,13 @@ jobs:
             -lm -o input_profile
           ./input_profile
 
+      - name: Screen fit
+        run: |
+          cc -std=gnu11 -Wall -Wextra -Werror -O1 -g \
+            -I horizon-wine/source \
+            horizon-wine/tests/screen_fit.c -o screen_fit
+          ./screen_fit
+
       - name: Floating keyboard and controls overlay
         run: |
           cc -std=gnu11 -Wall -Wextra -Werror -O1 -g $(sdl2-config --cflags) \
