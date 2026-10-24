@@ -143,8 +143,14 @@ void input_profile_apply( struct input_profile *p, const struct launcher_kv *kv 
     p->deadzone[0] = setting( kv, "left-deadzone", p->deadzone[0], 0, 25 );
     p->deadzone[1] = setting( kv, "right-deadzone", p->deadzone[1], 0, 25 );
     p->keyboard_auto = setting( kv, "keyboard-auto", p->keyboard_auto, 0, 1 );
-    p->mouse_speed = setting( kv, "mouse-speed", p->mouse_speed,
-                              INPUT_MOUSE_SPEED_MIN, INPUT_MOUSE_SPEED_MAX );
+    if (launcher_kv_get( kv, "mouse-speed", value, sizeof(value) ))
+    {
+        /* The key's being there is the player's word on it, which the game's
+         * recommended speed must not quietly overrule. */
+        p->mouse_speed = setting( kv, "mouse-speed", p->mouse_speed,
+                                  INPUT_MOUSE_SPEED_MIN, INPUT_MOUSE_SPEED_MAX );
+        p->mouse_speed_explicit = 1;
+    }
 }
 
 int input_profile_global( const char *root, int keyboard_auto, struct input_profile *profile,

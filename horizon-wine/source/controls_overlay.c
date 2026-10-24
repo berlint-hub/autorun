@@ -29,9 +29,17 @@
 #include "controls_overlay.h"
 #include "osk.h"
 
+/* The runtime's copy of the profile the game runs on (runtime.c): every save
+ * below hands the whole thing over at once, so a remap takes effect in the
+ * game the moment it is made, not at the next launch. Weak, so the host tests
+ * can link this file without the runtime. */
+extern void wine_nx_input_profile_publish( const struct input_profile *profile ) __attribute__((weak));
+
 #define LIST_ROWS 8
 #define PICK_COLS 6
 #define PICK_ROWS 5
+/* The row under the bindings: the mouse speed, which is not a binding. */
+#define SPEED_ROW INPUT_SOURCE_COUNT
 #define STICK_DEAD 16000
 #define REPEAT_FIRST_NS 350000000ull
 #define REPEAT_NEXT_NS    70000000ull
@@ -40,7 +48,7 @@
  * never do, so two overlays sharing one presenter cannot share a number. */
 #define GENERATION_BIT 0x80000000u
 
-enum { MODE_LIST, MODE_PICK, MODE_CAPTURE };
+enum { MODE_LIST, MODE_PICK, MODE_CAPTURE, MODE_SPEED };
 
 /* What the grid offers: the mouse actions, then the keys games bind. */
 static const struct { unsigned short code; const char *label; } pick_targets[] =
@@ -167,6 +175,7 @@ static int reload( void )
     kv = loaded_kv;
     memcpy( save_path, loaded_path, sizeof(save_path) );
     generation++;
+    if (wine_nx_input_profile_publish) wine_nx_input_profile_publish( &profile );
     return 1;
 }
 
@@ -175,6 +184,36 @@ static void save_row( int source, const struct input_binding *binding )
     if (!input_binding_save( &kv, source, controller_mapping(), binding ) ||
         !input_profile_save( &kv, save_path )) return;
     reload();
+}
+
+/* The mouse speed, by its stop in input_mouse_speed_values, or -1 for the
+ * game's own (the key gone, whatever is under it stands). */
+static void save_speed( int index )
+{
+    char value[16];
+
+    if (index < 0) launcher_kv_set( &kv, "mouse-speed", NULL );
+    else
+    {
+        snprintf( value, sizeof(value), "%d", input_mouse_speed_values[index] );
+        if (!launcher_kv_set( &kv, "mouse-speed", value )) return;
+    }
+    if (input_profile_save( &kv, save_path )) reload();
+}
+
+/* Which stop the profile's speed sits on, nearest wins. */
+static int speed_choice( int speed )
+{
+    int best = 0, best_gap = speed > input_mouse_speed_values[0] ?
+        speed - input_mouse_speed_values[0] : input_mouse_speed_values[0] - speed;
+
+    for (int i = 1; i < INPUT_MOUSE_SPEED_COUNT; i++)
+    {
+        int gap = speed > input_mouse_speed_values[i] ?
+            speed - input_mouse_speed_values[i] : input_mouse_speed_values[i] - speed;
+        if (gap < best_gap) { best_gap = gap; best = i; }
+    }
+    return best;
 }
 
 static void close_overlay( void )
@@ -258,7 +297,7 @@ static void keep_in_view( void )
     if (selected < list_top) list_top = selected;
     if (selected >= list_top + LIST_ROWS) list_top = selected - LIST_ROWS + 1;
     if (list_top < 0) list_top = 0;
-    if (list_top > INPUT_SOURCE_COUNT - LIST_ROWS) list_top = INPUT_SOURCE_COUNT - LIST_ROWS;
+    if (list_top > SPEED_ROW + 1 - LIST_ROWS) list_top = SPEED_ROW + 1 - LIST_ROWS;
     if (pick < pick_top) pick_top = pick;
     if (pick >= pick_top + PICK_COLS * PICK_ROWS) pick_top = pick - PICK_COLS * PICK_ROWS + 1;
     if (pick_top < 0) pick_top = 0;
@@ -275,6 +314,14 @@ static void act_list( unsigned int button )
     case OSK_LEFT: case OSK_L: selected -= LIST_ROWS; break;
     case OSK_RIGHT: case OSK_R: selected += LIST_ROWS; break;
     case OSK_A:
+        if (selected == SPEED_ROW)
+        {
+            pick = speed_choice( profile.mouse_speed );
+            pick_top = 0;
+            mode = MODE_SPEED;
+            generation++;
+            break;
+        }
         draft = *row_binding( selected );
         for (unsigned int i = 0; i < draft.count; i++) draft.code[i] = normalize_code( draft.code[i] );
         pick = 0;
@@ -283,12 +330,36 @@ static void act_list( unsigned int button )
         mode = controller_mapping() ? MODE_CAPTURE : MODE_PICK;
         generation++;
         break;
-    case OSK_X: save_row( selected, &(struct input_binding){0} ); break;
-    case OSK_Y: save_row( selected, NULL ); break;
+    case OSK_X:
+        if (selected != SPEED_ROW) save_row( selected, &(struct input_binding){0} );
+        break;
+    case OSK_Y:
+        if (selected == SPEED_ROW) save_speed( -1 );
+        else save_row( selected, NULL );
+        break;
     case OSK_B: case OSK_MINUS: case OSK_PLUS: close_overlay(); break;
     }
     if (selected < 0) selected = 0;
-    if (selected >= INPUT_SOURCE_COUNT) selected = INPUT_SOURCE_COUNT - 1;
+    if (selected > SPEED_ROW) selected = SPEED_ROW;
+}
+
+static void act_speed( unsigned int button )
+{
+    switch (button)
+    {
+    case OSK_UP: pick -= PICK_COLS; break;
+    case OSK_DOWN: pick += PICK_COLS; break;
+    case OSK_LEFT: pick--; break;
+    case OSK_RIGHT: pick++; break;
+    case OSK_L: pick -= PICK_COLS * PICK_ROWS; break;
+    case OSK_R: pick += PICK_COLS * PICK_ROWS; break;
+    case OSK_A: save_speed( pick ); mode = MODE_LIST; generation++; break;
+    case OSK_X: case OSK_Y: save_speed( -1 ); mode = MODE_LIST; generation++; break;
+    case OSK_B: mode = MODE_LIST; generation++; break;
+    case OSK_MINUS: case OSK_PLUS: close_overlay(); break;
+    }
+    if (pick < 0) pick = 0;
+    if (pick >= INPUT_MOUSE_SPEED_COUNT) pick = INPUT_MOUSE_SPEED_COUNT - 1;
 }
 
 static void act_pick( unsigned int button )
@@ -398,7 +469,8 @@ int wine_nx_controls_overlay_input( unsigned int held, int left_x, int left_y, i
         {
             if (!(pressed & bit)) continue;
             if (mode == MODE_LIST) act_list( bit );
-            else act_pick( bit );
+            else if (mode == MODE_PICK) act_pick( bit );
+            else act_speed( bit );
             if (visible && mode != MODE_CAPTURE && repeats( bit ))
             {
                 repeating = bit;
@@ -409,7 +481,8 @@ int wine_nx_controls_overlay_input( unsigned int held, int left_x, int left_y, i
         if (visible && mode != MODE_CAPTURE && repeating && now_ns >= repeat_at)
         {
             if (mode == MODE_LIST) act_list( repeating );
-            else act_pick( repeating );
+            else if (mode == MODE_PICK) act_pick( repeating );
+            else act_speed( repeating );
             repeat_at = now_ns + REPEAT_NEXT_NS;
         }
     }
@@ -433,31 +506,35 @@ int wine_nx_controls_overlay_input( unsigned int held, int left_x, int left_y, i
             {
                 int row = (py - area_y) / (g.row_h + g.gap);
 
-                if (row >= 0 && row < LIST_ROWS && list_top + row < INPUT_SOURCE_COUNT)
+                if (row >= 0 && row < LIST_ROWS && list_top + row <= SPEED_ROW)
                 {
                     selected = list_top + row;
                     act_list( OSK_A );
                 }
             }
-            else if (mode == MODE_PICK && on_panel && py >= area_y && py < area_y + area_h)
+            else if ((mode == MODE_PICK || mode == MODE_SPEED) && on_panel &&
+                     py >= area_y && py < area_y + area_h)
             {
                 int cell_w = (g.width - 2 * g.pad - (PICK_COLS - 1) * g.gap) / PICK_COLS;
                 int cell_h = (area_h - (PICK_ROWS - 1) * g.gap) / PICK_ROWS;
                 int col = cell_w > 0 ? (px - g.pad) / (cell_w + g.gap) : -1;
                 int row = cell_h > 0 ? (py - area_y) / (cell_h + g.gap) : -1;
                 int index = pick_top + row * PICK_COLS + col;
+                int count = mode == MODE_PICK ? PICK_COUNT : INPUT_MOUSE_SPEED_COUNT;
 
                 if (col >= 0 && col < PICK_COLS && row >= 0 && row < PICK_ROWS &&
-                    index >= 0 && index < PICK_COUNT)
+                    index >= 0 && index < count)
                 {
                     pick = index;
-                    act_pick( OSK_A );
+                    if (mode == MODE_PICK) act_pick( OSK_A );
+                    else act_speed( OSK_A );
                 }
             }
             else if (on_panel && py >= g.height - g.pad - g.hint)
             {
                 if (mode == MODE_LIST) act_list( OSK_B );
                 else if (mode == MODE_PICK) act_pick( OSK_B );
+                else if (mode == MODE_SPEED) act_speed( OSK_B );
             }
         }
     }
@@ -578,6 +655,14 @@ static void draw_row( const struct geometry *g, int row, int source, int active 
 
     fill_rounded( x, y, w, g->row_h, 12, active ? CARD : PANEL );
     if (active) fill_rounded( x, y, 6, g->row_h, 3, SELECTED );
+    if (source == SPEED_ROW)
+    {
+        text_at( 0, size, "Mouse speed", x + 28, y + g->row_h / 2, TEXT, 0 );
+        if (profile.mouse_speed_explicit) snprintf( label, sizeof(label), "%d%%", profile.mouse_speed );
+        else snprintf( label, sizeof(label), "%d%% (default)", profile.mouse_speed );
+        text_at( 1, size, label, x + w - 28, y + g->row_h / 2, active ? TEXT : DIM, 2 );
+        return;
+    }
     text_at( 0, size, input_sources[source].label, x + 28, y + g->row_h / 2, TEXT, 0 );
     input_binding_label( row_binding( source ), controller_mapping(), label, sizeof(label) );
     text_at( 1, size, label, x + w - 28, y + g->row_h / 2, active ? TEXT : DIM, 2 );
@@ -589,7 +674,7 @@ static void draw_list( const struct geometry *g, int size )
     {
         int source = list_top + row;
 
-        if (source < INPUT_SOURCE_COUNT) draw_row( g, row, source, source == selected );
+        if (source <= SPEED_ROW) draw_row( g, row, source, source == selected );
     }
     text_at( 1, size, "A change    X clear    Y reset    B close", g->x + g->width / 2,
              g->y + g->height - g->pad - g->hint / 2, DIM, 1 );
@@ -622,6 +707,37 @@ static void draw_pick( const struct geometry *g, int size )
                      index == pick ? TEXT : DIM, 1 );
         }
     text_at( 1, size, "A add / remove    X clear    B done", g->x + g->width / 2,
+             g->y + g->height - g->pad - g->hint / 2, DIM, 1 );
+}
+
+static void draw_speed( const struct geometry *g, int size )
+{
+    int area_y = g->y + g->pad + g->header;
+    int area_h = LIST_ROWS * g->row_h + (LIST_ROWS - 1) * g->gap;
+    int cell_w = (g->width - 2 * g->pad - (PICK_COLS - 1) * g->gap) / PICK_COLS;
+    int cell_h = (area_h - (PICK_ROWS - 1) * g->gap) / PICK_ROWS;
+    char label[32];
+
+    text_at( 0, size, "Mouse speed", g->x + g->pad + 28, g->y + g->pad + g->header / 2, TEXT, 0 );
+    if (profile.mouse_speed_explicit) snprintf( label, sizeof(label), "%d%%", profile.mouse_speed );
+    else snprintf( label, sizeof(label), "%d%% (default)", profile.mouse_speed );
+    text_at( 1, size, label, g->x + g->width - g->pad - 28, g->y + g->pad + g->header / 2, DIM, 2 );
+    for (int row = 0; row < PICK_ROWS; row++)
+        for (int col = 0; col < PICK_COLS; col++)
+        {
+            int index = pick_top + row * PICK_COLS + col;
+            int x, y;
+
+            if (index >= INPUT_MOUSE_SPEED_COUNT) continue;
+            x = g->x + g->pad + col * (cell_w + g->gap);
+            y = area_y + row * (cell_h + g->gap);
+            if (index == pick) fill_rounded( x - 3, y - 3, cell_w + 6, cell_h + 6, 12, DIM );
+            fill_rounded( x, y, cell_w, cell_h, 10,
+                          profile.mouse_speed == input_mouse_speed_values[index] ? SELECTED : CARD );
+            snprintf( label, sizeof(label), "%d%%", input_mouse_speed_values[index] );
+            text_at( 0, size, label, x + cell_w / 2, y + cell_h / 2, index == pick ? TEXT : DIM, 1 );
+        }
+    text_at( 1, size, "A set    Y default    B back", g->x + g->width / 2,
              g->y + g->height - g->pad - g->hint / 2, DIM, 1 );
 }
 
@@ -666,6 +782,7 @@ static void draw( int screen_w, int screen_h )
         draw_list( &g, small );
     }
     else if (mode == MODE_PICK) draw_pick( &g, small );
+    else if (mode == MODE_SPEED) draw_speed( &g, small );
     else draw_capture( &g, small );
 }
 

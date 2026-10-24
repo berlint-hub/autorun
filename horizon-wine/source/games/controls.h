@@ -156,7 +156,9 @@ static inline void game_controls_apply( struct input_profile *profile, const str
             profile->keys[binding->source] = (struct input_binding){ { INPUT_MOUSE_LEFT + binding->source }, 1 };
     }
     profile->mode = game->mode;
-    profile->mouse_speed = game->mouse_speed;
+    /* The speed the game plays best at, unless the player chose one: a
+     * personal speed is not the layout to be corrected. */
+    if (!profile->mouse_speed_explicit) profile->mouse_speed = game->mouse_speed;
 }
 
 #endif

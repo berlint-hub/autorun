@@ -44,6 +44,14 @@ void wine_nx_osk_show( int show, unsigned int held )
     (void)show; (void)held;
 }
 
+/* The runtime's profile store is not linked either: record what the overlay
+ * hands over, which is how remapping reaches a running game. */
+static struct input_profile published;
+void wine_nx_input_profile_publish( const struct input_profile *profile )
+{
+    published = *profile;
+}
+
 #define MS 1000000ull
 static uint64_t now = 1000 * MS;
 
@@ -163,6 +171,21 @@ int main( int argc, char **argv )
     press( OSK_Y );
     assert( !file_has( root, "septerra.wine-nx.txt", "key.A" ) );
     assert( wine_nx_controls_overlay_visible() );
+
+    /* The row under the bindings is the mouse speed. Its picker sets the
+     * speed at once -- into the running game as well -- and Y gives the
+     * game's own back. */
+    for (i = 0; i < 24; i++) press( OSK_DOWN );
+    assert( wine_nx_controls_overlay_selected() == 24 );
+    press( OSK_A );
+    save( dir, "controls-speed.png" );
+    press( OSK_RIGHT );
+    press( OSK_A );                 /* 150% -> 200% */
+    assert( file_has( root, "septerra.wine-nx.txt", "mouse-speed=200" ) );
+    assert( published.mouse_speed == 200 );
+    press( OSK_A );
+    press( OSK_Y );                 /* the game's own again */
+    assert( !file_has( root, "septerra.wine-nx.txt", "mouse-speed" ) );
 
     /* B closes it; it opens again on the same file. Buttons held while it
      * opens are the opening itself, not a press. */

@@ -234,6 +234,40 @@ static void game_layouts( void )
     assert(p.keys[4].code[0]==0x10);
     assert(p.keys[7].count==2 && p.keys[7].code[0]==0x10);
 
+    /* The player's own mouse speed is theirs: the game's suggested speed
+     * stands over the global defaults, not over a choice they made. */
+    snprintf(game,sizeof(game),"%s/septerra.exe",root);
+    snprintf(path,sizeof(path),"%s/config/keys.txt",root);
+    {
+        struct launcher_kv global={0};
+        assert(launcher_kv_set(&global,"key.A","0x20"));
+        assert(launcher_kv_set(&global,"input-mode","1"));
+        assert(launcher_kv_set(&global,"mouse-speed","25"));
+        assert(input_profile_save(&global,path));
+    }
+    assert(input_profile_program(root,game,1,&p,&kv,path,sizeof(path)));
+    assert(p.mouse_speed==25 && p.mouse_speed_explicit);
+    /* Their per-game choice wins over even that, and the new low stops
+     * count; clearing it falls back to the global one. */
+    assert(launcher_kv_set(&kv,"mouse-speed","5"));
+    assert(input_profile_save(&kv,path));
+    assert(input_profile_program(root,game,1,&p,&kv,path,sizeof(path)));
+    assert(p.mouse_speed==5);
+    assert(launcher_kv_set(&kv,"mouse-speed",NULL));
+    assert(input_profile_save(&kv,path));
+    assert(input_profile_program(root,game,1,&p,&kv,path,sizeof(path)));
+    assert(p.mouse_speed==25);
+    /* With no speed named anywhere, the game's own comes back. */
+    snprintf(path,sizeof(path),"%s/config/keys.txt",root);
+    {
+        struct launcher_kv global={0};
+        assert(launcher_kv_set(&global,"key.A","0x20"));
+        assert(launcher_kv_set(&global,"input-mode","1"));
+        assert(input_profile_save(&global,path));
+    }
+    assert(input_profile_program(root,game,1,&p,&kv,path,sizeof(path)));
+    assert(p.mouse_speed==150 && !p.mouse_speed_explicit);
+
     /* A game without a layout keeps the player's own global controls. */
     snprintf(game,sizeof(game),"%s/Game.exe",root);
     assert(input_profile_program(root,game,1,&p,&kv,path,sizeof(path)));

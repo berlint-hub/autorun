@@ -599,6 +599,29 @@ int wine_nx_display_devices = 1;
 int wine_nx_swkbd_auto_enabled = 1;
 struct input_profile wine_nx_input_profile;
 uint64_t wine_nx_input_swallowed;
+static pthread_mutex_t wine_nx_input_profile_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+/* The controls overlay writes the profile the game runs on (controls_overlay.c)
+ * while the polls read it. Publish hands over a whole profile at a time, and
+ * the polls take a copy of it, so a row being remapped mid-frame is never half
+ * of one layout and half of another. */
+void wine_nx_input_profile_publish( const struct input_profile *profile )
+{
+    int speed = profile->mouse_speed, changed;
+
+    pthread_mutex_lock( &wine_nx_input_profile_mutex );
+    changed = wine_nx_input_profile.mouse_speed != speed;
+    if (profile != &wine_nx_input_profile) wine_nx_input_profile = *profile;
+    pthread_mutex_unlock( &wine_nx_input_profile_mutex );
+    if (changed) log_line( "[INPUT] mouse speed %d%% of the built-in", speed );
+}
+
+void wine_nx_input_profile_copy( struct input_profile *profile )
+{
+    pthread_mutex_lock( &wine_nx_input_profile_mutex );
+    *profile = wine_nx_input_profile;
+    pthread_mutex_unlock( &wine_nx_input_profile_mutex );
+}
 /* Where the controls overlay (controls_overlay.c) writes what it changes: the
  * runtime directory and the program the runtime started, kept from the load
  * below so remapping while the game runs lands in the same per-game file. */
@@ -1211,12 +1234,15 @@ int wine_nx_pointer_poll( int *x, int *y, unsigned int *buttons )
     HidTouchScreenState touch = {0};
     struct input_pad raw = {0};
     struct input_output output = {0};
-    const struct input_profile *profile = &wine_nx_input_profile;
+    struct input_profile profile_store;
+    const struct input_profile *profile = &profile_store;
     u64 now, held, all_held, elapsed;
     int moved = 0, keyboard = 0, on_keyboard = 0, leave = 0, emulate;
     static int osk_combo, remap_combo, shot_combo;
     static u64 swallowed, quit_since, wheel_next;
     static unsigned int last_wheels;
+
+    wine_nx_input_profile_copy( &profile_store );
 
     pthread_mutex_lock( &wine_nx_pointer_mutex );
     if (!wine_nx_pointer_ready)
@@ -2335,6 +2361,7 @@ static RTL_USER_PROCESS_PARAMETERS *runtime_create_process_params( const char *t
             input_profile_program( RUNTIME_DIR, target, wine_nx_swkbd_auto_enabled,
                                    &wine_nx_input_profile, &kv, input_path, sizeof(input_path) );
         if (!loaded) log_line( "[INPUT] could not read controller settings" );
+        wine_nx_input_profile_publish( &wine_nx_input_profile );
         wine_nx_swkbd_auto_enabled = wine_nx_input_profile.keyboard_auto;
         /* Kept for the controls overlay, which reads and writes the same
          * per-game controls while the program runs. */
