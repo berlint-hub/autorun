@@ -789,6 +789,7 @@ static BOOL wine_nx_cursor_visible_for( HCURSOR cursor, int count, BOOL *seen )
 static void wine_nx_update_cursor( void )
 {
     static BOOL seen;
+    static int last_shown = -1, last_count, last_cursor;
     struct object_lock lock = OBJECT_LOCK_INIT;
     const input_shm_t *input_shm;
     HCURSOR cursor = 0;
@@ -801,7 +802,25 @@ static void wine_nx_update_cursor( void )
         count = input_shm->cursor_count;
     }
     if (status) return;
-    wine_nx_cursor_show( wine_nx_cursor_visible_for( cursor, count, &seen ) );
+    {
+        int shown = wine_nx_cursor_visible_for( cursor, count, &seen );
+
+        /* What the program wants on screen: its own cursor, none, or the
+         * arrow. Logged when it changes, so a log can say whose cursor a
+         * picture is showing. */
+        if (shown != last_shown || count != last_count || (int)(INT_PTR)cursor != last_cursor)
+        {
+            char line[96];
+
+            last_shown = shown;
+            last_count = count;
+            last_cursor = (int)(INT_PTR)cursor;
+            snprintf( line, sizeof(line), "[INPUT] the program's cursor: shown %d, count %d, handle %p",
+                      shown, count, (void *)cursor );
+            if (&wine_nx_runtime_trace) wine_nx_runtime_trace( line );
+        }
+        wine_nx_cursor_show( shown );
+    }
 }
 
 BOOL wine_nx_drv_ProcessEvents( DWORD mask )
