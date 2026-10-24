@@ -644,6 +644,7 @@ static char wine_nx_input_program[768];
  * and centred; input maps through the same transform.  sdmc:/switch/wine/
  * desktop.txt ("1920x1080") overrides the default. */
 static int wine_nx_desktop_w = 1920, wine_nx_desktop_h = 1080;
+static int wine_nx_desktop_default_w, wine_nx_desktop_default_h;
 
 /* 1: present the central 4:3 of every picture stretched over the whole
  * screen (the classic "widescreen hack" look). Set per game. */
@@ -678,6 +679,8 @@ static void wine_nx_desktop_init( void )
             wine_nx_desktop_h = h;
         }
     }
+    wine_nx_desktop_default_w = wine_nx_desktop_w;
+    wine_nx_desktop_default_h = wine_nx_desktop_h;
     log_line( "[INIT] the desktop is %dx%d, the panel %dx%d", wine_nx_desktop_w, wine_nx_desktop_h,
               WINE_NX_FB_W, WINE_NX_FB_H );
 }
@@ -955,6 +958,21 @@ void *wine_nx_gl_acquire_window( int width, int height )
     int compositor = wine_nx_compositor_enabled();
     NWindow *window = NULL;
 
+    /* An exclusive D3D game expects the screen to take on its mode, the way a
+     * real display modeset would: its ClipCursor, centring and cursor maths
+     * all measure against the monitor size.  We do not modeset, so pretend the
+     * screen is the program's own resolution while its surface holds the
+     * display; every mapping through the present fit then lines up with the
+     * picture, and the game's clip box lands on its window. */
+    if (width > 0 && height > 0 &&
+        (wine_nx_desktop_w != width || wine_nx_desktop_h != height))
+    {
+        log_line( "[NXGL] the screen is %dx%d while the program runs (was %dx%d)",
+                  width, height, wine_nx_desktop_w, wine_nx_desktop_h );
+        wine_nx_desktop_w = width;
+        wine_nx_desktop_h = height;
+    }
+
     pthread_mutex_lock( &wine_nx_fb_mutex );
     if (!wine_nx_gl_window && !wine_nx_fb_lock_depth)
     {
@@ -1018,6 +1036,15 @@ void wine_nx_gl_release_window(void)
     pthread_mutex_lock( &wine_nx_fb_mutex );
     wine_nx_gl_window = 0;
     pthread_mutex_unlock( &wine_nx_fb_mutex );
+    if (wine_nx_desktop_default_w &&
+        (wine_nx_desktop_w != wine_nx_desktop_default_w ||
+         wine_nx_desktop_h != wine_nx_desktop_default_h))
+    {
+        log_line( "[NXGL] the screen is back to %dx%d",
+                  wine_nx_desktop_default_w, wine_nx_desktop_default_h );
+        wine_nx_desktop_w = wine_nx_desktop_default_w;
+        wine_nx_desktop_h = wine_nx_desktop_default_h;
+    }
     log_line( "[NXGL] screen returned to the %s", compositor ? "compositor" : "framebuffer" );
     if (compositor) wine_nx_compositor_resume();
 }
