@@ -37,6 +37,13 @@ jobs:
             horizon-wine/tests/screen_fit.c -o screen_fit
           ./screen_fit
 
+      - name: Log flood fold
+        run: |
+          cc -std=gnu11 -Wall -Wextra -Werror -O1 -g \
+            -I horizon-wine/source \
+            horizon-wine/tests/log_repeat.c -o log_repeat
+          ./log_repeat
+
       - name: Floating keyboard and controls overlay
         run: |
           cc -std=gnu11 -Wall -Wextra -Werror -O1 -g $(sdl2-config --cflags) \

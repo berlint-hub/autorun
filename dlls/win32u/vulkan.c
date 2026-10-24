@@ -57,6 +57,7 @@ static pthread_mutex_t present_lock = PTHREAD_MUTEX_INITIALIZER;
 #ifdef __SWITCH__
 #include "../../horizon-wine/source/osk.h"
 #include "../../horizon-wine/source/screen_fit.h"
+#include "../../horizon-wine/source/graphics_config.h"
 #endif
 
 /* The Upscaling setting a scaled swapchain is made with: 0 bilinear, 1 FSR 1.0
@@ -105,6 +106,8 @@ void wine_nx_aspect_configure( int stretch43 )
 
 extern void wine_nx_present_fit( int src_w, int src_h, int src_x, int src_y,
                                  int *dst_x, int *dst_y, int *dst_w, int *dst_h ) __attribute__((weak));
+extern int wine_nx_screenshot_requested( void ) __attribute__((weak));
+extern int wine_nx_screenshot_take( const void *pixels, int width, int height, int stride_px, int format ) __attribute__((weak));
 #endif
 
 static void nx_pace_present( uint64_t *previous )
@@ -3690,7 +3693,9 @@ static void nx_submit_scaled( struct vulkan_queue *queue, VkSubmitInfo *submit_i
     VkResult res;
     void *map;
 
-    if (presents != 30 && presents != 90 && presents % 1800)
+    /* The screenshot's shutter (Minus+R) asks for the readback out of turn. */
+    if (presents != 30 && presents != 90 && presents % 1800 &&
+        !(&wine_nx_screenshot_requested && wine_nx_screenshot_requested()))
     {
         device->p_vkQueueSubmit( queue->host.queue, 1, submit_info, VK_NULL_HANDLE );
         return;
@@ -3767,6 +3772,8 @@ static void nx_submit_scaled( struct vulkan_queue *queue, VkSubmitInfo *submit_i
                  (int)presents, extent.width, extent.height,
                  (unsigned int)(pixels[extent.height / 2 * extent.width + extent.width / 2] & 0xffffff),
                  (unsigned int)(pixels[extent.height / 2 * extent.width + 4] & 0xffffff), lit, samples, white );
+    if (&wine_nx_screenshot_take)
+        wine_nx_screenshot_take( pixels, extent.width, extent.height, extent.width * 4, WINE_NX_SHOT_BGRA8 );
     device->p_vkUnmapMemory( device->host.device, memory );
     goto done;
 

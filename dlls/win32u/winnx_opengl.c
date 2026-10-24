@@ -29,6 +29,7 @@
 #include "wine/debug.h"
 #include "../../horizon-wine/source/osk.h"
 #include "../../horizon-wine/source/controls_overlay.h"
+#include "../../horizon-wine/source/graphics_config.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(wgl);
 
@@ -39,6 +40,8 @@ extern void wine_nx_gl_release_window( void );
 extern void wine_nx_present_fit( int src_w, int src_h, int src_x, int src_y,
                                  int *dst_x, int *dst_y, int *dst_w, int *dst_h ) __attribute__((weak));
 extern void wine_nx_runtime_trace( const char *msg ) __attribute__((weak));
+extern int wine_nx_screenshot_requested( void ) __attribute__((weak));
+extern int wine_nx_screenshot_take( const void *pixels, int width, int height, int stride_px, int format ) __attribute__((weak));
 
 static const struct egl_platform *egl;
 static const struct opengl_funcs *funcs;
@@ -314,6 +317,29 @@ static void nx_osk_draw( struct opengl_drawable *base )
     funcs->p_glPixelStorei( GL_UNPACK_ALIGNMENT, alignment );
 }
 
+/* The frame about to be shown, kept when the player asked for it (Minus+R;
+ * horizon-wine/source/runtime.c).  glReadPixels comes up bottom-up, which the
+ * sink is told.  The read buffer is taken back to whatever the program left
+ * bound. */
+static void nx_drawable_screenshot( struct opengl_drawable *base )
+{
+    GLint width = 0, height = 0, read_fb = 0;
+    void *pixels;
+
+    if (!&wine_nx_screenshot_requested || !wine_nx_screenshot_requested()) return;
+    if (!&wine_nx_screenshot_take || !funcs->p_glReadPixels || !p_glBindFramebuffer) return;
+    if (!funcs->p_eglQuerySurface( egl->display, base->surface, EGL_WIDTH, &width ) ||
+        !funcs->p_eglQuerySurface( egl->display, base->surface, EGL_HEIGHT, &height ) ||
+        width < 1 || height < 1) return;
+    if (!(pixels = malloc( (size_t)width * height * 4 ))) return;
+    funcs->p_glGetIntegerv( GL_READ_FRAMEBUFFER_BINDING, &read_fb );
+    p_glBindFramebuffer( GL_READ_FRAMEBUFFER, 0 );
+    funcs->p_glReadPixels( 0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, pixels );
+    p_glBindFramebuffer( GL_READ_FRAMEBUFFER, read_fb );
+    wine_nx_screenshot_take( pixels, width, height, width * 4, WINE_NX_SHOT_RGBA8_BOTTOM_UP );
+    free( pixels );
+}
+
 static BOOL nx_drawable_swap( struct opengl_drawable *base )
 {
     unsigned long long start;
@@ -331,6 +357,7 @@ static BOOL nx_drawable_swap( struct opengl_drawable *base )
                                  base->client->virtual_rect.top, NULL, NULL, NULL, NULL );
     }
     nx_osk_draw( base );
+    nx_drawable_screenshot( base );
     start = horizon_interrupt_time();
     ret = funcs->p_eglSwapBuffers( egl->display, base->surface );
     __atomic_add_fetch( &wine_nx_gl_swap_time, horizon_interrupt_time() - start, __ATOMIC_RELAXED );

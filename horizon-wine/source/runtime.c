@@ -12,6 +12,7 @@
 #include <strings.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#include <png.h>
 
 #include "ntstatus.h"
 #define WIN32_NO_STATUS
@@ -43,6 +44,7 @@
 #include "input_profile.h"
 #include "config_json.h"
 #include "pointer_cursor.h"
+#include "log_repeat.h"
 #include "compositor.h"
 #include "osk.h"
 #include "controls_overlay.h"
@@ -392,6 +394,18 @@ static int log_lock_bounded( void )
     return 0;
 }
 
+/* The log's floods folded into one summary per while (log_repeat.h): the same
+ * loader line a hundred times over, one fault a program polls on.  The policy
+ * has a lock of its own, taken with a trylock like the file's -- an exception
+ * handler may be the one logging, on the thread that faulted. */
+static struct log_repeat_table log_repeats;
+static pthread_mutex_t log_repeat_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+static unsigned long long log_repeat_now_ms( void )
+{
+    return armTicksToNs( armGetSystemTick() ) / 1000000ull;
+}
+
 static void log_line( const char *fmt, ... )
 {
     /* The software console aborts the process (framebufferBegin →
@@ -408,6 +422,21 @@ static void log_line( const char *fmt, ... )
     len = vsnprintf( line, sizeof(line) - 1, fmt, args );
     va_end( args );
     if (len < 0) return;
+    /* The same line a hundred times over says nothing its first two did not. */
+    if (log_repeat_wanted( line ) && !pthread_mutex_trylock( &log_repeat_mutex ))
+    {
+        char summary[256];
+        enum log_repeat_action action = log_repeat_next( &log_repeats, log_repeat_now_ms(),
+                                                         line, summary, sizeof(summary) );
+
+        pthread_mutex_unlock( &log_repeat_mutex );
+        if (action == LOG_REPEAT_SUPPRESS) return;
+        if (action == LOG_REPEAT_SUMMARY)
+        {
+            len = snprintf( line, sizeof(line) - 1, "%s", summary );
+            if (len < 0) return;
+        }
+    }
     if (len > (int)sizeof(line) - 2) len = sizeof(line) - 2;
     line[len++] = '\n';
     line[len] = 0;
@@ -431,6 +460,17 @@ static void log_line( const char *fmt, ... )
         pthread_mutex_unlock( &log_mutex );
     }
     if (on_main && strncmp( line, "[SYSCALL]", 9 )) consoleUpdate( NULL );
+}
+
+/* The folds not said yet, for the way out and before a program's own log
+ * starts: nothing counted is lost. */
+static void log_repeat_flush_now( void )
+{
+    char summary[256];
+
+    if (pthread_mutex_trylock( &log_repeat_mutex )) return;
+    while (log_repeat_flush( &log_repeats, summary, sizeof(summary) )) log_line( "%s", summary );
+    pthread_mutex_unlock( &log_repeat_mutex );
 }
 
 /* A program's own log, kept from the moment it is about to start: everything
@@ -483,6 +523,7 @@ static void open_game_log( const char *target )
     }
     pthread_mutex_unlock( &log_mutex );
     log_line( "[LOG] this run is kept in %s", path );
+    log_repeat_flush_now();
 }
 
 static void stall_watch( void *arg )
@@ -958,6 +999,75 @@ void wine_nx_gl_release_window(void)
     if (compositor) wine_nx_compositor_resume();
 }
 
+/* Screenshots: Minus and R together keep the frame the player is looking at,
+ * as a PNG under sdmc:/switch/wine/screenshots/.  Each present path hands the
+ * sink its own pixels -- the framebuffer's, an OpenGL surface's back buffer,
+ * the Vulkan screen buffer's readback -- and the sink does the rest.  (+ and -
+ * held together still quits, so the shutter needed a chord of its own.) */
+static volatile int screenshot_pending;
+
+void wine_nx_screenshot_request( void )
+{
+    if (__atomic_exchange_n( &screenshot_pending, 1, __ATOMIC_ACQ_REL )) return;
+    log_line( "[SHOT] capture asked for; the next frame is saved to screenshots/" );
+}
+
+int wine_nx_screenshot_requested( void )
+{
+    return __atomic_load_n( &screenshot_pending, __ATOMIC_ACQUIRE );
+}
+
+int wine_nx_screenshot_take( const void *pixels, int width, int height, int stride_px, int format )
+{
+    static unsigned int shot_count;
+    png_image image = { .version = PNG_IMAGE_VERSION };
+    unsigned char *rows;
+    char path[320];
+    FILE *file;
+    int y, ok = 0;
+
+    if (!__atomic_exchange_n( &screenshot_pending, 0, __ATOMIC_ACQ_REL )) return 0;
+    if (!pixels || width < 1 || height < 1 || stride_px < width * 4)
+    {
+        log_line( "[SHOT] no picture to keep" );
+        return 0;
+    }
+    if (!(rows = malloc( (size_t)width * height * 4 )))
+    {
+        log_line( "[SHOT] no room for a %dx%d picture", width, height );
+        return 0;
+    }
+    /* Rows the way PNG wants them: glReadPixels comes up bottom-up. */
+    for (y = 0; y < height; y++)
+    {
+        const unsigned char *row = (const unsigned char *)pixels +
+                                   (size_t)(format == WINE_NX_SHOT_RGBA8_BOTTOM_UP ? height - 1 - y : y) * stride_px;
+
+        memcpy( rows + (size_t)y * width * 4, row, (size_t)width * 4 );
+    }
+    mkdir( "sdmc:/switch/wine/screenshots", 0777 );
+    for (;;)
+    {
+        struct stat st;
+
+        if (++shot_count > 9999) break;
+        snprintf( path, sizeof(path), "sdmc:/switch/wine/screenshots/shot-%04u.png", shot_count );
+        if (stat( path, &st )) break;  /* the first free name */
+    }
+    if (shot_count <= 9999 && (file = fopen( path, "wb" )))
+    {
+        image.width = width;
+        image.height = height;
+        image.format = format == WINE_NX_SHOT_BGRA8 ? PNG_FORMAT_BGRA : PNG_FORMAT_RGBA;
+        ok = png_image_write_to_stdio( &image, file, 0, rows, 0, NULL );
+        fclose( file );
+    }
+    free( rows );
+    if (ok) log_line( "[SHOT] saved %s (%dx%d)", path, width, height );
+    else log_line( "[SHOT] could not keep the picture" );
+    return ok;
+}
+
 /* Each present converts the whole screen, so frames that only move the
  * cursor are held to the display rate. */
 #define WINE_NX_CURSOR_FRAME_NS 16666667ull
@@ -982,6 +1092,9 @@ void wine_nx_fb_present(void)
         {
             if (wine_nx_cursor_visible)
                 pointer_cursor_paint( &wine_nx_cursor, wine_nx_fb_pending_bits, wine_nx_fb_pending_stride, 1 );
+            if (wine_nx_screenshot_requested())
+                wine_nx_screenshot_take( wine_nx_fb_pending_bits, WINE_NX_FB_W, WINE_NX_FB_H,
+                                         wine_nx_fb_pending_stride, WINE_NX_SHOT_BGRA8 );
             framebufferEnd( &wine_nx_fb );
             if (wine_nx_cursor_visible)
                 pointer_cursor_paint( &wine_nx_cursor, wine_nx_fb_pending_bits, wine_nx_fb_pending_stride, 0 );
@@ -1101,7 +1214,7 @@ int wine_nx_pointer_poll( int *x, int *y, unsigned int *buttons )
     const struct input_profile *profile = &wine_nx_input_profile;
     u64 now, held, all_held, elapsed;
     int moved = 0, keyboard = 0, on_keyboard = 0, leave = 0, emulate;
-    static int osk_combo, remap_combo;
+    static int osk_combo, remap_combo, shot_combo;
     static u64 swallowed, quit_since, wheel_next;
     static unsigned int last_wheels;
 
@@ -1130,6 +1243,8 @@ int wine_nx_pointer_poll( int *x, int *y, unsigned int *buttons )
         /* Minus and the left stick click open the controls overlay instead:
          * remapping where the game is, rather than back in the launcher. */
         const u64 remap = HidNpadButton_Minus | HidNpadButton_StickL;
+        /* Minus and R keep the screen as a screenshot. */
+        const u64 shot = HidNpadButton_Minus | HidNpadButton_R;
         unsigned int bits = osk_buttons( held );
         if ((held & osk) == osk && !osk_combo && !wine_nx_osk_visible() && !wine_nx_controls_overlay_visible())
             wine_nx_osk_show( 1, bits );
@@ -1142,6 +1257,13 @@ int wine_nx_pointer_poll( int *x, int *y, unsigned int *buttons )
                 log_line( "[INPUT] could not read controller settings for the controls overlay" );
         }
         remap_combo = (held & remap) == remap;
+        if ((held & shot) == shot)
+        {
+            if (!shot_combo) wine_nx_screenshot_request();
+            /* The game sees none of it: the shutter is ours alone. */
+            swallowed = held;
+        }
+        shot_combo = (held & shot) == shot;
         __atomic_store_n( &osk_last_held, bits, __ATOMIC_RELAXED );
         if (wine_nx_osk_visible() || wine_nx_controls_overlay_visible())
         {
@@ -3479,6 +3601,7 @@ static int leave_cleanly( void )
 {
     int left = memory_left_behind( 0 ), after;
 
+    log_repeat_flush_now();
     wine_nx_sd_cache_flush();
     /* Services opened for the whole run hold heap pages of their own: the
      * sockets take a transfer memory at start-up and nothing ever gave it back.
@@ -3764,6 +3887,7 @@ static int return_to_launcher( void )
     /* The widescreen hack belongs to the game: the launcher's own screen comes
      * back through the plain fill-the-panel transform again. */
     wine_nx_fit_stretch43 = 0;
+    log_repeat_flush_now();
 
     /* Only reached with the program's threads already gone. Both of these wait
      * for the thread they end: a thread of the runtime's own has no quit point
