@@ -4057,6 +4057,18 @@ static POINT ll_hook_mouse_point( const union hw_input *input )
             pt.y = desktop_shm->cursor.y + input->mouse.y;
         }
     }
+    /* The shared cursor is in the screen's own coordinates; a hook consumer
+     * like dinput subtracts GetCursorPos(), which maps those through the
+     * monitor's raw<->virt transform first.  Map the point the same way, or
+     * the difference it computes is not the mouse motion at all but the map
+     * of the whole screen, and the program's pointer runs away. */
+    {
+        RECT r = { pt.x, pt.y, pt.x, pt.y };
+
+        r = map_rect_raw_to_virt( r, get_thread_dpi() );
+        pt.x = r.left;
+        pt.y = r.top;
+    }
     return pt;
 }
 

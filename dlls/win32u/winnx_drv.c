@@ -588,6 +588,12 @@ UINT wine_nx_drv_UpdateDisplayDevices( const struct gdi_device_manager *dm, void
     mode.dmPelsWidth = screen_w; mode.dmPelsHeight = screen_h;
     current = mode;
 
+    /* The screen's own coordinates are the ones programs see.  A source that
+     * carries a scaled DPI makes win32u's raw<->virt monitor map shrink and
+     * shift every cursor coordinate a program reads, and a program then
+     * drives its pointer sprite off a shrunken copy of the real cursor. */
+    dpi = USER_DEFAULT_SCREEN_DPI;
+
     dm->add_gpu( "Tegra X1 GM20B", &pci_id, NULL, param );
     dm->add_source( "Default", source_flags, dpi, param );
     dm->add_monitor( &monitor, param );
@@ -595,6 +601,26 @@ UINT wine_nx_drv_UpdateDisplayDevices( const struct gdi_device_manager *dm, void
     dm->add_modes( &current, 1, &mode, param );
     nxdrv_trace( "[NXDRV] UpdateDisplayDevices -> %dx%d", screen_w, screen_h, 0, 0 );
     return STATUS_SUCCESS;
+}
+
+/**********************************************************************
+ *           wine_nx_drv_ChangeDisplaySettings
+ *
+ * A program setting a display mode switches the screen to its resolution
+ * (the numbers only - no modeset).  It happens before win32u re-registers
+ * the display devices for the new mode, which is what keeps the physical
+ * and the current mode the same size: when they differ, the raw<->virt
+ * map comes out scaled and every cursor coordinate is wrong.
+ */
+extern void wine_nx_desktop_set( int width, int height );
+
+LONG wine_nx_drv_ChangeDisplaySettings( LPDEVMODEW displays, LPCWSTR primary_name, HWND hwnd,
+                                        DWORD flags, LPARAM lparam )
+{
+    (void)primary_name; (void)hwnd; (void)flags; (void)lparam;
+    if (displays && (displays->dmFields & DM_PELSWIDTH) && (displays->dmFields & DM_PELSHEIGHT))
+        wine_nx_desktop_set( displays->dmPelsWidth, displays->dmPelsHeight );
+    return DISP_CHANGE_SUCCESSFUL;
 }
 
 /**********************************************************************

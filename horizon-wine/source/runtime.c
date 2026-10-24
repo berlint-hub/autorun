@@ -685,6 +685,28 @@ static void wine_nx_desktop_init( void )
               WINE_NX_FB_W, WINE_NX_FB_H );
 }
 
+/* A program setting a display mode (ddraw/Direct3D SetDisplayMode) switches
+ * the screen to its resolution: win32u re-registers the display devices right
+ * after, and both the physical and current mode must then be the program's,
+ * or the raw<->virt monitor map comes out scaled and shifted and every
+ * cursor coordinate a program sees is a shrunken copy of the real one. */
+void wine_nx_desktop_set( int width, int height )
+{
+    if (width <= 0 || height <= 0) return;
+    if (!wine_nx_desktop_default_w)
+    {
+        wine_nx_desktop_default_w = wine_nx_desktop_w;
+        wine_nx_desktop_default_h = wine_nx_desktop_h;
+    }
+    if (wine_nx_desktop_w != width || wine_nx_desktop_h != height)
+    {
+        log_line( "[NXGL] the screen is %dx%d (a display mode; was %dx%d)",
+                  width, height, wine_nx_desktop_w, wine_nx_desktop_h );
+        wine_nx_desktop_w = width;
+        wine_nx_desktop_h = height;
+    }
+}
+
 void wine_nx_desktop_size( int *width, int *height )
 {
     wine_nx_desktop_init();

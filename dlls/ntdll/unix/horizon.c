@@ -9956,6 +9956,7 @@ static int horizon_server_handle_set_cursor( struct horizon_server_connection *c
         if (request->flags & HORIZON_SET_CURSOR_COUNT) input->cursor_count += request->show_count;
         if (request->flags & HORIZON_SET_CURSOR_POS)
         {
+            static unsigned int pos_logged;
             int x = request->x, y = request->y;
 
             /* Windows clips SetCursorPos to the cursor clip rectangle as
@@ -9971,8 +9972,34 @@ static int horizon_server_handle_set_cursor( struct horizon_server_connection *c
             desktop->cursor.x = x;
             desktop->cursor.y = y;
             desktop->cursor.last_change = horizon_server_input_time();
+            /* The program repositioning the cursor: asked for and where it
+             * landed after the clip.  First few plainly, then sparingly. */
+            if (pos_logged < 200)
+            {
+                char line[128];
+
+                snprintf( line, sizeof(line),
+                          "[INPUT] the program sets the cursor %d,%d -> %d,%d (clip %d,%d-%d,%d)",
+                          request->x, request->y, x, y,
+                          desktop->cursor.clip.left, desktop->cursor.clip.top,
+                          desktop->cursor.clip.right, desktop->cursor.clip.bottom );
+                wine_nx_runtime_trace( line );
+                pos_logged++;
+            }
         }
-        if (request->flags & HORIZON_SET_CURSOR_CLIP) desktop->cursor.clip = request->clip;
+        if (request->flags & HORIZON_SET_CURSOR_CLIP)
+        {
+            desktop->cursor.clip = request->clip;
+            {
+                char line[128];
+
+                snprintf( line, sizeof(line),
+                          "[INPUT] the program clips the cursor to %d,%d-%d,%d",
+                          request->clip.left, request->clip.top,
+                          request->clip.right, request->clip.bottom );
+                wine_nx_runtime_trace( line );
+            }
+        }
         if (request->flags & HORIZON_SET_CURSOR_NOCLIP)
         {
             desktop->cursor.clip.left = desktop->cursor.clip.top = 0;
