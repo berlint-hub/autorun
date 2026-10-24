@@ -79,7 +79,10 @@ static void nx_client_surface_update( struct client_surface *client )
     if (!offscreen && client->hwnd != client->toplevel) offscreen = !is_window_visible( client->hwnd );
     changed = InterlockedExchange( &client->offscreen, offscreen ) != offscreen;
 
-    if (changed || (offscreen && (size.cx != surface->size.cx || size.cy != surface->size.cy)))
+    /* A size change remakes the drawable: a visible window that takes a
+     * display mode of its own would otherwise keep a surface of the old size
+     * and draw the new picture into its corner. */
+    if (changed || size.cx != surface->size.cx || size.cy != surface->size.cy)
         InterlockedIncrement( &surface->generation );
     surface->size = size;
 }
