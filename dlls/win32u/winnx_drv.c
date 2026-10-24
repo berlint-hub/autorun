@@ -615,7 +615,7 @@ UINT wine_nx_drv_UpdateDisplayDevices( const struct gdi_device_manager *dm, void
 extern void wine_nx_desktop_set( int width, int height );
 
 LONG wine_nx_drv_ChangeDisplaySettings( LPDEVMODEW displays, LPCWSTR primary_name, HWND hwnd,
-                                        DWORD flags, LPARAM lparam )
+                                        DWORD flags, LPVOID lparam )
 {
     (void)primary_name; (void)hwnd; (void)flags; (void)lparam;
     if (displays && (displays->dmFields & DM_PELSWIDTH) && (displays->dmFields & DM_PELSHEIGHT))

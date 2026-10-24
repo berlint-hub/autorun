@@ -1061,7 +1061,7 @@ static void load_display_driver(void)
             extern void wine_nx_drv_SetCursor( HWND, HCURSOR );
             extern BOOL wine_nx_drv_ShowSoftwareKeyboard( HWND );
             extern UINT wine_nx_drv_UpdateDisplayDevices( const struct gdi_device_manager *, void * );
-            extern LONG wine_nx_drv_ChangeDisplaySettings( LPDEVMODEW, LPCWSTR, HWND, DWORD, LPARAM );
+            extern LONG wine_nx_drv_ChangeDisplaySettings( LPDEVMODEW, LPCWSTR, HWND, DWORD, LPVOID );
             extern UINT wine_nx_drv_OpenGLInit( UINT, const struct opengl_funcs *, const struct opengl_driver_funcs ** );
 #ifdef WINE_NX_MESA_SWITCH
             extern UINT wine_nx_drv_VulkanInit( UINT, void *, const struct vulkan_driver_funcs ** );
