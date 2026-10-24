@@ -9956,8 +9956,20 @@ static int horizon_server_handle_set_cursor( struct horizon_server_connection *c
         if (request->flags & HORIZON_SET_CURSOR_COUNT) input->cursor_count += request->show_count;
         if (request->flags & HORIZON_SET_CURSOR_POS)
         {
-            desktop->cursor.x = request->x;
-            desktop->cursor.y = request->y;
+            int x = request->x, y = request->y;
+
+            /* Windows clips SetCursorPos to the cursor clip rectangle as
+             * well: a program cannot park the cursor outside its own clip.
+             * Without this a program that repositions the cursor (a game
+             * syncing its own pointer sprite, say) leaves it out of bounds,
+             * and every poll it makes then sees a phantom jump as the next
+             * move drags the cursor back into the clip. */
+            if (x < desktop->cursor.clip.left) x = desktop->cursor.clip.left;
+            if (y < desktop->cursor.clip.top) y = desktop->cursor.clip.top;
+            if (x >= desktop->cursor.clip.right) x = desktop->cursor.clip.right - 1;
+            if (y >= desktop->cursor.clip.bottom) y = desktop->cursor.clip.bottom - 1;
+            desktop->cursor.x = x;
+            desktop->cursor.y = y;
             desktop->cursor.last_change = horizon_server_input_time();
         }
         if (request->flags & HORIZON_SET_CURSOR_CLIP) desktop->cursor.clip = request->clip;
@@ -9966,6 +9978,22 @@ static int horizon_server_handle_set_cursor( struct horizon_server_connection *c
             desktop->cursor.clip.left = desktop->cursor.clip.top = 0;
             desktop->cursor.clip.right = 1280;
             desktop->cursor.clip.bottom = 720;
+        }
+        if (request->flags & (HORIZON_SET_CURSOR_CLIP | HORIZON_SET_CURSOR_NOCLIP))
+        {
+            /* Windows pulls the cursor into a new clip as soon as it is set. */
+            int x = desktop->cursor.x, y = desktop->cursor.y;
+
+            if (x < desktop->cursor.clip.left) x = desktop->cursor.clip.left;
+            if (y < desktop->cursor.clip.top) y = desktop->cursor.clip.top;
+            if (x >= desktop->cursor.clip.right) x = desktop->cursor.clip.right - 1;
+            if (y >= desktop->cursor.clip.bottom) y = desktop->cursor.clip.bottom - 1;
+            if (x != desktop->cursor.x || y != desktop->cursor.y)
+            {
+                desktop->cursor.x = x;
+                desktop->cursor.y = y;
+                desktop->cursor.last_change = horizon_server_input_time();
+            }
         }
         reply.new_x = desktop->cursor.x;
         reply.new_y = desktop->cursor.y;

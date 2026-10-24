@@ -4064,9 +4064,31 @@ static POINT ll_hook_mouse_point( const union hw_input *input )
  * the chain swallows go, the rest go to the server. */
 static DWORD ll_hook_mouse_input( const union hw_input *input, BOOL injected )
 {
+    static unsigned int hooked_logged, hooked_last;
     DWORD keep = input->mouse.flags & ~LL_MOUSE_MSG_FLAGS;
     POINT pt = ll_hook_mouse_point( input );
     unsigned int i;
+
+    /* What a hook consumer (dinput) subtracts from this point is its own
+     * GetCursorPos(); when the two ever disagree the program sees a mouse
+     * motion that never happened. Logged plainly at first, then sparingly. */
+    if ((input->mouse.flags & MOUSEEVENTF_MOVE) &&
+        (hooked_logged < 40 || NtGetTickCount() - hooked_last >= 2000))
+    {
+        POINT now;
+
+        NtUserGetCursorPos( &now );
+        if (now.x != pt.x || now.y != pt.y || hooked_logged < 4)
+        {
+            char line[128];
+
+            snprintf( line, sizeof(line), "[HOOK] mouse hook pt %d,%d over cursor %d,%d (sent %d,%d)",
+                      pt.x, pt.y, now.x, now.y, input->mouse.x, input->mouse.y );
+            if (&wine_nx_runtime_trace) wine_nx_runtime_trace( line );
+        }
+        hooked_logged++;
+        hooked_last = NtGetTickCount();
+    }
 
     for (i = 0; i < ARRAY_SIZE(ll_mouse_messages); i++)
     {
