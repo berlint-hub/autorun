@@ -13,6 +13,7 @@ from pathlib import Path
 from pathlib import PurePosixPath
 from zipfile import ZipFile, ZIP_DEFLATED
 import argparse
+import hashlib
 import json
 import os
 import platform
@@ -98,14 +99,79 @@ compile_setup(tools / 'autorun_setup.c', drive / 'windows/autorun-setup.exe', '-
 # registry keys, settings files, controls -- comes from the game fixes
 # repository (autorun-game-fixes): the launcher recognises the game and offers
 # its fix before it starts. The archive ships the index it was built with, so a
-# card offline when a game starts still says the game has a fix to download.
+# card offline when a game starts still says the game has a fix to download,
+# and the files of the fixes game-fixes-extra/ adds, which then apply offline.
 (drive / 'WarCraft III').mkdir()
 (drive / 'The Sims 2').mkdir()
 assert args.fixes.is_file(), f'{args.fixes} is missing; check out game-fixes'
 fixes_index = json.loads(args.fixes.read_text())
 assert fixes_index['schema'] == 1 and fixes_index['fixes'], f'{args.fixes} is not a game fixes index'
 (stage / 'game-fixes').mkdir()
-shutil.copy2(args.fixes, stage / 'game-fixes/bundled.json')
+
+# Game fixes this build adds, from game-fixes-extra/. The game fixes repository
+# is where every fix belongs; a folder here is one this build carries until it
+# is published there -- a fix.json as that repository takes it (its AGENTS.md),
+# written out the way its build would: registry.txt from the registry list and
+# the generic setup beside it, the repository's own build of that program. The
+# files go into the archive under game-fixes/<id>/, so the launcher applies
+# them with no network. The index serial is one past the repository's: a card
+# reads whichever index has the higher serial and would read past these fixes
+# otherwise. Once the repository has them, the folder goes.
+extra_fixes = []
+extra_root = root / 'game-fixes-extra'
+if extra_root.is_dir():
+    setups = list(args.fixes.parent.glob('*/autorun-registry.exe'))
+    assert setups, f'no autorun-registry.exe beside {args.fixes}'
+    setup = setups[0].read_bytes()
+    assert all(p.read_bytes() == setup for p in setups), 'autorun-registry.exe differs between fixes'
+    for extra in sorted(p for p in extra_root.iterdir() if p.is_dir()):
+        assert re.fullmatch(r'[a-z0-9-]{1,31}', extra.name), f'{extra.name} is not a fix id'
+        fix = json.loads((extra / 'fix.json').read_text(encoding='utf-8'))
+        assert set(fix) <= {'title', 'version', 'required', 'summary', 'match', 'registry'}, \
+            f'{extra}/fix.json has fields this packer does not write out'
+        assert 'registry' in fix and 'match' in fix and fix['match'].get('exe')
+        assert isinstance(fix['version'], int) and fix['version'] >= 1
+        assert len(fix['title'].encode()) < 96 and len(fix['summary'].encode()) < 640
+        edits = []
+        for edit in fix['registry']:
+            assert set(edit) <= {'key', 'name', 'string', 'dword', 'delete', 'view'}
+            assert edit['key'].startswith(('HKCU\\', 'HKLM\\')) and '\\' in edit['key'][5:]
+            if edit.get('delete'):
+                kind, value = 'delete', ''
+            elif 'dword' in edit:
+                kind, value = 'dword', str(edit['dword'])
+            else:
+                kind, value = 'sz', edit['string']
+                assert '\t' not in value and '\n' not in value and len(value) < 1000
+            edits.append('\t'.join((str(edit.get('view', 32)), edit['key'], edit.get('name', ''), kind, value)))
+        assert edits, f'{extra}/fix.json writes nothing'
+        registry_txt = ('\n'.join(edits) + '\n').encode('utf-8')
+        folder = stage / 'game-fixes' / extra.name
+        folder.mkdir()
+        (folder / 'autorun-registry.exe').write_bytes(setup)
+        (folder / 'registry.txt').write_bytes(registry_txt)
+        extra_fixes.append({
+            'id': extra.name,
+            'title': fix['title'],
+            'version': fix['version'],
+            'required': bool(fix.get('required')),
+            'summary': fix['summary'],
+            'match': fix['match'],
+            'run': 'autorun-registry.exe',
+            'files': [
+                {'name': 'autorun-registry.exe', 'size': len(setup),
+                 'sha256': hashlib.sha256(setup).hexdigest()},
+                {'name': 'registry.txt', 'size': len(registry_txt),
+                 'sha256': hashlib.sha256(registry_txt).hexdigest()},
+            ],
+        })
+if extra_fixes:
+    fixes_index['fixes'] = fixes_index['fixes'] + extra_fixes
+    fixes_index['serial'] += 1
+    (stage / 'game-fixes/bundled.json').write_text(
+        json.dumps(fixes_index, indent=1, ensure_ascii=False) + '\n', encoding='utf-8')
+else:
+    shutil.copy2(args.fixes, stage / 'game-fixes/bundled.json')
 
 
 # --- Settings ----------------------------------------------------------------
@@ -186,7 +252,9 @@ repository (github.com/autorunhq/autorun-game-fixes). When a game in the
 library has one, the launcher asks before the game starts, and says when the
 game may not start without it; the fix is downloaded, checked and applied, and
 the game starts after it. This archive knows which games have fixes even
-offline; applying one needs the internet once. Which games have one:
+offline; applying one needs the internet once, except a fix whose files this
+archive holds under game-fixes/, which applies offline as well. Which games
+have one:
 github.com/autorunhq/autorun-game-fixes/blob/main/FIXES.md. A game's Library
 settings show its fix, and choosing it asks again at the next
 start. Without a network, copy the switch folder of autorun-game-fixes to the

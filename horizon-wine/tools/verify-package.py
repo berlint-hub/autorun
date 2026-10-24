@@ -9,6 +9,7 @@ Autorun ships no Windows modules; horizon-dlls does, laid out as on the card
 first and then there, which is how the two meet on a card."""
 from pathlib import Path
 import argparse
+import hashlib
 import json
 import os
 import platform
@@ -98,10 +99,21 @@ if (stage / "target.txt").exists():
     assert target.startswith("sdmc:/switch/wine/drive_c/") and (stage / target[len("sdmc:/switch/wine/"):]).is_file(), \
         f"target.txt names {target}, which the package does not hold"
 assert not (stage / "args.txt").exists(), "args.txt would apply to whatever program it names"
-# The game fixes the launcher knows of offline; the fixes themselves are downloaded.
+# The game fixes the launcher knows of offline; the fixes themselves are
+# downloaded, except any whose files the archive also holds under game-fixes/,
+# which then apply with no network (the packer's game-fixes-extra/).
 fixes = json.loads((stage / "game-fixes/bundled.json").read_text())
 assert fixes["schema"] == 1 and fixes["serial"] >= 1 and fixes["fixes"], "game-fixes/bundled.json is not an index"
 assert not (stage / "game-fixes/index.json").exists(), "index.json is the card's download; the archive ships bundled.json"
+for fix in fixes["fixes"]:
+    folder = stage / "game-fixes" / fix["id"]
+    if not folder.is_dir():
+        continue
+    for file in fix["files"]:
+        held = folder / file["name"]
+        assert held.is_file(), f"{held} is named in the index but not in the archive"
+        assert held.stat().st_size == file["size"], f"{held} is not the size the index says"
+        assert hashlib.sha256(held.read_bytes()).hexdigest() == file["sha256"], f"{held} is not the file the index says"
 
 # One settings file, where a dozen loose toggles were, and the keys beside it.
 settings = json.loads((stage / "config/settings.json").read_text())
