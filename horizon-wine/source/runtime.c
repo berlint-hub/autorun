@@ -915,6 +915,19 @@ void *wine_nx_gl_acquire_window( int width, int height )
      * display compositor scales the buffer onto the panel, like it does for
      * every other layer.  The panel's own size kept the program's viewport
      * (its window's size) clipped to a crop of the picture. */
+    if (width >= 1 && height >= 1 && window && wine_nx_fit_stretch43)
+    {
+        /* The widescreen hack: the display compositor shows only the
+         * central 4:3 of the buffer, stretched over the whole panel. The
+         * Vulkan screen buffers are drawn already cropped and stay whole. */
+        int crop_w = width, crop_h = height, left, top;
+
+        screen_crop_4_3( &crop_w, &crop_h );
+        left = (width - crop_w) / 2;
+        top = (height - crop_h) / 2;
+        nwindowSetCrop( window, left, top, left + crop_w, top + crop_h );
+    }
+    else if (window) nwindowSetCrop( window, 0, 0, 0, 0 );
     if (width < 1) width = WINE_NX_FB_W;
     if (height < 1) height = WINE_NX_FB_H;
     if (window) nwindowSetDimensions( window, width, height );
@@ -4414,9 +4427,11 @@ int main( int argc, char **argv )
 #endif
         runtime_four_cores = 1;
         horizon_fast_sync_enabled = 0;
+        wine_nx_fit_stretch43 = 0;
 #ifdef WINE_NX_MESA_SWITCH
         wine_nx_graphics_configure( 0, 1 );
         wine_nx_upscaling_configure( 0, 0.4f );
+        wine_nx_aspect_configure( 0 );
 #endif
 #ifdef WINE_NX_LSFG
         wine_nx_lsfg_configure( 0, 1, 1 );
@@ -4444,6 +4459,7 @@ int main( int argc, char **argv )
             runtime_dxvk_hud = settings.dxvk_hud;
             wine_nx_graphics_configure( launcher_frame_limits[settings.frame_limit], settings.vsync );
             wine_nx_upscaling_configure( settings.upscaling, launcher_sharpness_values[settings.upscaling_sharpness] );
+            wine_nx_aspect_configure( settings.aspect_stretch );
 #ifdef WINE_NX_LSFG
             wine_nx_lsfg_configure( settings.lsfg_enabled, settings.lsfg_performance, settings.lsfg_flow );
 #endif

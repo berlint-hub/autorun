@@ -56,6 +56,7 @@ static pthread_mutex_t present_lock = PTHREAD_MUTEX_INITIALIZER;
 #endif
 #ifdef __SWITCH__
 #include "../../horizon-wine/source/osk.h"
+#include "../../horizon-wine/source/screen_fit.h"
 #endif
 
 /* The Upscaling setting a scaled swapchain is made with: 0 bilinear, 1 FSR 1.0
@@ -90,6 +91,21 @@ void wine_nx_upscaling_configure( int mode, float sharpness )
     nx_upscaling_mode = mode;
     nx_upscaling_sharpness = sharpness;
 }
+
+#ifdef __SWITCH__
+/* The per-game Aspect setting (horizon-wine's wine_nx_aspect_configure):
+ * 1 presents the central 4:3 of the picture stretched over the whole
+ * screen. Input maps through the same rectangle. */
+static int nx_stretch43;
+
+void wine_nx_aspect_configure( int stretch43 )
+{
+    nx_stretch43 = !!stretch43;
+}
+
+extern void wine_nx_present_fit( int src_w, int src_h, int src_x, int src_y,
+                                 int *dst_x, int *dst_y, int *dst_w, int *dst_h ) __attribute__((weak));
+#endif
 
 static void nx_pace_present( uint64_t *previous )
 {
@@ -3182,7 +3198,8 @@ static VkResult win32u_vkCreateSwapchainKHR( VkDevice client_device, const VkSwa
     {
         /* EASU is made for enlarging; a game drawing more than the screen
          * holds is scaled down by the blit as before. */
-        swapchain->fsr = nx_upscaling_mode == 1 && swapchain->host_extents.width >= swapchain->extents.width &&
+        swapchain->fsr = nx_upscaling_mode == 1 && !nx_stretch43 &&
+                         swapchain->host_extents.width >= swapchain->extents.width &&
                          swapchain->host_extents.height >= swapchain->extents.height;
         if ((res = init_fs_hack_images( device, swapchain, create_info )))
         {
@@ -3485,36 +3502,56 @@ static VkResult record_compute_cmd( struct vulkan_device *device, struct swapcha
 
 #ifdef __SWITCH__
     {
-        /* Keep the aspect ratio: the image is centred, and the sampler's black
-         * border fills the bars. texcoord = (id + 0.5 - offset) / extents.
-         * Integer scaling takes the largest whole multiple that fits, and FSR
-         * a rectangle of whole pixels, both on whole-pixel bars. */
-        float scale = min( (float)swapchain->host_extents.width / swapchain->extents.width,
-                           (float)swapchain->host_extents.height / swapchain->extents.height );
-        float width, height;
-
-        if (!swapchain->fsr && fs_hack_is_integer() && scale >= 1.0f) scale = floorf( scale );
-        width = swapchain->extents.width * scale;
-        height = swapchain->extents.height * scale;
-        if (swapchain->fsr || fs_hack_is_integer())
+        /* texcoord = (id + 0.5 - offset) / extents: the shader samples the
+         * picture with normalized coordinates, so offset and extents say which
+         * rectangle of the picture lands where on the screen. */
+        if (nx_stretch43)
         {
-            width = min( floorf( width + 0.5f ), swapchain->host_extents.width );
-            height = min( floorf( height + 0.5f ), swapchain->host_extents.height );
-            constants.offset[0] = floorf( (swapchain->host_extents.width - width) / 2 );
-            constants.offset[1] = floorf( (swapchain->host_extents.height - height) / 2 );
+            /* The widescreen hack: the central 4:3 of the picture is stretched
+             * over the whole screen, so its bars stay out of the picture. */
+            int crop_w = swapchain->extents.width, crop_h = swapchain->extents.height;
+
+            screen_crop_4_3( &crop_w, &crop_h );
+            constants.extents[0] = (float)swapchain->host_extents.width * swapchain->extents.width / crop_w;
+            constants.extents[1] = (float)swapchain->host_extents.height * swapchain->extents.height / crop_h;
+            constants.offset[0] = -(float)swapchain->host_extents.width *
+                                  (swapchain->extents.width - crop_w) / (2.0f * crop_w) - 0.5f;
+            constants.offset[1] = -(float)swapchain->host_extents.height *
+                                  (swapchain->extents.height - crop_h) / (2.0f * crop_h) - 0.5f;
         }
         else
         {
-            constants.offset[0] = (swapchain->host_extents.width - width) / 2;
-            constants.offset[1] = (swapchain->host_extents.height - height) / 2;
+            /* Keep the aspect ratio: the image is centred, and the sampler's
+             * black border fills the bars. Integer scaling takes the largest
+             * whole multiple that fits, and FSR a rectangle of whole pixels,
+             * both on whole-pixel bars. */
+            float scale = min( (float)swapchain->host_extents.width / swapchain->extents.width,
+                               (float)swapchain->host_extents.height / swapchain->extents.height );
+            float width, height;
+
+            if (!swapchain->fsr && fs_hack_is_integer() && scale >= 1.0f) scale = floorf( scale );
+            width = swapchain->extents.width * scale;
+            height = swapchain->extents.height * scale;
+            if (swapchain->fsr || fs_hack_is_integer())
+            {
+                width = min( floorf( width + 0.5f ), swapchain->host_extents.width );
+                height = min( floorf( height + 0.5f ), swapchain->host_extents.height );
+                constants.offset[0] = floorf( (swapchain->host_extents.width - width) / 2 );
+                constants.offset[1] = floorf( (swapchain->host_extents.height - height) / 2 );
+            }
+            else
+            {
+                constants.offset[0] = (swapchain->host_extents.width - width) / 2;
+                constants.offset[1] = (swapchain->host_extents.height - height) / 2;
+            }
+            if (!swapchain->fsr)
+            {
+                constants.offset[0] -= 0.5f;
+                constants.offset[1] -= 0.5f;
+            }
+            constants.extents[0] = width;
+            constants.extents[1] = height;
         }
-        if (!swapchain->fsr)
-        {
-            constants.offset[0] -= 0.5f;
-            constants.offset[1] -= 0.5f;
-        }
-        constants.extents[0] = width;
-        constants.extents[1] = height;
     }
 #else
     if (swapchain->fsr)
@@ -4037,6 +4074,13 @@ static VkResult win32u_vkQueuePresentKHR( VkQueue client_queue, const VkPresentI
         struct swapchain *swapchain = swapchain_from_handle( client_swapchains[i] );
         struct surface *surface = swapchain->surface;
         client_surface_update( surface->client );
+#ifdef __SWITCH__
+        /* Input maps through the very transform the scaled present shows. */
+        if (&wine_nx_present_fit && surface->client)
+            wine_nx_present_fit( swapchain->extents.width, swapchain->extents.height,
+                                 surface->client->virtual_rect.left, surface->client->virtual_rect.top,
+                                 NULL, NULL, NULL, NULL );
+#endif
     }
 
     if (blit_count)
