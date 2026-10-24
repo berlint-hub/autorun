@@ -18,6 +18,33 @@ static void expect( const char *what, double x, double y, double want_x, double 
 
 int main(void)
 {
+    {
+        struct { int w, h, cw, ch; } cases[] =
+        {
+            { 1920, 1080, 1440, 1080 },  /* a widescreen window: crop the sides */
+            { 1280, 720, 960, 720 },
+            { 640, 480, 640, 480 },      /* 4:3 stays as it is */
+            { 800, 600, 800, 600 },
+            { 1024, 768, 1024, 768 },
+            { 1000, 1000, 1000, 750 },   /* a square picture: crop top and bottom */
+            { 641, 480, 640, 480 },
+        };
+        size_t i;
+
+        for (i = 0; i < sizeof(cases) / sizeof(cases[0]); i++)
+        {
+            int w = cases[i].w, h = cases[i].h;
+
+            screen_crop_4_3( &w, &h );
+            if (w != cases[i].cw || h != cases[i].ch)
+            {
+                fprintf( stderr, "FAIL crop 4:3 %dx%d -> %dx%d, want %dx%d\n",
+                         cases[i].w, cases[i].h, w, h, cases[i].cw, cases[i].ch );
+                failures++;
+            }
+        }
+    }
+
     double sx, sy;
 
     /* The widescreen-patched game: 1920x1080 onto the 1280x720 panel is an

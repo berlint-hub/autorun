@@ -581,6 +581,10 @@ static char wine_nx_input_program[768];
  * desktop.txt ("1920x1080") overrides the default. */
 static int wine_nx_desktop_w = 1920, wine_nx_desktop_h = 1080;
 
+/* 1: present the central 4:3 of every picture stretched over the whole
+ * screen (the classic "widescreen hack" look). Set per game. */
+int wine_nx_fit_stretch43;
+
 /* The transform the last present used: panel = screen * scale + offset.
  * The scales differ per axis: presents fill the panel like the Switch
  * display compositor does, so a 4:3 game window becomes the widescreen look
@@ -631,6 +635,16 @@ void wine_nx_present_fit( int src_w, int src_h, int src_x, int src_y,
 {
     double scale_x, scale_y;
 
+    if (wine_nx_fit_stretch43)
+    {
+        int crop_w = src_w, crop_h = src_h;
+
+        screen_crop_4_3( &crop_w, &crop_h );
+        src_x += (src_w - crop_w) / 2;
+        src_y += (src_h - crop_h) / 2;
+        src_w = crop_w;
+        src_h = crop_h;
+    }
     screen_fill_scales( src_w, src_h, WINE_NX_FB_W, WINE_NX_FB_H, &scale_x, &scale_y );
 
     pthread_mutex_lock( &wine_nx_fit_mutex );
@@ -4480,6 +4494,7 @@ int main( int argc, char **argv )
                           settings.vsync ? "on" : "off" );
             }
 #endif
+            wine_nx_fit_stretch43 = settings.aspect_stretch;
             log_line( "[SETTINGS] %s: verbose %s, profiler %s, windows %s, Direct3D %s", settings_path,
                       settings.verbose < 0 ? "global" : settings.verbose ? "on" : "off",
                       settings.profile < 0 ? "global" : settings.profile ? "on" : "off",

@@ -189,6 +189,7 @@ struct launcher_settings
     int four_cores;
     int lazy_file_views;  /* views of files read from the card on demand */
     int framebuffer;  /* 1: windows go to the framebuffer, 0: through the compositor */
+    int aspect_stretch; /* 1: the central 4:3 of the picture fills the screen, 0: the whole window */
     enum launcher_d3d_renderer d3d;
     enum dxvk_source dxvk_source;
     char vkd3d_version[32];
@@ -406,6 +407,8 @@ static inline void launcher_settings_read( const struct launcher_kv *kv, struct 
     settings->four_cores = launcher_setting_state( kv, "four-cores" ) != 0;
     settings->lazy_file_views = launcher_setting_state( kv, "lazy-file-views" ) == 1;
     settings->framebuffer = -1;
+    settings->aspect_stretch = launcher_kv_get( kv, "aspect", value, sizeof(value) ) &&
+                               !strcasecmp( value, "stretch" );
     if (launcher_kv_get( kv, "windows", value, sizeof(value) ))
     {
         if (!strcasecmp( value, "framebuffer" )) settings->framebuffer = 1;
@@ -491,6 +494,7 @@ static inline int launcher_settings_write( struct launcher_kv *kv, const struct 
            launcher_kv_set( kv, "lazy-file-views", settings->lazy_file_views ? "1" : NULL ) &&
            launcher_kv_set( kv, "windows", settings->framebuffer < 0 ? NULL :
                                            settings->framebuffer ? "framebuffer" : "compositor" ) &&
+           launcher_kv_set( kv, "aspect", settings->aspect_stretch ? "stretch" : NULL ) &&
            launcher_kv_set( kv, "d3d9", NULL ) &&
            launcher_kv_set( kv, "d3d", settings->d3d == LAUNCHER_D3D_WINE ? "wine" :
                             settings->d3d == LAUNCHER_D3D_DXVK_VKD3D ? "dxvk+vkd3d" : NULL ) &&

@@ -22,4 +22,12 @@ static inline void screen_fill_scales( int src_w, int src_h, int panel_w, int pa
     if (scale_y) *scale_y = (double)panel_h / src_h;
 }
 
+/* The central 4:3 crop of a picture: narrow it (or shorten it) until it is
+ * 4:3, keeping the centre. A 4:3 picture is returned unchanged. */
+static inline void screen_crop_4_3( int *width, int *height )
+{
+    if (*width * 3 > *height * 4) *width = (*height * 4 + 2) / 3;
+    else *height = (*width * 3 + 3) / 4;
+}
+
 #endif

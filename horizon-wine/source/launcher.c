@@ -1757,7 +1757,7 @@ static void draw_home( struct launcher *l )
 enum program_row
 {
     ROW_START, ROW_FAVORITE, ROW_ARTWORK, ROW_FORWARDER, ROW_LOCATE, ROW_TITLE, ROW_ARGS, ROW_VERBOSE, ROW_PROFILE,
-    ROW_WINDOWS, ROW_D3D9, ROW_VKD3D_VERSION, ROW_DXVK_VERSION, ROW_DXVK_OPTIONS, ROW_DXVK_HUD, ROW_FRAME_LIMIT, ROW_VSYNC,
+    ROW_WINDOWS, ROW_ASPECT, ROW_D3D9, ROW_VKD3D_VERSION, ROW_DXVK_VERSION, ROW_DXVK_OPTIONS, ROW_DXVK_HUD, ROW_FRAME_LIMIT, ROW_VSYNC,
     ROW_LSFG, ROW_LSFG_DLL, ROW_LSFG_PERFORMANCE, ROW_LSFG_FLOW,
     ROW_UPSCALING, ROW_UPSCALING_SHARPNESS,
     ROW_INPUT, ROW_INPUT_END = ROW_INPUT + INPUT_ROW_COUNT - 1, ROW_BOX64, ROW_FEX, ROW_SYNC, ROW_CPU, ROW_FOUR_CORES, ROW_LAZY_FILE_VIEWS,
@@ -2518,6 +2518,13 @@ static int program_menu_run( struct launcher *l, struct program *p, char *target
                   state_text( p->settings.framebuffer, l->options->framebuffer, "Framebuffer", "Compositor",
                               buffer, sizeof(buffer) ) );
 
+        ADD_ROW( ROW_ASPECT, SECTION_GRAPHICS, "Aspect",
+                 "Fit keeps the program's own proportions, with bars at the sides when it is 4:3. "
+                 "Stretch 4:3 fills the screen: the central 4:3 of the picture is stretched "
+                 "widescreen, like a classic console TV look." );
+        row->adjustable = 1;
+        snprintf( row->value, sizeof(row->value), "%s", p->settings.aspect_stretch ? "Stretch 4:3" : "Fit" );
+
         if (l->options->vulkan && (x86 || x64))
         {
             ADD_ROW( ROW_D3D9, SECTION_GRAPHICS, "Direct3D renderer",
@@ -2801,6 +2808,13 @@ static int program_menu_run( struct launcher *l, struct program *p, char *target
             else remove( path );
             load_program_settings( l, p );
             ui_toast( ui, line[0] ? "Arguments saved" : "Arguments removed", 1500 );
+            break;
+
+        case ROW_ASPECT:
+            if (action == UI_ACTION_RESET) p->settings.aspect_stretch = 0;
+            else if (action == UI_ACTION_CHOOSE) p->settings.aspect_stretch = !p->settings.aspect_stretch;
+            else p->settings.aspect_stretch = action == UI_ACTION_RIGHT;
+            save_program_settings( l, p );
             break;
 
         case ROW_VERBOSE:
