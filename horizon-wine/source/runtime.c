@@ -793,6 +793,9 @@ int wine_nx_fb_init(void)
         return -1;
     }
     framebufferMakeLinear( &wine_nx_fb );
+    /* A finished OpenGL surface can leave its widescreen crop on the window;
+     * the framebuffer's picture is fitted as it is drawn and stays whole. */
+    nwindowSetCrop( nwindowGetDefault(), 0, 0, 0, 0 );
     wine_nx_fb_ready = 1;
     log_line( "[NXFB] framebuffer ready %dx%d", WINE_NX_FB_W, WINE_NX_FB_H );
     return 0;
@@ -915,22 +918,27 @@ void *wine_nx_gl_acquire_window( int width, int height )
      * display compositor scales the buffer onto the panel, like it does for
      * every other layer.  The panel's own size kept the program's viewport
      * (its window's size) clipped to a crop of the picture. */
-    if (width >= 1 && height >= 1 && window && wine_nx_fit_stretch43)
+    if (width < 1) width = WINE_NX_FB_W;
+    if (height < 1) height = WINE_NX_FB_H;
+    /* libnx's nwindowSetDimensions clears the crop, and nwindowSetCrop clamps
+     * to the dimensions in effect (nx/source/display/native_window.c), so the
+     * crop is only given after the dimensions: before them it never survived
+     * to a single presented frame.  The widescreen hack: the display
+     * compositor shows only the central 4:3 of the buffer, stretched over the
+     * whole panel.  The Vulkan screen buffers are drawn already cropped and
+     * stay whole. */
+    if (window) nwindowSetDimensions( window, width, height );
+    if (window && wine_nx_fit_stretch43)
     {
-        /* The widescreen hack: the display compositor shows only the
-         * central 4:3 of the buffer, stretched over the whole panel. The
-         * Vulkan screen buffers are drawn already cropped and stay whole. */
         int crop_w = width, crop_h = height, left, top;
 
         screen_crop_4_3( &crop_w, &crop_h );
         left = (width - crop_w) / 2;
         top = (height - crop_h) / 2;
         nwindowSetCrop( window, left, top, left + crop_w, top + crop_h );
+        log_line( "[NXGL] the crop is %d,%d-%d,%d", left, top, left + crop_w, top + crop_h );
     }
     else if (window) nwindowSetCrop( window, 0, 0, 0, 0 );
-    if (width < 1) width = WINE_NX_FB_W;
-    if (height < 1) height = WINE_NX_FB_H;
-    if (window) nwindowSetDimensions( window, width, height );
     log_line( "[NXGL] %s", window ? "screen handed to an OpenGL surface" : "screen busy; OpenGL surface refused" );
     if (window) log_line( "[NXGL] the surface is %dx%d, scaled onto the %dx%d panel", width, height,
                           WINE_NX_FB_W, WINE_NX_FB_H );
@@ -3752,6 +3760,10 @@ static void run_components_first( char *target, size_t size )
 static int return_to_launcher( void )
 {
     int i, still_lent = 0;
+
+    /* The widescreen hack belongs to the game: the launcher's own screen comes
+     * back through the plain fill-the-panel transform again. */
+    wine_nx_fit_stretch43 = 0;
 
     /* Only reached with the program's threads already gone. Both of these wait
      * for the thread they end: a thread of the runtime's own has no quit point
