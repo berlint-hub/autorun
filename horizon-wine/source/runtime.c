@@ -2362,6 +2362,10 @@ static RTL_USER_PROCESS_PARAMETERS *runtime_create_process_params( const char *t
                                    &wine_nx_input_profile, &kv, input_path, sizeof(input_path) );
         if (!loaded) log_line( "[INPUT] could not read controller settings" );
         wine_nx_input_profile_publish( &wine_nx_input_profile );
+        log_line( "[INPUT] mouse speed %d%% of the built-in (%s); %d panel px/s at full tilt",
+                  wine_nx_input_profile.mouse_speed,
+                  wine_nx_input_profile.mouse_speed_explicit ? "yours" : "the game's default",
+                  wine_nx_input_profile.mouse_speed * 10 );
         wine_nx_swkbd_auto_enabled = wine_nx_input_profile.keyboard_auto;
         /* Kept for the controls overlay, which reads and writes the same
          * per-game controls while the program runs. */

@@ -842,7 +842,27 @@ BOOL wine_nx_drv_ProcessEvents( DWORD mask )
     for (unsigned int i = 0; i < key_after; i++) wine_nx_send_key( key_events + i );
     wine_nx_pointer_flags( last_buttons, buttons, pressed, released, &first, &second );
     if (placed || first) wine_nx_send_mouse( x, y, (placed ? MOUSEEVENTF_MOVE : 0) | first );
-    if (stepped) wine_nx_send_mouse_motion( dx, dy );
+    if (stepped)
+    {
+        /* What the program is told the mouse did: the first few plainly,
+         * then one line every couple of seconds, so a log can say whether
+         * the cursor races because these grow or because the program runs
+         * away with what it got. */
+        static unsigned int motion_logged;
+        static DWORD motion_last;
+        DWORD motion_now = NtGetTickCount();
+
+        if (motion_logged < 40 || motion_now - motion_last >= 2000)
+        {
+            char line[96];
+
+            snprintf( line, sizeof(line), "[INPUT] sent the program mouse motion %d,%d", dx, dy );
+            if (&wine_nx_runtime_trace) wine_nx_runtime_trace( line );
+            motion_logged++;
+            motion_last = motion_now;
+        }
+        wine_nx_send_mouse_motion( dx, dy );
+    }
     if (second) wine_nx_send_mouse( x, y, second );
     wine_nx_flush_mouse();
     wine_nx_send_extra_mouse( last_buttons, buttons, pressed, released, wheel, hwheel );

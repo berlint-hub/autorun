@@ -9604,6 +9604,25 @@ done:
             }
         }
         if (target || raw_target) horizon_server_refresh_queues_locked();
+        if ((flags & HORIZON_MOUSEEVENTF_MOVE) && (dx || dy))
+        {
+            /* The movement the program's side will see: the first few
+             * plainly, then one line every couple of seconds, as the sending
+             * side's own line is (winnx_drv.c). */
+            static unsigned int moved_logged;
+            static unsigned int moved_last;
+
+            if (moved_logged < 40 || time - moved_last >= 2000)
+            {
+                char line[128];
+
+                snprintf( line, sizeof(line), "[INPUT] mouse moved %d,%d to %d,%d",
+                          dx, dy, desktop->cursor.x, desktop->cursor.y );
+                wine_nx_runtime_trace( line );
+                moved_logged++;
+                moved_last = time;
+            }
+        }
         reply.new_x = desktop->cursor.x;
         reply.new_y = desktop->cursor.y;
         if (input) horizon_server_flush_input_locked( input );

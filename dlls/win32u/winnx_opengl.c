@@ -225,8 +225,16 @@ static void nx_osk_draw( struct opengl_drawable *base )
 
     if (!wine_nx_osk_visible() && !wine_nx_controls_overlay_visible()) return;
     if (!funcs->p_eglQuerySurface( egl->display, base->surface, EGL_WIDTH, &width ) ||
-        !funcs->p_eglQuerySurface( egl->display, base->surface, EGL_HEIGHT, &height ) ||
-        !wine_nx_osk_frame( width, height, &frame ) || !(context = funcs->p_eglGetCurrentContext()))
+        !funcs->p_eglQuerySurface( egl->display, base->surface, EGL_HEIGHT, &height ))
+        return;
+    /* The picture is laid out for the 1280x720 panel -- the screen its taps
+     * are read against (controls_overlay.c) -- not for this surface: the
+     * surface is the panel's picture scaled to the window, a 4:3 game's
+     * 800x600 stretched widescreen among them, and drawing the layout at the
+     * surface's own size made the overlay a stretched, cropped thing that no
+     * tap lined up with. The blit below maps the panel's rectangle into the
+     * surface's, so it lands on the panel as it was drawn. */
+    if (!wine_nx_osk_frame( 1280, 720, &frame ) || !(context = funcs->p_eglGetCurrentContext()))
         return;
     if (!p_glBlitFramebuffer)
     {
@@ -290,7 +298,7 @@ static void nx_osk_draw( struct opengl_drawable *base )
         osk->generation = 0;
     }
     if (osk->pixels && osk->generation != frame.generation &&
-        (osk->generation = wine_nx_osk_copy( width, height, osk->pixels, frame.width * 4, 0 )))
+        (osk->generation = wine_nx_osk_copy( 1280, 720, osk->pixels, frame.width * 4, 0 )))
         funcs->p_glTexSubImage2D( GL_TEXTURE_2D, 0, 0, 0, frame.width, frame.height, GL_BGRA, GL_UNSIGNED_BYTE,
                                   osk->pixels );
     if (osk->generation)
@@ -300,9 +308,17 @@ static void nx_osk_draw( struct opengl_drawable *base )
         p_glBindFramebuffer( GL_DRAW_FRAMEBUFFER, 0 );
         if (scissor) funcs->p_glDisable( GL_SCISSOR_TEST );
         if (srgb) funcs->p_glDisable( GL_FRAMEBUFFER_SRGB );
-        /* The picture's first row is its top; the window's first is its bottom. */
-        p_glBlitFramebuffer( 0, 0, frame.width, frame.height, frame.x, height - frame.y,
-                             frame.x + frame.width, height - frame.y - frame.height, GL_COLOR_BUFFER_BIT, GL_NEAREST );
+        /* The picture's first row is its top; the window's first is its
+         * bottom. Panel pixels, mapped into the surface's own. */
+        {
+            int dst_x0 = (int)((long long)frame.x * width / 1280);
+            int dst_y0 = (int)((long long)frame.y * height / 720);
+            int dst_x1 = (int)((long long)(frame.x + frame.width) * width / 1280);
+            int dst_y1 = (int)((long long)(frame.y + frame.height) * height / 720);
+
+            p_glBlitFramebuffer( 0, 0, frame.width, frame.height, dst_x0, height - dst_y0,
+                                 dst_x1, height - dst_y1, GL_COLOR_BUFFER_BIT, GL_NEAREST );
+        }
         if (scissor) funcs->p_glEnable( GL_SCISSOR_TEST );
         if (srgb) funcs->p_glEnable( GL_FRAMEBUFFER_SRGB );
     }
