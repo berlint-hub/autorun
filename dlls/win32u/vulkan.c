@@ -2144,8 +2144,8 @@ static void win32u_vkDestroySurfaceKHR( VkInstance client_instance, VkSurfaceKHR
     instance->p_vkDestroySurfaceKHR( instance->host.instance, surface->obj.host.surface, NULL /* allocator */ );
 #if defined(__SWITCH__) && defined(WINE_NX_MESA_SWITCH)
     {
-        extern void wine_nx_gl_release_window(void);
-        wine_nx_gl_release_window();
+        extern void wine_nx_vulkan_release_window(void);
+        wine_nx_vulkan_release_window();
     }
 #endif
     use_window_client_surface( surface->client, FALSE );

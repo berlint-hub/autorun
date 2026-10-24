@@ -35,8 +35,8 @@ WINE_DEFAULT_DEBUG_CHANNEL(vulkan);
 /* Width/height zero keep the panel's own size: mesa-switch's NVK swapchain
  * takes the window's dimensions and scales the program's buffers onto the
  * screen itself, as DXVK's presents have shown. */
-extern void *wine_nx_gl_acquire_window( int width, int height );
-extern void wine_nx_gl_release_window( void );
+extern void *wine_nx_gl_acquire_window_vulkan( int width, int height );
+extern void wine_nx_vulkan_release_window( void );
 extern void wine_nx_runtime_trace( const char *msg ) __attribute__((weak));
 
 /* VK_NN_vi_surface, which Wine's Vulkan headers do not describe: mesa-switch's
@@ -105,7 +105,7 @@ static VkResult nx_vulkan_surface_create( struct client_surface *client, const s
 
     TRACE( "hwnd %p, raw %u, instance %p\n", hwnd, client->raw, instance );
 
-    if (!(info.window = wine_nx_gl_acquire_window( 0, 0 )))
+    if (!(info.window = wine_nx_gl_acquire_window_vulkan( 0, 0 )))
     {
         ERR( "hwnd %p: the screen already has an OpenGL or Vulkan surface\n", hwnd );
         return VK_ERROR_NATIVE_WINDOW_IN_USE_KHR;
@@ -114,7 +114,7 @@ static VkResult nx_vulkan_surface_create( struct client_surface *client, const s
     {
         ERR( "hwnd %p: vkCreateViSurfaceNN failed, res %d\n", hwnd, res );
         nx_log( "[NXVK] hwnd %p: vkCreateViSurfaceNN failed, res %d", hwnd, res );
-        wine_nx_gl_release_window();
+        wine_nx_vulkan_release_window();
         return res;
     }
 

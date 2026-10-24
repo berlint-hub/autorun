@@ -648,6 +648,9 @@ static char wine_nx_input_program[768];
 static int wine_nx_desktop_w = WINE_NX_FB_W, wine_nx_desktop_h = WINE_NX_FB_H;
 static int wine_nx_desktop_default_w, wine_nx_desktop_default_h;
 static int wine_nx_desktop_wanted_w, wine_nx_desktop_wanted_h;
+/* The display mode the program asked for itself (ChangeDisplaySettings), if
+ * any: it outranks the size a surface pretends while it holds the screen. */
+static int wine_nx_desktop_mode_w, wine_nx_desktop_mode_h;
 
 /* 1: present the central 4:3 of every picture stretched over the whole
  * screen (the classic "widescreen hack" look). Set per game. */
@@ -713,6 +716,8 @@ void wine_nx_desktop_set( int width, int height )
         wine_nx_desktop_w = width;
         wine_nx_desktop_h = height;
     }
+    wine_nx_desktop_mode_w = width;
+    wine_nx_desktop_mode_h = height;
 }
 
 /* The screen a program starts with, from the Resolution setting: picked
@@ -723,6 +728,7 @@ void wine_nx_desktop_start_size( int width, int height )
     if (width <= 0 || height <= 0) return;
     wine_nx_desktop_wanted_w = width;
     wine_nx_desktop_wanted_h = height;
+    wine_nx_desktop_mode_w = wine_nx_desktop_mode_h = 0;  /* a new program starts */
     if (wine_nx_desktop_default_w)  /* the desktop is already up */
     {
         wine_nx_desktop_default_w = width;
@@ -854,6 +860,7 @@ static struct pointer_cursor wine_nx_cursor =
 static int wine_nx_cursor_moved;
 static int wine_nx_cursor_visible = 1;  /* 0 while the program hides the mouse cursor */
 static int wine_nx_gl_window;  /* an OpenGL window surface owns the screen's NWindow */
+static int wine_nx_vulkan_window;  /* a Vulkan surface owns it (DXVK's presents) */
 /* Controller and touchscreen state, guarded by wine_nx_pointer_mutex.  The
  * pointer lives in desktop coordinates (what Wine and the program see); a
  * touch arrives in panel pixels and is mapped through the present's fit. */
@@ -897,7 +904,7 @@ int wine_nx_fb_init(void)
 {
     Result rc;
     if (wine_nx_fb_ready) return 0;
-    if (wine_nx_gl_window) return -1;  /* an OpenGL surface has the screen */
+    if (wine_nx_gl_window || wine_nx_vulkan_window) return -1;  /* a surface has the screen */
     log_line( "[NXFB] fb_init: taking screen from console" );
     if (wine_nx_console_active)
     {
@@ -1000,15 +1007,20 @@ int wine_nx_compositor_enabled(void)
     return 1;
 }
 
-/* An OpenGL window surface takes the screen. libnx's framebuffer and EGL cannot
+/* A window surface takes the screen. libnx's framebuffer and EGL cannot
  * both queue buffers to the default NWindow, so the framebuffer is closed, or
  * the compositor gives the screen up, while the surface exists; GDI keeps
  * drawing into window surfaces, shown again once the surface is gone. Returns
- * NULL while another surface has the screen or the framebuffer is being drawn. */
-void *wine_nx_gl_acquire_window( int width, int height )
+ * NULL while another surface has the screen or the framebuffer is being drawn.
+ * OpenGL and Vulkan take turns with the screen: a Vulkan surface (DXVK's
+ * presents) takes it over from an OpenGL surface that is only holding it, so
+ * a D3D game behind DXVK is never kept off the screen by the wined3d or GDI
+ * OpenGL surface its ddraw proxy opens first. */
+static void *wine_nx_screen_acquire( int width, int height, int vulkan )
 {
     int compositor = wine_nx_compositor_enabled();
     NWindow *window = NULL;
+    int taken_over = 0;
 
     /* An exclusive D3D game expects the screen to take on its mode, the way a
      * real display modeset would: its ClipCursor, centring and cursor maths
@@ -1024,9 +1036,31 @@ void *wine_nx_gl_acquire_window( int width, int height )
         wine_nx_desktop_w = width;
         wine_nx_desktop_h = height;
     }
+    else if (width < 1 && wine_nx_desktop_mode_w &&
+             (wine_nx_desktop_w != wine_nx_desktop_mode_w || wine_nx_desktop_h != wine_nx_desktop_mode_h))
+    {
+        /* A Vulkan surface is the panel's own size and takes the screen again
+         * whenever its swapchain is reset; between two takes, the size a
+         * release puts back must not outlast the program's own display mode. */
+        log_line( "[NXGL] the screen is %dx%d (the program's mode; was %dx%d)",
+                  wine_nx_desktop_mode_w, wine_nx_desktop_mode_h, wine_nx_desktop_w, wine_nx_desktop_h );
+        wine_nx_desktop_w = wine_nx_desktop_mode_w;
+        wine_nx_desktop_h = wine_nx_desktop_mode_h;
+    }
 
     pthread_mutex_lock( &wine_nx_fb_mutex );
-    if (!wine_nx_gl_window && !wine_nx_fb_lock_depth)
+    if (vulkan && wine_nx_vulkan_window)
+        window = nwindowGetDefault();  /* a swapchain reset reuses the screen it has */
+    else if (vulkan && wine_nx_gl_window)
+    {
+        /* Take the screen over from the OpenGL surface holding it: it is not
+         * the presenter when the program presents through Vulkan. */
+        taken_over = 1;
+        wine_nx_gl_window = 0;
+        wine_nx_vulkan_window = 1;
+        window = nwindowGetDefault();
+    }
+    else if (!wine_nx_gl_window && !wine_nx_vulkan_window && !wine_nx_fb_lock_depth)
     {
         if (compositor)
             ;  /* suspended below, without this lock, as it waits for the presenter */
@@ -1044,7 +1078,8 @@ void *wine_nx_gl_acquire_window( int width, int height )
             wine_nx_console_active = 0;
         }
         window = nwindowGetDefault();
-        wine_nx_gl_window = 1;
+        if (vulkan) wine_nx_vulkan_window = 1;
+        else wine_nx_gl_window = 1;
     }
     pthread_mutex_unlock( &wine_nx_fb_mutex );
     if (window && compositor) wine_nx_compositor_suspend();
@@ -1062,7 +1097,9 @@ void *wine_nx_gl_acquire_window( int width, int height )
      * whole panel.  The Vulkan screen buffers are drawn already cropped and
      * stay whole. */
     if (window) nwindowSetDimensions( window, width, height );
-    if (window && wine_nx_fit_stretch43)
+    if (window && vulkan)
+        nwindowSetCrop( window, 0, 0, 0, 0 );  /* the Vulkan buffers carry their own crop */
+    else if (window && wine_nx_fit_stretch43)
     {
         int crop_w = width, crop_h = height, left, top;
 
@@ -1073,21 +1110,35 @@ void *wine_nx_gl_acquire_window( int width, int height )
         log_line( "[NXGL] the crop is %d,%d-%d,%d", left, top, left + crop_w, top + crop_h );
     }
     else if (window) nwindowSetCrop( window, 0, 0, 0, 0 );
-    log_line( "[NXGL] %s", window ? "screen handed to an OpenGL surface" : "screen busy; OpenGL surface refused" );
+    log_line( "[NXGL] %s", window ? (vulkan ? "screen handed to a Vulkan surface" : "screen handed to an OpenGL surface")
+                          : (vulkan ? "screen busy; Vulkan surface refused" : "screen busy; OpenGL surface refused") );
+    if (taken_over) log_line( "[NXGL] the screen is taken over from the OpenGL surface" );
     if (window) log_line( "[NXGL] the surface is %dx%d, scaled onto the %dx%d panel", width, height,
                           WINE_NX_FB_W, WINE_NX_FB_H );
     return window;
 }
 
-/* The OpenGL surface is destroyed; the framebuffer or the compositor may take
- * the screen back. */
-void wine_nx_gl_release_window(void)
+void *wine_nx_gl_acquire_window( int width, int height )
+{
+    return wine_nx_screen_acquire( width, height, 0 );
+}
+
+void *wine_nx_gl_acquire_window_vulkan( int width, int height )
+{
+    return wine_nx_screen_acquire( width, height, 1 );
+}
+
+int wine_nx_vulkan_owns_screen( void )
+{
+    return wine_nx_vulkan_window;
+}
+
+/* The screen goes back to the framebuffer or the compositor once the last
+ * surface is done with it. */
+static void wine_nx_screen_return( void )
 {
     int compositor = wine_nx_compositor_running();
 
-    pthread_mutex_lock( &wine_nx_fb_mutex );
-    wine_nx_gl_window = 0;
-    pthread_mutex_unlock( &wine_nx_fb_mutex );
     if (wine_nx_desktop_default_w &&
         (wine_nx_desktop_w != wine_nx_desktop_default_w ||
          wine_nx_desktop_h != wine_nx_desktop_default_h))
@@ -1099,6 +1150,38 @@ void wine_nx_gl_release_window(void)
     }
     log_line( "[NXGL] screen returned to the %s", compositor ? "compositor" : "framebuffer" );
     if (compositor) wine_nx_compositor_resume();
+}
+
+/* The OpenGL surface is destroyed; the screen goes back to the framebuffer or
+ * the compositor, unless a Vulkan surface has meanwhile taken it over. */
+void wine_nx_gl_release_window(void)
+{
+    int give_back = 0;
+
+    pthread_mutex_lock( &wine_nx_fb_mutex );
+    if (wine_nx_gl_window && !wine_nx_vulkan_window)
+    {
+        wine_nx_gl_window = 0;
+        give_back = 1;
+    }
+    pthread_mutex_unlock( &wine_nx_fb_mutex );
+    if (give_back) wine_nx_screen_return();
+}
+
+/* The Vulkan surface is destroyed (a swapchain reset makes a new one at once,
+ * or the program is done); the screen goes back the same way. */
+void wine_nx_vulkan_release_window(void)
+{
+    int give_back = 0;
+
+    pthread_mutex_lock( &wine_nx_fb_mutex );
+    if (wine_nx_vulkan_window)
+    {
+        wine_nx_vulkan_window = 0;
+        give_back = 1;
+    }
+    pthread_mutex_unlock( &wine_nx_fb_mutex );
+    if (give_back) wine_nx_screen_return();
 }
 
 /* Screenshots: Minus and R together keep the frame the player is looking at,

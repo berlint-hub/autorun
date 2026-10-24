@@ -37,6 +37,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(wgl);
  * (horizon-wine/source/runtime.c). */
 extern void *wine_nx_gl_acquire_window( int width, int height );
 extern void wine_nx_gl_release_window( void );
+extern int wine_nx_vulkan_owns_screen( void ) __attribute__((weak));
 extern void wine_nx_present_fit( int src_w, int src_h, int src_x, int src_y,
                                  int *dst_x, int *dst_y, int *dst_w, int *dst_h ) __attribute__((weak));
 extern void wine_nx_runtime_trace( const char *msg ) __attribute__((weak));
@@ -363,6 +364,20 @@ static BOOL nx_drawable_swap( struct opengl_drawable *base )
 
     if (!impl_from_opengl_drawable( base )->screen)
         return funcs->p_eglSwapBuffers( egl->display, base->surface );
+    if (&wine_nx_vulkan_owns_screen && wine_nx_vulkan_owns_screen())
+    {
+        /* A Vulkan surface has the screen and shows it; an OpenGL surface left
+         * holding on (a ddraw proxy's wined3d, a GDI paint) must not queue
+         * buffers behind the picture. */
+        static int stood_down;
+
+        if (!stood_down)
+        {
+            stood_down = 1;
+            nx_log( "[NXGL] OpenGL swaps stand down; a Vulkan surface shows the screen" );
+        }
+        return TRUE;
+    }
     if (&wine_nx_present_fit && base->client)
     {
         EGLint width = 0, height = 0;
