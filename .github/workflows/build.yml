@@ -44,6 +44,11 @@ jobs:
             horizon-wine/tests/log_repeat.c -o log_repeat
           ./log_repeat
 
+      - name: DirectInput input (raw payload and low-level hooks)
+        run: |
+          python3 horizon-wine/tests/check_raw_mouse.py
+          python3 horizon-wine/tests/check_ll_hooks.py
+
       - name: Floating keyboard and controls overlay
         run: |
           cc -std=gnu11 -Wall -Wextra -Werror -O1 -g $(sdl2-config --cflags) \
