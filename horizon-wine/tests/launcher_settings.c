@@ -71,7 +71,7 @@ static void test_settings( const char *dir )
     load_text( &kv, "" );
     launcher_settings_read( &kv, &settings );
     assert( !settings.fast_sync && settings.fex && settings.four_cores &&
-            settings.d3d == LAUNCHER_D3D_DXVK );
+            settings.d3d == LAUNCHER_D3D_DXVK && !settings.resolution );
     load_text( &kv, "four-cores=0\n" );
     launcher_settings_read( &kv, &settings );
     assert( !settings.four_cores && launcher_settings_write( &kv, &settings ) );
@@ -104,6 +104,17 @@ static void test_settings( const char *dir )
     load_text( &kv, "sync=fsync\n" );
     launcher_settings_read( &kv, &settings );
     assert( !settings.fast_sync );
+    load_text( &kv, "resolution=1920x1080\n" );
+    launcher_settings_read( &kv, &settings );
+    assert( settings.resolution == 1 );
+    assert( launcher_settings_write( &kv, &settings ) );
+    launcher_settings_read( &kv, &back );
+    assert( back.resolution == 1 );
+    settings.resolution = 0;
+    assert( launcher_settings_write( &kv, &settings ) && !strstr( kv.text, "resolution=" ) );
+    load_text( &kv, "resolution=unknown\n" );
+    launcher_settings_read( &kv, &settings );
+    assert( !settings.resolution );
 
     assert( launcher_settings_path( "sdmc:/switch/wine/drive_c/nfsu2/SPEED2.EXE", path, sizeof(path) ) );
     assert( !strcmp( path, "sdmc:/switch/wine/drive_c/nfsu2/SPEED2.wine-nx.txt" ) );

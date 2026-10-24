@@ -641,10 +641,13 @@ static char wine_nx_input_program[768];
  * screen), and a window bigger than the desktop would clip: the cursor could
  * never leave the desktop, and the picture would present as a crop.  So the
  * desktop is its own size, and every present maps it onto the panel, fitted
- * and centred; input maps through the same transform.  sdmc:/switch/wine/
- * desktop.txt ("1920x1080") overrides the default. */
-static int wine_nx_desktop_w = 1920, wine_nx_desktop_h = 1080;
+ * and centred; input maps through the same transform.  The default is the
+ * panel itself, so a game that follows the screen draws 1280x720 and nothing
+ * has to be scaled; the Resolution setting of the program (wine_nx_desktop_
+ * start_size) and sdmc:/switch/wine/desktop.txt ("1920x1080") pick another. */
+static int wine_nx_desktop_w = WINE_NX_FB_W, wine_nx_desktop_h = WINE_NX_FB_H;
 static int wine_nx_desktop_default_w, wine_nx_desktop_default_h;
+static int wine_nx_desktop_wanted_w, wine_nx_desktop_wanted_h;
 
 /* 1: present the central 4:3 of every picture stretched over the whole
  * screen (the classic "widescreen hack" look). Set per game. */
@@ -668,7 +671,12 @@ static void wine_nx_desktop_init( void )
 
     if (done) return;
     done = 1;
-    if ((f = fopen( "sdmc:/switch/wine/desktop.txt", "r" )))
+    if (wine_nx_desktop_wanted_w)
+    {
+        wine_nx_desktop_w = wine_nx_desktop_wanted_w;
+        wine_nx_desktop_h = wine_nx_desktop_wanted_h;
+    }
+    else if ((f = fopen( "sdmc:/switch/wine/desktop.txt", "r" )))
     {
         size_t n = fread( text, 1, sizeof(text) - 1, f );
         (void)n;
@@ -704,6 +712,28 @@ void wine_nx_desktop_set( int width, int height )
                   width, height, wine_nx_desktop_w, wine_nx_desktop_h );
         wine_nx_desktop_w = width;
         wine_nx_desktop_h = height;
+    }
+}
+
+/* The screen a program starts with, from the Resolution setting: picked
+ * before the desktop is set up, or put in place at once once it is. A program
+ * that asks for a display mode of its own still gets it (wine_nx_desktop_set). */
+void wine_nx_desktop_start_size( int width, int height )
+{
+    if (width <= 0 || height <= 0) return;
+    wine_nx_desktop_wanted_w = width;
+    wine_nx_desktop_wanted_h = height;
+    if (wine_nx_desktop_default_w)  /* the desktop is already up */
+    {
+        wine_nx_desktop_default_w = width;
+        wine_nx_desktop_default_h = height;
+        if (wine_nx_desktop_w != width || wine_nx_desktop_h != height)
+        {
+            log_line( "[NXGL] the screen is %dx%d (the program's start size; was %dx%d)",
+                      width, height, wine_nx_desktop_w, wine_nx_desktop_h );
+            wine_nx_desktop_w = width;
+            wine_nx_desktop_h = height;
+        }
     }
 }
 
@@ -4727,6 +4757,11 @@ int main( int argc, char **argv )
             }
 #endif
             wine_nx_fit_stretch43 = settings.aspect_stretch;
+            /* Resolution: the screen the program starts with. The panel
+             * (the default) is left to the built-in default above. */
+            if (settings.resolution)
+                wine_nx_desktop_start_size( launcher_resolution_sizes[settings.resolution][0],
+                                            launcher_resolution_sizes[settings.resolution][1] );
             log_line( "[SETTINGS] %s: verbose %s, profiler %s, windows %s, Direct3D %s", settings_path,
                       settings.verbose < 0 ? "global" : settings.verbose ? "on" : "off",
                       settings.profile < 0 ? "global" : settings.profile ? "on" : "off",

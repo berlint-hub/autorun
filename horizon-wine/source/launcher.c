@@ -1757,7 +1757,7 @@ static void draw_home( struct launcher *l )
 enum program_row
 {
     ROW_START, ROW_FAVORITE, ROW_ARTWORK, ROW_FORWARDER, ROW_LOCATE, ROW_TITLE, ROW_ARGS, ROW_VERBOSE, ROW_PROFILE,
-    ROW_WINDOWS, ROW_ASPECT, ROW_D3D9, ROW_VKD3D_VERSION, ROW_DXVK_VERSION, ROW_DXVK_OPTIONS, ROW_DXVK_HUD, ROW_FRAME_LIMIT, ROW_VSYNC,
+    ROW_WINDOWS, ROW_ASPECT, ROW_RESOLUTION, ROW_D3D9, ROW_VKD3D_VERSION, ROW_DXVK_VERSION, ROW_DXVK_OPTIONS, ROW_DXVK_HUD, ROW_FRAME_LIMIT, ROW_VSYNC,
     ROW_LSFG, ROW_LSFG_DLL, ROW_LSFG_PERFORMANCE, ROW_LSFG_FLOW,
     ROW_UPSCALING, ROW_UPSCALING_SHARPNESS,
     ROW_INPUT, ROW_INPUT_END = ROW_INPUT + INPUT_ROW_COUNT - 1, ROW_BOX64, ROW_FEX, ROW_SYNC, ROW_CPU, ROW_FOUR_CORES, ROW_LAZY_FILE_VIEWS,
@@ -2525,6 +2525,14 @@ static int program_menu_run( struct launcher *l, struct program *p, char *target
         row->adjustable = 1;
         snprintf( row->value, sizeof(row->value), "%s", p->settings.aspect_stretch ? "Stretch 4:3" : "Fit" );
 
+        ADD_ROW( ROW_RESOLUTION, SECTION_GRAPHICS, "Resolution",
+                 "The screen a game starts with. 1280x720 is the panel itself, the fewest pixels to draw. "
+                 "A game that asks for a display mode of its own still gets it, and whatever it draws "
+                 "is scaled onto the panel." );
+        row->kind = UI_ROW_DROPDOWN;
+        row->choices = LAUNCHER_RESOLUTION_COUNT;
+        snprintf( row->value, sizeof(row->value), "%s", launcher_resolution_labels[p->settings.resolution] );
+
         if (l->options->vulkan && (x86 || x64))
         {
             ADD_ROW( ROW_D3D9, SECTION_GRAPHICS, "Direct3D renderer",
@@ -2816,6 +2824,25 @@ static int program_menu_run( struct launcher *l, struct program *p, char *target
             else p->settings.aspect_stretch = action == UI_ACTION_RIGHT;
             save_program_settings( l, p );
             break;
+
+        case ROW_RESOLUTION:
+        {
+            struct ui_row items[LAUNCHER_RESOLUTION_COUNT] = {0};
+            int selected, i;
+
+            if (action == UI_ACTION_RESET) p->settings.resolution = 0;
+            else if (action == UI_ACTION_CHOOSE)
+            {
+                for (i = 0; i < LAUNCHER_RESOLUTION_COUNT; i++)
+                    snprintf( items[i].label, sizeof(items[i].label), "%s", launcher_resolution_labels[i] );
+                selected = ui_settings_dropdown( ui, &list, items, LAUNCHER_RESOLUTION_COUNT, p->settings.resolution );
+                if (selected < 0) break;
+                p->settings.resolution = selected;
+            }
+            else break;
+            save_program_settings( l, p );
+            break;
+        }
 
         case ROW_VERBOSE:
         case ROW_PROFILE:

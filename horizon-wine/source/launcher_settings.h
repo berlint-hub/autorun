@@ -197,6 +197,7 @@ struct launcher_settings
     int dxvk_hud;
     int frame_limit;
     int vsync;
+    int resolution;  /* the screen a program starts with: index into launcher_resolution_labels */
     int lsfg_enabled;
     int lsfg_performance;
     int lsfg_flow;
@@ -212,7 +213,8 @@ enum {
     LAUNCHER_FRAME_LIMIT_COUNT = 8,
     LAUNCHER_HUD_COUNT = 4,
     LAUNCHER_UPSCALING_COUNT = 3,
-    LAUNCHER_SHARPNESS_COUNT = 6
+    LAUNCHER_SHARPNESS_COUNT = 6,
+    LAUNCHER_RESOLUTION_COUNT = 5
 };
 static const int launcher_frame_limits[] = { 0, 30, 40, 45, 60, 75, 90, 120 };
 static const char *const launcher_frame_limit_labels[] =
@@ -226,6 +228,11 @@ static const char *const launcher_upscaling_labels[] = { "Off (Bilinear)", "FSR 
 static const char *const launcher_upscaling_values[] = { "off", "fsr", "integer" };
 static const char *const launcher_sharpness_labels[] = { "0%", "20%", "40%", "60%", "80%", "100%" };
 static const float launcher_sharpness_values[] = { 0.0f, 0.2f, 0.4f, 0.6f, 0.8f, 1.0f };
+/* The screen a program starts with. The first is the panel, and the default. */
+static const char *const launcher_resolution_labels[] =
+    { "1280x720", "1920x1080", "1024x768", "800x600", "640x480" };
+static const int launcher_resolution_sizes[][2] =
+    { { 1280, 720 }, { 1920, 1080 }, { 1024, 768 }, { 800, 600 }, { 640, 480 } };
 
 static inline int launcher_dxvk_config( const struct launcher_settings *settings, char *out, size_t size )
 {
@@ -448,6 +455,10 @@ static inline void launcher_settings_read( const struct launcher_kv *kv, struct 
         for (int i = 1; i < LAUNCHER_FRAME_LIMIT_COUNT; i++)
             if (!strcasecmp( value, launcher_frame_limit_labels[i] )) settings->frame_limit = i;
     settings->vsync = launcher_setting_state( kv, "vsync" ) != 0;
+    settings->resolution = 0;
+    if (launcher_kv_get( kv, "resolution", value, sizeof(value) ))
+        for (int i = 1; i < LAUNCHER_RESOLUTION_COUNT; i++)
+            if (!strcasecmp( value, launcher_resolution_labels[i] )) settings->resolution = i;
     settings->lsfg_enabled = launcher_setting_state( kv, "lsfg" ) == 1;
     settings->lsfg_performance = launcher_setting_state( kv, "lsfg-performance" ) != 0;
     settings->lsfg_flow = 1;
@@ -481,6 +492,7 @@ static inline int launcher_settings_write( struct launcher_kv *kv, const struct 
         settings->dxvk_hud < 0 || settings->dxvk_hud >= LAUNCHER_HUD_COUNT ||
         settings->dxvk_source < 0 || settings->dxvk_source >= DXVK_SOURCE_COUNT ||
         settings->frame_limit < 0 || settings->frame_limit >= LAUNCHER_FRAME_LIMIT_COUNT ||
+        settings->resolution < 0 || settings->resolution >= LAUNCHER_RESOLUTION_COUNT ||
         settings->lsfg_flow < 0 || settings->lsfg_flow >= 3 ||
         settings->upscaling < 0 || settings->upscaling >= LAUNCHER_UPSCALING_COUNT ||
         settings->upscaling_sharpness < 0 || settings->upscaling_sharpness >= LAUNCHER_SHARPNESS_COUNT) return 0;
@@ -505,6 +517,8 @@ static inline int launcher_settings_write( struct launcher_kv *kv, const struct 
            launcher_kv_set( kv, "dxvk-hud", settings->dxvk_hud ? launcher_hud_values[settings->dxvk_hud] : NULL ) &&
            launcher_kv_set( kv, "frame-limit", settings->frame_limit ?
                             launcher_frame_limit_labels[settings->frame_limit] : NULL ) &&
+           launcher_kv_set( kv, "resolution", settings->resolution ?
+                            launcher_resolution_labels[settings->resolution] : NULL ) &&
            launcher_kv_set( kv, "vsync", settings->vsync ? NULL : "0" ) &&
            launcher_kv_set( kv, "lsfg", settings->lsfg_enabled ? "1" : NULL ) &&
            launcher_kv_set( kv, "lsfg-performance", settings->lsfg_performance ? NULL : "0" ) &&
