@@ -34,8 +34,10 @@ WINE_DEFAULT_DEBUG_CHANNEL(wgl);
 
 /* The runtime hands the screen's NWindow to one OpenGL surface at a time
  * (horizon-wine/source/runtime.c). */
-extern void *wine_nx_gl_acquire_window( void );
+extern void *wine_nx_gl_acquire_window( int width, int height );
 extern void wine_nx_gl_release_window( void );
+extern void wine_nx_present_fit( int src_w, int src_h, int src_x, int src_y,
+                                 int *dst_x, int *dst_y, int *dst_w, int *dst_h ) __attribute__((weak));
 extern void wine_nx_runtime_trace( const char *msg ) __attribute__((weak));
 
 static const struct egl_platform *egl;
@@ -319,6 +321,15 @@ static BOOL nx_drawable_swap( struct opengl_drawable *base )
 
     if (!impl_from_opengl_drawable( base )->screen)
         return funcs->p_eglSwapBuffers( egl->display, base->surface );
+    if (&wine_nx_present_fit && base->client)
+    {
+        EGLint width = 0, height = 0;
+
+        if (funcs->p_eglQuerySurface( egl->display, base->surface, EGL_WIDTH, &width ) &&
+            funcs->p_eglQuerySurface( egl->display, base->surface, EGL_HEIGHT, &height ))
+            wine_nx_present_fit( width, height, base->client->virtual_rect.left,
+                                 base->client->virtual_rect.top, NULL, NULL, NULL, NULL );
+    }
     nx_osk_draw( base );
     start = horizon_interrupt_time();
     ret = funcs->p_eglSwapBuffers( egl->display, base->surface );
@@ -403,10 +414,14 @@ static BOOL nx_surface_create( struct client_surface *client, int format, struct
     }
     pthread_mutex_unlock( &nx_screen_mutex );
 
-    if (!(window = wine_nx_gl_acquire_window()))
     {
-        ERR( "hwnd %p: the screen already has an OpenGL surface\n", hwnd );
-        goto err;
+        SIZE size = gl->base.virtual_size;
+
+        if (!(window = wine_nx_gl_acquire_window( size.cx, size.cy )))
+        {
+            ERR( "hwnd %p: the screen already has an OpenGL surface\n", hwnd );
+            goto err;
+        }
     }
     gl->screen = TRUE;
     if (!(gl->base.surface = funcs->p_eglCreateWindowSurface( egl->display, nx_config_for_format( format ),
@@ -540,17 +555,6 @@ UINT wine_nx_drv_OpenGLInit( UINT version, const struct opengl_funcs *opengl_fun
     }
     if (!opengl_funcs->egl_handle) return STATUS_NOT_SUPPORTED;
     funcs = opengl_funcs;
-
-    /* The panel is a fixed 1280x720 while games choose their own window
-     * resolution (a widescreen-patched game asks for 1920x1080).  Every
-     * window drawable must render into win32u's framebuffer surface so that
-     * presents land in blit_framebuffer_surface, which fits them onto the
-     * panel, centred, with input mapping through the same transform
-     * (horizon-wine/source/runtime.c).  Without this the program's viewport
-     * (its window's size) is clipped by the panel-sized surface and the
-     * picture shows as a crop. */
-    emulate_modeset = TRUE;
-    nx_log( "[NXGL] window surfaces present through the fitted framebuffer" );
 
     nx_driver_funcs.p_get_proc_address = (*driver_funcs)->p_get_proc_address;
     nx_driver_funcs.p_init_pixel_formats = (*driver_funcs)->p_init_pixel_formats;

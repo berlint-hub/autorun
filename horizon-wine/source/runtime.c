@@ -581,9 +581,13 @@ static char wine_nx_input_program[768];
  * desktop.txt ("1920x1080") overrides the default. */
 static int wine_nx_desktop_w = 1920, wine_nx_desktop_h = 1080;
 
-/* The transform the last present used: panel = screen * scale + offset. */
+/* The transform the last present used: panel = screen * scale + offset.
+ * The scales differ per axis: presents fill the panel like the Switch
+ * display compositor does, so a 4:3 game window becomes the widescreen look
+ * and input maps through the very same stretch. */
 static pthread_mutex_t wine_nx_fit_mutex = PTHREAD_MUTEX_INITIALIZER;
-static double wine_nx_fit_scale = 1.0, wine_nx_fit_off_x, wine_nx_fit_off_y;
+static double wine_nx_fit_scale_x = 1.0, wine_nx_fit_scale_y = 1.0;
+static double wine_nx_fit_off_x, wine_nx_fit_off_y;
 static int wine_nx_fit_ready;
 
 static void wine_nx_desktop_init( void )
@@ -617,51 +621,48 @@ void wine_nx_desktop_size( int *width, int *height )
     if (height) *height = wine_nx_desktop_h;
 }
 
-/* Fit a src_w x src_h picture into the panel, centred, and return where it
- * lands (dst_x/dst_y are the offsets from the panel's left and TOP -- the
- * fit is centred, so the top and bottom bars match and the GL blit, whose
- * origin is the bottom-left, reads the same numbers).  src_x/src_y are the
- * presented window's origin in desktop coordinates; together with the fitted
- * rect this is the desktop -> panel transform that input maps through. */
+/* Where a src_w x src_h picture lands on the panel: stretched to fill it,
+ * exactly like the display compositor scales a layer's buffer.  The picture
+ * goes to the whole panel (dst_x/dst_y are 0); src_x/src_y are the presented
+ * window's origin in desktop coordinates, and together with the scales this
+ * is the desktop -> panel transform that input maps through. */
 void wine_nx_present_fit( int src_w, int src_h, int src_x, int src_y,
                           int *dst_x, int *dst_y, int *dst_w, int *dst_h )
 {
-    double scale;
-    int w, h, x, y;
+    double scale_x, scale_y;
 
-    screen_fit_rect( src_w, src_h, WINE_NX_FB_W, WINE_NX_FB_H, &x, &y, &w, &h );
-    scale = (double)w / (src_w < 1 ? 1 : src_w);
+    screen_fill_scales( src_w, src_h, WINE_NX_FB_W, WINE_NX_FB_H, &scale_x, &scale_y );
 
     pthread_mutex_lock( &wine_nx_fit_mutex );
-    wine_nx_fit_scale = scale;
-    wine_nx_fit_off_x = x - (double)src_x * scale;
-    wine_nx_fit_off_y = y - (double)src_y * scale;
+    wine_nx_fit_scale_x = scale_x;
+    wine_nx_fit_scale_y = scale_y;
+    wine_nx_fit_off_x = -(double)src_x * scale_x;
+    wine_nx_fit_off_y = -(double)src_y * scale_y;
     wine_nx_fit_ready = 1;
     pthread_mutex_unlock( &wine_nx_fit_mutex );
 
-    if (dst_x) *dst_x = x;
-    if (dst_y) *dst_y = y;
-    if (dst_w) *dst_w = w;
-    if (dst_h) *dst_h = h;
+    if (dst_x) *dst_x = 0;
+    if (dst_y) *dst_y = 0;
+    if (dst_w) *dst_w = WINE_NX_FB_W;
+    if (dst_h) *dst_h = WINE_NX_FB_H;
 }
 
 /* The present's scale, so stick speeds can mean panel pixels per second no
  * matter how large the desktop is. */
 double wine_nx_fit_scale_now( void )
 {
-    double scale;
+    double scale_x, scale_y;
 
     pthread_mutex_lock( &wine_nx_fit_mutex );
-    scale = wine_nx_fit_ready ? wine_nx_fit_scale : 0.0;
+    scale_x = wine_nx_fit_ready ? wine_nx_fit_scale_x : 0.0;
+    scale_y = wine_nx_fit_ready ? wine_nx_fit_scale_y : 0.0;
     pthread_mutex_unlock( &wine_nx_fit_mutex );
-    if (scale <= 0)
+    if (scale_x <= 0 || scale_y <= 0)
     {
-        int fx, fy, fw, fh;
-        screen_fit_rect( wine_nx_desktop_w, wine_nx_desktop_h, WINE_NX_FB_W, WINE_NX_FB_H,
-                         &fx, &fy, &fw, &fh );
-        scale = (double)fw / (wine_nx_desktop_w < 1 ? 1 : wine_nx_desktop_w);
+        screen_fill_scales( wine_nx_desktop_w, wine_nx_desktop_h, WINE_NX_FB_W, WINE_NX_FB_H,
+                            &scale_x, &scale_y );
     }
-    return scale > 0 ? scale : 1.0;
+    return (scale_x + scale_y) / 2.0 > 0 ? (scale_x + scale_y) / 2.0 : 1.0;
 }
 
 /* Where a point of the desktop lands on the panel, and the way back (the way
@@ -669,54 +670,49 @@ double wine_nx_fit_scale_now( void )
  * coordinate the picture at that pixel came from). */
 void wine_nx_screen_to_panel( double x, double y, int *px, int *py )
 {
-    double scale = 1.0, off_x = 0, off_y = 0;
+    double scale_x = 1.0, scale_y = 1.0, off_x = 0, off_y = 0;
 
     pthread_mutex_lock( &wine_nx_fit_mutex );
     if (wine_nx_fit_ready)
     {
-        scale = wine_nx_fit_scale;
+        scale_x = wine_nx_fit_scale_x;
+        scale_y = wine_nx_fit_scale_y;
         off_x = wine_nx_fit_off_x;
         off_y = wine_nx_fit_off_y;
     }
     else
     {
-        /* No present yet: the default fit of the whole desktop. */
-        int fx, fy, fw, fh;
-        screen_fit_rect( wine_nx_desktop_w, wine_nx_desktop_h, WINE_NX_FB_W, WINE_NX_FB_H,
-                         &fx, &fy, &fw, &fh );
-        scale = (double)fw / (wine_nx_desktop_w < 1 ? 1 : wine_nx_desktop_w);
-        off_x = fx;
-        off_y = fy;
+        /* No present yet: the default map of the whole desktop. */
+        screen_fill_scales( wine_nx_desktop_w, wine_nx_desktop_h, WINE_NX_FB_W, WINE_NX_FB_H,
+                            &scale_x, &scale_y );
     }
     pthread_mutex_unlock( &wine_nx_fit_mutex );
-    if (px) *px = (int)(x * scale + off_x + 0.5);
-    if (py) *py = (int)(y * scale + off_y + 0.5);
+    if (px) *px = (int)(x * scale_x + off_x + 0.5);
+    if (py) *py = (int)(y * scale_y + off_y + 0.5);
 }
 
 void wine_nx_panel_to_screen( int px, int py, double *x, double *y )
 {
-    double scale = 1.0, off_x = 0, off_y = 0;
+    double scale_x = 1.0, scale_y = 1.0, off_x = 0, off_y = 0;
 
     pthread_mutex_lock( &wine_nx_fit_mutex );
     if (wine_nx_fit_ready)
     {
-        scale = wine_nx_fit_scale;
+        scale_x = wine_nx_fit_scale_x;
+        scale_y = wine_nx_fit_scale_y;
         off_x = wine_nx_fit_off_x;
         off_y = wine_nx_fit_off_y;
     }
     else
     {
-        int fx, fy, fw, fh;
-        screen_fit_rect( wine_nx_desktop_w, wine_nx_desktop_h, WINE_NX_FB_W, WINE_NX_FB_H,
-                         &fx, &fy, &fw, &fh );
-        scale = (double)fw / (wine_nx_desktop_w < 1 ? 1 : wine_nx_desktop_w);
-        off_x = fx;
-        off_y = fy;
+        screen_fill_scales( wine_nx_desktop_w, wine_nx_desktop_h, WINE_NX_FB_W, WINE_NX_FB_H,
+                            &scale_x, &scale_y );
     }
     pthread_mutex_unlock( &wine_nx_fit_mutex );
-    if (scale <= 0) scale = 1.0;
-    if (x) *x = (px - off_x) / scale;
-    if (y) *y = (py - off_y) / scale;
+    if (scale_x <= 0) scale_x = 1.0;
+    if (scale_y <= 0) scale_y = 1.0;
+    if (x) *x = (px - off_x) / scale_x;
+    if (y) *y = (py - off_y) / scale_y;
 }
 
 /* The drawn cursor, guarded by wine_nx_fb_mutex. */
@@ -873,7 +869,7 @@ int wine_nx_compositor_enabled(void)
  * the compositor gives the screen up, while the surface exists; GDI keeps
  * drawing into window surfaces, shown again once the surface is gone. Returns
  * NULL while another surface has the screen or the framebuffer is being drawn. */
-void *wine_nx_gl_acquire_window(void)
+void *wine_nx_gl_acquire_window( int width, int height )
 {
     int compositor = wine_nx_compositor_enabled();
     NWindow *window = NULL;
@@ -901,8 +897,16 @@ void *wine_nx_gl_acquire_window(void)
     }
     pthread_mutex_unlock( &wine_nx_fb_mutex );
     if (window && compositor) wine_nx_compositor_suspend();
-    if (window) nwindowSetDimensions( window, WINE_NX_FB_W, WINE_NX_FB_H );
+    /* The surface is the window's own size: the program draws 1:1 and the
+     * display compositor scales the buffer onto the panel, like it does for
+     * every other layer.  The panel's own size kept the program's viewport
+     * (its window's size) clipped to a crop of the picture. */
+    if (width < 1) width = WINE_NX_FB_W;
+    if (height < 1) height = WINE_NX_FB_H;
+    if (window) nwindowSetDimensions( window, width, height );
     log_line( "[NXGL] %s", window ? "screen handed to an OpenGL surface" : "screen busy; OpenGL surface refused" );
+    if (window) log_line( "[NXGL] the surface is %dx%d, scaled onto the %dx%d panel", width, height,
+                          WINE_NX_FB_W, WINE_NX_FB_H );
     return window;
 }
 
