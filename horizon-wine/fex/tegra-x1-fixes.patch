@@ -1,15 +1,18 @@
 From: Autorun <noreply@autorun.local>
-Subject: [PATCH] Horizon.h: declare the CRT helpers instead of defining them
+Subject: [PATCH] Fix the FEX-2610 Horizon port's compile errors
 
-The port's fallback Horizon.h defines HorizonWritableAddress and
-HorizonFlushICache inline, while Source/Windows/Common/CRT/HorizonHeap.cpp
-defines the same two functions and includes the header: a redefinition in
-every CRT translation unit. Autorun's horizon.patch keeps Horizon.h to
-declarations and leaves the definitions with the CRT; this restores that
-split. FEX-2610 (berlint-hub/FEX @ arena/799d045b-fex).
+Horizon.h defines HorizonWritableAddress and HorizonFlushICache inline
+while Source/Windows/Common/CRT/HorizonHeap.cpp defines the same two
+functions and includes the header: a redefinition in every CRT
+translation unit. Autorun's horizon.patch keeps Horizon.h to
+declarations and leaves the definitions with the CRT; this restores
+that split. And CPUFeatures.cpp clears HostFeatures.SupportsAVX256,
+which FEX-2610 no longer has (SupportsAVX is the flag, and the port
+already clears it). FEX-2610 (berlint-hub/FEX @ arena/799d045b-fex).
 ---
  FEXCore/include/FEXCore/Utils/Horizon.h | 17 ++++++-----------
- 1 file changed, 5 insertions(+), 11 deletions(-)
+ Source/Windows/Common/CPUFeatures.cpp   | 1 -
+ 2 files changed, 5 insertions(+), 12 deletions(-)
 
 diff --git a/FEXCore/include/FEXCore/Utils/Horizon.h b/FEXCore/include/FEXCore/Utils/Horizon.h
 --- a/FEXCore/include/FEXCore/Utils/Horizon.h
@@ -37,3 +40,14 @@ diff --git a/FEXCore/include/FEXCore/Utils/Horizon.h b/FEXCore/include/FEXCore/U
  
  } // namespace Allocator
  } // namespace FEXCore
+diff --git a/Source/Windows/Common/CPUFeatures.cpp b/Source/Windows/Common/CPUFeatures.cpp
+--- a/Source/Windows/Common/CPUFeatures.cpp
++++ b/Source/Windows/Common/CPUFeatures.cpp
+@@ -90,7 +90,6 @@
+   HostFeatures.SupportsAtomics = false;
+   HostFeatures.SupportsSVE128 = false;
+   HostFeatures.SupportsSVE256 = false;
+-  HostFeatures.SupportsAVX256 = false;
+   HostFeatures.SupportsRPRES = false;
+   HostFeatures.SupportsAFP = false;
+ 

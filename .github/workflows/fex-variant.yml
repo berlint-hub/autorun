@@ -15,6 +15,7 @@ on:
     branches: [ "arena/**" ]
     paths:
       - "horizon-wine/fex/dlls-fex-variants.patch"
+      - "horizon-wine/fex/tegra-x1-fixes.patch"
       - ".github/workflows/fex-variant.yml"
 
 permissions:
