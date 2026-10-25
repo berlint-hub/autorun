@@ -118,12 +118,12 @@ static void layout( int screen_w, int screen_h, struct geometry *g )
     float s = screen_h / 720.0f;
 
     if (screen_w * 720 < screen_h * 1280) s = screen_w / 1280.0f;
-    g->pad = (int)floorf( 16 * s ); if (g->pad < 8) g->pad = 8;
-    g->hint = (int)floorf( 44 * s );
-    g->header = (int)floorf( 52 * s );
-    g->row_h = (int)floorf( 56 * s );
+    g->pad = (int)floorf( 12 * s ); if (g->pad < 8) g->pad = 8;
+    g->hint = (int)floorf( 36 * s );
+    g->header = (int)floorf( 44 * s );
+    g->row_h = (int)floorf( 46 * s );
     g->gap = (int)floorf( 6 * s ); if (g->gap < 2) g->gap = 2;
-    g->width = (int)floorf( 1120 * s );
+    g->width = (int)floorf( 940 * s );
     g->height = g->header + LIST_ROWS * g->row_h + (LIST_ROWS - 1) * g->gap + g->hint + 2 * g->pad;
     g->x = (screen_w - g->width) / 2;
     g->y = (screen_h - g->height) / 2;
@@ -651,7 +651,7 @@ static void draw_row( const struct geometry *g, int row, int source, int active 
     int x = g->x + g->pad;
     int w = g->width - 2 * g->pad;
     char label[192];
-    int size = (int)(g->row_h * 0.36f);
+    int size = (int)(g->row_h * 0.42f);
 
     fill_rounded( x, y, w, g->row_h, 12, active ? CARD : PANEL );
     if (active) fill_rounded( x, y, 6, g->row_h, 3, SELECTED );
@@ -771,7 +771,7 @@ static void draw( int screen_w, int screen_h )
     for (y = 1; y < picture_h - 1; y++)
         for (x = 1; x < picture_w - 1; x++) picture[y * picture_w + x] = PANEL;
 
-    size = (int)(g.row_h * 0.38f);
+    size = (int)(g.row_h * 0.44f);
     small = size * 3 / 4;
     if (mode == MODE_LIST)
     {
