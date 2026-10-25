@@ -2728,7 +2728,11 @@ static VkResult init_blit_images( struct vulkan_device *device, struct swapchain
         viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
         viewInfo.image = hack->swapchain_image;
         viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+#ifdef __SWITCH__
+        viewInfo.format = swapchain->nx_format;
+#else
         viewInfo.format = VK_FORMAT_B8G8R8A8_UNORM;
+#endif
         viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
         viewInfo.subresourceRange.baseMipLevel = 0;
         viewInfo.subresourceRange.levelCount = 1;
@@ -3040,6 +3044,31 @@ static BOOL nx_scaled_host_extent( const VkSurfaceCapabilitiesKHR *capabilities,
     *host_extent = *screen;
     return TRUE;
 }
+
+/* The host swapchain format for the scaled path: B8G8R8A8, the one the blit's
+ * views are built for, when the surface has it; the program's own otherwise;
+ * the first one the surface offers as a last resort. */
+static VkFormat nx_host_swapchain_format( const struct vulkan_instance *instance,
+                                          const struct vulkan_physical_device *physical_device,
+                                          VkSurfaceKHR host_surface, VkFormat client_format )
+{
+    VkSurfaceFormatKHR formats[16];
+    uint32_t count = sizeof(formats) / sizeof(formats[0]), i;
+
+    if (instance->p_vkGetPhysicalDeviceSurfaceFormatsKHR( physical_device->host.physical_device,
+                                                          host_surface, &count, formats ) || !count)
+        return client_format;
+    for (i = 0; i < count; i++)
+        if (formats[i].format == VK_FORMAT_B8G8R8A8_UNORM) return formats[i].format;
+    for (i = 0; i < count; i++)
+        if (formats[i].format == client_format) return formats[i].format;
+    return formats[0].format;
+}
+#endif
+
+#ifndef __SWITCH__
+/* [NXVK] lines belong to the Switch build's runtime log. */
+static void nx_vk_trace( const char *format, ... ) { (void)format; }
 #endif
 
 static BOOL swapchain_fshack_changed( struct swapchain *swapchain, struct surface *surface )
@@ -3108,13 +3137,20 @@ static VkResult win32u_vkCreateSwapchainKHR( VkDevice client_device, const VkSwa
     {
         swapchain->fshack_dpi = 1;
         create_info_host.imageExtent = swapchain->host_extents;
-        create_info_host.imageFormat = VK_FORMAT_B8G8R8A8_UNORM;
-        /* Transfer source for the [NXVK] read-back of the scaled frame. */
-        create_info_host.imageUsage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
-        nx_vk_trace( "[NXVK] swapchain %ux%u format %d scaled into %ux%u screen buffers (%s)",
+        create_info_host.imageFormat = nx_host_swapchain_format( instance, physical_device,
+                                                                 surface->obj.host.surface,
+                                                                 VK_FORMAT_B8G8R8A8_UNORM );
+        /* Storage for the blit that scales the program's frames into the
+         * screen buffers, transfer source for their read-back, and color
+         * attachment because some swapchains (NVK's) refuse to be made
+         * without it, even though nothing colors into them here. */
+        create_info_host.imageUsage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+                                      VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+        nx_vk_trace( "[NXVK] swapchain %ux%u format %d scaled into %ux%u screen buffers (%s; host format %d, usage %#x)",
                      create_info->imageExtent.width, create_info->imageExtent.height, create_info->imageFormat,
                      swapchain->host_extents.width, swapchain->host_extents.height,
-                     create_info->presentMode == VK_PRESENT_MODE_IMMEDIATE_KHR ? "immediate" : "fifo" );
+                     create_info->presentMode == VK_PRESENT_MODE_IMMEDIATE_KHR ? "immediate" : "fifo",
+                     create_info_host.imageFormat, create_info_host.imageUsage );
     }
     else
 #endif
@@ -3188,8 +3224,24 @@ static VkResult win32u_vkCreateSwapchainKHR( VkDevice client_device, const VkSwa
 #endif
     if ((res = device->p_vkCreateSwapchainKHR( device->host.device, &create_info_host, NULL, &host_swapchain )))
     {
-        free( swapchain );
-        return res;
+        nx_vk_trace( "[NXVK] swapchain create failed: res %d, %ux%u format %d usage %#x mode %d images %u (usage caps %#x)",
+                     res, create_info_host.imageExtent.width, create_info_host.imageExtent.height,
+                     create_info_host.imageFormat, create_info_host.imageUsage, create_info_host.presentMode,
+                     create_info_host.minImageCount, capabilities.supportedUsageFlags );
+        if (swapchain->fshack_dpi && create_info_host.imageFormat != create_info->imageFormat)
+        {
+            /* The surface prefers the program's format over B8G8R8A8: the blit
+             * goes by swapchain->nx_format, so it can follow. */
+            create_info_host.imageFormat = swapchain->nx_format = create_info->imageFormat;
+            res = device->p_vkCreateSwapchainKHR( device->host.device, &create_info_host, NULL, &host_swapchain );
+        }
+        if (res)
+        {
+            nx_vk_trace( "[NXVK] giving up on the swapchain: res %d", res );
+            free( swapchain );
+            return res;
+        }
+        nx_vk_trace( "[NXVK] the program's own format was accepted" );
     }
 
     vulkan_object_init( &swapchain->obj.obj, host_swapchain );
@@ -3207,6 +3259,7 @@ static VkResult win32u_vkCreateSwapchainKHR( VkDevice client_device, const VkSwa
         if ((res = init_fs_hack_images( device, swapchain, create_info )))
         {
             ERR( "creating fs hack images failed: %d\n", res );
+            nx_vk_trace( "[NXVK] the scaled frames' images failed: res %d", res );
             device->p_vkDestroySwapchainKHR( device->host.device, swapchain->obj.host.swapchain, NULL );
             free( swapchain );
             return res;
@@ -3215,6 +3268,7 @@ static VkResult win32u_vkCreateSwapchainKHR( VkDevice client_device, const VkSwa
         if ((res = init_blit_images( device, swapchain )))
         {
             ERR( "creating blit images failed: %d\n", res );
+            nx_vk_trace( "[NXVK] the scaling blit's images failed: res %d", res );
             device->p_vkDestroySwapchainKHR( device->host.device, swapchain->obj.host.swapchain, NULL );
             free( swapchain );
             return res;
