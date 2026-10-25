@@ -74,7 +74,7 @@ jobs:
           export AUTORUN="$PWD"
           export WINE_NX_FEX_REMOTE=https://github.com/berlint-hub/FEX.git
           export WINE_NX_FEX_REVISION=b8674872b42550ec95faf48f860b23246dd34716
-          export WINE_NX_FEX_PATCH=
+          export WINE_NX_FEX_PATCH=tegra-x1-fixes.patch
           export WINE_NX_FEX_TUNE_TEGRA_X1=ON
           export WINE_NX_FEX_SUFFIX=-opt
           export WINE_NX_FEX_VERSION=FEX-2610

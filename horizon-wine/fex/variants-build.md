@@ -8,7 +8,8 @@ compared on the Switch without rebuilding or reinstalling:
   exactly as the release pipeline has always built them;
 - **opt** — `libwow64fex-opt.dll` and `libarm64ecfex-opt.dll`, from
   `berlint-hub/FEX@b8674872` (FEX-2610 with the Horizon patch already in its
-  tree), built with the Tegra X1 (Cortex-A57) tuning.
+  tree), built with the Tegra X1 (Cortex-A57) tuning and
+  `tegra-x1-fixes.patch`, the port's compile fixes.
 
 Both share Autorun's ABI headers in `horizon-wine/fex/` and are validated the
 same way; only the CPU back end and the version resources differ.
@@ -21,7 +22,9 @@ The changes live in the `autorun-horizon-dlls` tools and are kept here as
 
 - `tools/build-fex.sh` takes `WINE_NX_FEX_REMOTE`, `_REVISION`, `_PATCH`
   (empty for none), `_TUNE_TEGRA_X1`, `_VERSION` and `_SUFFIX`, and gives the
-  modules and their payload directory the suffix when one is set;
+  modules and their payload directory the suffix when one is set — the recipe
+  names `tegra-x1-fixes.patch` as `_PATCH`, and `FEX_TUNE_TEGRA_X1=ON`, the
+  tuning option berlint-hub/FEX defines, as the CPU tuning;
 - `tools/fex_payload.py` takes `--suffix`, `--version`, `--revision` and
   `--patch`, so a variant's manifest honestly records its own source;
 - `tools/build-dlls.py` builds the variant as the `fex-opt` entry, from the
@@ -32,6 +35,11 @@ To land it: apply the patch on top of the `horizon-dlls` submodule pin
 push, and update the pin here; or open it as a pull request against
 `autorunhq/autorun-horizon-dlls`. `build.sh --dlls` then produces both module
 pairs in `switch/wine/drive_c/windows/system32/`.
+
+Until then the `FEX variant` workflow (`.github/workflows/fex-variant.yml`)
+builds the variant on its own and uploads the SD overlay as its artifact:
+unpack `switch/` over the SD card and the variant is live, `fex-variant.txt`
+and all.
 
 ## A/B on the Switch
 

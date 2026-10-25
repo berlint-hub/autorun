@@ -1,4 +1,4 @@
-From 3bf3cb73fb5a872d0571afbf6a1c7e37030f9dde Mon Sep 17 00:00:00 2001
+From 6f53e4d510b896012cd5d20fae84e04dce2ceafa Mon Sep 17 00:00:00 2001
 From: danfromtico <tiicu@proton.me>
 Date: Sun, 25 Oct 2026 21:36:23 +0000
 Subject: [PATCH] fex: build a tuned Tegra X1 variant beside the pinned release
@@ -20,7 +20,7 @@ hardware.
  3 files changed, 112 insertions(+), 25 deletions(-)
 
 diff --git a/tools/build-dlls.py b/tools/build-dlls.py
-index ae3a322..95d0dd5 100755
+index ae3a322..40f3760 100755
 --- a/tools/build-dlls.py
 +++ b/tools/build-dlls.py
 @@ -110,8 +110,8 @@ CATEGORIES = [
@@ -45,7 +45,7 @@ index ae3a322..95d0dd5 100755
 +FEX_VARIANT = {
 +    'WINE_NX_FEX_REMOTE': 'https://github.com/berlint-hub/FEX.git',
 +    'WINE_NX_FEX_REVISION': 'b8674872b42550ec95faf48f860b23246dd34716',
-+    'WINE_NX_FEX_PATCH': '',                 # the Horizon patch is in the tree
++    'WINE_NX_FEX_PATCH': 'tegra-x1-fixes.patch',  # the Horizon patch is in the tree; the port's fixes are not
 +    'WINE_NX_FEX_TUNE_TEGRA_X1': 'ON',
 +    'WINE_NX_FEX_SUFFIX': '-opt',
 +    'WINE_NX_FEX_VERSION': 'FEX-2610',
