@@ -50,6 +50,7 @@
 #include "setup_boot.h"
 #include "launcher_graphics.h"
 #include "launcher_dxvk.h"
+#include "launcher_voodoo.h"
 #include "launcher_game_settings.h"
 #include "autorun_install.h"
 #include "steamgriddb.h"
@@ -1758,6 +1759,7 @@ enum program_row
 {
     ROW_START, ROW_FAVORITE, ROW_ARTWORK, ROW_FORWARDER, ROW_LOCATE, ROW_TITLE, ROW_ARGS, ROW_VERBOSE, ROW_PROFILE,
     ROW_WINDOWS, ROW_ASPECT, ROW_RESOLUTION, ROW_D3D9, ROW_VKD3D_VERSION, ROW_DXVK_VERSION, ROW_DXVK_OPTIONS, ROW_DXVK_HUD, ROW_FRAME_LIMIT, ROW_VSYNC,
+    ROW_VOODOO,
     ROW_LSFG, ROW_LSFG_DLL, ROW_LSFG_PERFORMANCE, ROW_LSFG_FLOW,
     ROW_UPSCALING, ROW_UPSCALING_SHARPNESS,
     ROW_INPUT, ROW_INPUT_END = ROW_INPUT + INPUT_ROW_COUNT - 1, ROW_BOX64, ROW_FEX, ROW_SYNC, ROW_CPU, ROW_FOUR_CORES, ROW_LAZY_FILE_VIEWS,
@@ -2533,6 +2535,11 @@ static int program_menu_run( struct launcher *l, struct program *p, char *target
         row->choices = LAUNCHER_RESOLUTION_COUNT;
         snprintf( row->value, sizeof(row->value), "%s", launcher_resolution_labels[p->settings.resolution] );
 
+        ADD_ROW( ROW_VOODOO, SECTION_GRAPHICS, "Voodoo (dgVoodoo)",
+                 "Settings for the dgVoodoo2 wrapper, whose DLLs are copied into the game folder by hand. "
+                 "On writes dgVoodoo.conf beside the program before every start; Off leaves the folder alone." );
+        snprintf( row->value, sizeof(row->value), "%s", p->settings.voodoo ? "On" : "Off" );
+
         if (l->options->vulkan && (x86 || x64))
         {
             ADD_ROW( ROW_D3D9, SECTION_GRAPHICS, "Direct3D renderer",
@@ -2843,6 +2850,12 @@ static int program_menu_run( struct launcher *l, struct program *p, char *target
             save_program_settings( l, p );
             break;
         }
+
+        case ROW_VOODOO:
+            if (action != UI_ACTION_CHOOSE) break;
+            launcher_voodoo_options( ui, l->options->runtime_dir, p->path, p->title );
+            load_program_settings( l, p );
+            break;
 
         case ROW_VERBOSE:
         case ROW_PROFILE:

@@ -80,7 +80,7 @@ clang -std=gnu11 -Wall -Wextra -Werror -O1 -g -fsanitize=address,undefined -fno-
     "$horizon_wine/tests/launcher_host.c" "$horizon_wine/source/launcher.c" "$horizon_wine/source/launcher_catalog.c" "$horizon_wine/source/launcher_ui.c" "$horizon_wine/source/launcher_audio.c" \
     "$horizon_wine/source/game_settings.c" "$horizon_wine/source/launcher_game_settings.c" \
     "$horizon_wine/source/input_profile.c" "$horizon_wine/source/launcher_input.c" \
-    "$horizon_wine/source/launcher_graphics.c" "$horizon_wine/source/launcher_dxvk.c" "$horizon_wine/source/dxvk_options.c" \
+    "$horizon_wine/source/launcher_graphics.c" "$horizon_wine/source/launcher_dxvk.c" "$horizon_wine/source/launcher_voodoo.c" "$horizon_wine/source/dxvk_options.c" \
     "$horizon_wine/source/launcher_forwarder.c" "$horizon_wine/source/launcher_image.c" \
     "$horizon_wine/source/launcher_setup.c" "$horizon_wine/source/setup_boot.c" \
     "$horizon_wine/source/steamgriddb.c" "$horizon_wine/source/launcher_artwork.c" \

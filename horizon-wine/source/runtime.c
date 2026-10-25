@@ -4845,6 +4845,31 @@ int main( int argc, char **argv )
             if (settings.resolution)
                 wine_nx_desktop_start_size( launcher_resolution_sizes[settings.resolution][0],
                                             launcher_resolution_sizes[settings.resolution][1] );
+            /* The dgVoodoo2 wrapper reads dgVoodoo.conf from beside its own
+             * DLLs, that is, the program's folder. The Voodoo settings write
+             * it here before every start; Off leaves the folder alone, so a
+             * conf of the user's own survives. */
+            if (settings.voodoo)
+            {
+                struct launcher_kv conf;
+                char voodoo_conf[520], *slash;
+
+                if ((conf.size = launcher_voodoo_config( &settings, conf.text, sizeof(conf.text) )))
+                {
+                    snprintf( voodoo_conf, sizeof(voodoo_conf), "%s", target );
+                    if ((slash = strrchr( voodoo_conf, '/' )) &&
+                        (size_t)(slash + 1 - voodoo_conf) + sizeof("dgVoodoo.conf") <= sizeof(voodoo_conf))
+                    {
+                        strcpy( slash + 1, "dgVoodoo.conf" );
+                        if (launcher_kv_save( &conf, voodoo_conf ))
+                            log_line( "[VOODOO] %s written, scaling %s, API %s", voodoo_conf,
+                                      launcher_voodoo_scaling_values[settings.voodoo_scaling],
+                                      launcher_voodoo_api_values[settings.voodoo_api] );
+                        else
+                            log_line( "[VOODOO] %s could not be written", voodoo_conf );
+                    }
+                }
+            }
             log_line( "[SETTINGS] %s: verbose %s, profiler %s, windows %s, Direct3D %s", settings_path,
                       settings.verbose < 0 ? "global" : settings.verbose ? "on" : "off",
                       settings.profile < 0 ? "global" : settings.profile ? "on" : "off",

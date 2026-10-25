@@ -116,6 +116,29 @@ static void test_settings( const char *dir )
     launcher_settings_read( &kv, &settings );
     assert( !settings.resolution );
 
+    load_text( &kv, "voodoo=1\nvoodoo-api=d3d11_fl10_1\nvoodoo-scaling=stretched\n"
+                    "voodoo-resolution=1024x768\nvoodoo-msaa=4x\n" );
+    launcher_settings_read( &kv, &settings );
+    assert( settings.voodoo && settings.voodoo_api == 2 && settings.voodoo_scaling == 1 &&
+            settings.voodoo_resolution == 3 && settings.voodoo_msaa == 3 );
+    assert( launcher_settings_write( &kv, &settings ) );
+    launcher_settings_read( &kv, &back );
+    assert( back.voodoo && back.voodoo_api == 2 && back.voodoo_scaling == 1 &&
+            back.voodoo_resolution == 3 && back.voodoo_msaa == 3 );
+    settings.voodoo = 0;
+    assert( launcher_settings_write( &kv, &settings ) && !strstr( kv.text, "voodoo=" ) );
+    settings.voodoo = 1;
+    assert( launcher_voodoo_config( &settings, config, sizeof(config) ) );
+    assert( strstr( config, "Version = 0x280\n" ) && strstr( config, "[General]\n" ) &&
+            strstr( config, "OutputAPI = d3d11_fl10_1\n" ) && strstr( config, "ScalingMode = stretched\n" ) &&
+            strstr( config, "[DirectX]\n" ) && strstr( config, "Resolution = 1024x768\n" ) &&
+            strstr( config, "Antialiasing = 4x\n" ) && strstr( config, "VRAM = 1024\n" ) &&
+            strstr( config, "dgVoodooWatermark = false\n" ) );
+    settings.voodoo_api = LAUNCHER_VOODOO_API_COUNT;
+    assert( !launcher_voodoo_config( &settings, config, sizeof(config) ) );
+    settings.voodoo_api = 0;
+    assert( launcher_settings_write( &kv, &settings ) && strstr( kv.text, "voodoo=1\n" ) );
+
     assert( launcher_settings_path( "sdmc:/switch/wine/drive_c/nfsu2/SPEED2.EXE", path, sizeof(path) ) );
     assert( !strcmp( path, "sdmc:/switch/wine/drive_c/nfsu2/SPEED2.wine-nx.txt" ) );
     assert( !launcher_settings_path( "sdmc:/readme.txt", path, sizeof(path) ) );

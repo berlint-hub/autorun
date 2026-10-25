@@ -198,6 +198,11 @@ struct launcher_settings
     int frame_limit;
     int vsync;
     int resolution;  /* the screen a program starts with: index into launcher_resolution_labels */
+    int voodoo;      /* 1: write dgVoodoo.conf beside the program from the voodoo settings below */
+    int voodoo_api;        /* dgVoodoo OutputAPI: index into launcher_voodoo_api_values */
+    int voodoo_scaling;    /* dgVoodoo ScalingMode */
+    int voodoo_resolution; /* dgVoodoo Resolution */
+    int voodoo_msaa;       /* dgVoodoo Antialiasing */
     int lsfg_enabled;
     int lsfg_performance;
     int lsfg_flow;
@@ -214,7 +219,11 @@ enum {
     LAUNCHER_HUD_COUNT = 4,
     LAUNCHER_UPSCALING_COUNT = 3,
     LAUNCHER_SHARPNESS_COUNT = 6,
-    LAUNCHER_RESOLUTION_COUNT = 5
+    LAUNCHER_RESOLUTION_COUNT = 5,
+    LAUNCHER_VOODOO_API_COUNT = 6,
+    LAUNCHER_VOODOO_SCALING_COUNT = 5,
+    LAUNCHER_VOODOO_RESOLUTION_COUNT = 6,
+    LAUNCHER_VOODOO_MSAA_COUNT = 5
 };
 static const int launcher_frame_limits[] = { 0, 30, 40, 45, 60, 75, 90, 120 };
 static const char *const launcher_frame_limit_labels[] =
@@ -233,6 +242,57 @@ static const char *const launcher_resolution_labels[] =
     { "1280x720", "1920x1080", "1024x768", "800x600", "640x480" };
 static const int launcher_resolution_sizes[][2] =
     { { 1280, 720 }, { 1920, 1080 }, { 1024, 768 }, { 800, 600 }, { 640, 480 } };
+/* dgVoodoo2 wrapper settings. The values are dgVoodoo.conf entries; when the
+ * Voodoo switch of the program is on, the runtime writes the file beside the
+ * program before every start. */
+static const char *const launcher_voodoo_api_labels[] =
+    { "Best available", "D3D11 FL 10.0", "D3D11 FL 10.1", "D3D11 FL 11.0", "D3D12 FL 11.0", "D3D12 FL 12.0" };
+static const char *const launcher_voodoo_api_values[] =
+    { "bestavailable", "d3d11_fl10_0", "d3d11_fl10_1", "d3d11_fl11_0", "d3d12_fl11_0", "d3d12_fl12_0" };
+static const char *const launcher_voodoo_scaling_labels[] =
+    { "Stretched keep AR", "Stretched", "Centered", "Centered keep AR", "4:3 stretched" };
+static const char *const launcher_voodoo_scaling_values[] =
+    { "stretched_ar", "stretched", "centered", "centered_ar", "stretched_4_3" };
+static const char *const launcher_voodoo_resolution_labels[] =
+    { "Unforced", "Max", "1280x720", "1024x768", "800x600", "640x480" };
+static const char *const launcher_voodoo_resolution_values[] =
+    { "unforced", "max", "1280x720", "1024x768", "800x600", "640x480" };
+static const char *const launcher_voodoo_msaa_labels[] =
+    { "Off", "App driven", "2x", "4x", "8x" };
+static const char *const launcher_voodoo_msaa_values[] =
+    { "off", "appdriven", "2x", "4x", "8x" };
+
+/* The dgVoodoo.conf written beside the program: the 2.80 format the wrapper
+ * migrates forward, only the keys the menu drives plus the two every guide
+ * agrees on (VRAM, no watermark). Keys left out stay at the wrapper's own
+ * defaults. The file is written before every start, so hand edits to it do
+ * not survive. */
+static inline int launcher_voodoo_config( const struct launcher_settings *settings, char *out, size_t size )
+{
+    int length;
+
+    if (settings->voodoo_api < 0 || settings->voodoo_api >= LAUNCHER_VOODOO_API_COUNT ||
+        settings->voodoo_scaling < 0 || settings->voodoo_scaling >= LAUNCHER_VOODOO_SCALING_COUNT ||
+        settings->voodoo_resolution < 0 || settings->voodoo_resolution >= LAUNCHER_VOODOO_RESOLUTION_COUNT ||
+        settings->voodoo_msaa < 0 || settings->voodoo_msaa >= LAUNCHER_VOODOO_MSAA_COUNT) return 0;
+    length = snprintf( out, size,
+                       "Version = 0x280\n"
+                       "\n"
+                       "[General]\n"
+                       "OutputAPI = %s\n"
+                       "ScalingMode = %s\n"
+                       "\n"
+                       "[DirectX]\n"
+                       "Resolution = %s\n"
+                       "Antialiasing = %s\n"
+                       "VRAM = 1024\n"
+                       "dgVoodooWatermark = false\n",
+                       launcher_voodoo_api_values[settings->voodoo_api],
+                       launcher_voodoo_scaling_values[settings->voodoo_scaling],
+                       launcher_voodoo_resolution_values[settings->voodoo_resolution],
+                       launcher_voodoo_msaa_values[settings->voodoo_msaa] );
+    return (length < 0 || (size_t)length >= size) ? 0 : length;
+}
 
 static inline int launcher_dxvk_config( const struct launcher_settings *settings, char *out, size_t size )
 {
@@ -459,6 +519,23 @@ static inline void launcher_settings_read( const struct launcher_kv *kv, struct 
     if (launcher_kv_get( kv, "resolution", value, sizeof(value) ))
         for (int i = 1; i < LAUNCHER_RESOLUTION_COUNT; i++)
             if (!strcasecmp( value, launcher_resolution_labels[i] )) settings->resolution = i;
+    settings->voodoo = launcher_setting_state( kv, "voodoo" ) == 1;
+    settings->voodoo_api = 0;
+    if (launcher_kv_get( kv, "voodoo-api", value, sizeof(value) ))
+        for (int i = 0; i < LAUNCHER_VOODOO_API_COUNT; i++)
+            if (!strcasecmp( value, launcher_voodoo_api_values[i] )) settings->voodoo_api = i;
+    settings->voodoo_scaling = 0;
+    if (launcher_kv_get( kv, "voodoo-scaling", value, sizeof(value) ))
+        for (int i = 0; i < LAUNCHER_VOODOO_SCALING_COUNT; i++)
+            if (!strcasecmp( value, launcher_voodoo_scaling_values[i] )) settings->voodoo_scaling = i;
+    settings->voodoo_resolution = 0;
+    if (launcher_kv_get( kv, "voodoo-resolution", value, sizeof(value) ))
+        for (int i = 0; i < LAUNCHER_VOODOO_RESOLUTION_COUNT; i++)
+            if (!strcasecmp( value, launcher_voodoo_resolution_values[i] )) settings->voodoo_resolution = i;
+    settings->voodoo_msaa = 0;
+    if (launcher_kv_get( kv, "voodoo-msaa", value, sizeof(value) ))
+        for (int i = 0; i < LAUNCHER_VOODOO_MSAA_COUNT; i++)
+            if (!strcasecmp( value, launcher_voodoo_msaa_values[i] )) settings->voodoo_msaa = i;
     settings->lsfg_enabled = launcher_setting_state( kv, "lsfg" ) == 1;
     settings->lsfg_performance = launcher_setting_state( kv, "lsfg-performance" ) != 0;
     settings->lsfg_flow = 1;
@@ -493,6 +570,10 @@ static inline int launcher_settings_write( struct launcher_kv *kv, const struct 
         settings->dxvk_source < 0 || settings->dxvk_source >= DXVK_SOURCE_COUNT ||
         settings->frame_limit < 0 || settings->frame_limit >= LAUNCHER_FRAME_LIMIT_COUNT ||
         settings->resolution < 0 || settings->resolution >= LAUNCHER_RESOLUTION_COUNT ||
+        settings->voodoo_api < 0 || settings->voodoo_api >= LAUNCHER_VOODOO_API_COUNT ||
+        settings->voodoo_scaling < 0 || settings->voodoo_scaling >= LAUNCHER_VOODOO_SCALING_COUNT ||
+        settings->voodoo_resolution < 0 || settings->voodoo_resolution >= LAUNCHER_VOODOO_RESOLUTION_COUNT ||
+        settings->voodoo_msaa < 0 || settings->voodoo_msaa >= LAUNCHER_VOODOO_MSAA_COUNT ||
         settings->lsfg_flow < 0 || settings->lsfg_flow >= 3 ||
         settings->upscaling < 0 || settings->upscaling >= LAUNCHER_UPSCALING_COUNT ||
         settings->upscaling_sharpness < 0 || settings->upscaling_sharpness >= LAUNCHER_SHARPNESS_COUNT) return 0;
@@ -527,7 +608,16 @@ static inline int launcher_settings_write( struct launcher_kv *kv, const struct 
            launcher_kv_set( kv, "upscaling", settings->upscaling ?
                             launcher_upscaling_values[settings->upscaling] : NULL ) &&
            launcher_kv_set( kv, "upscaling-sharpness", settings->upscaling == 1 && settings->upscaling_sharpness != 2 ?
-                            launcher_sharpness_labels[settings->upscaling_sharpness] : NULL );
+                            launcher_sharpness_labels[settings->upscaling_sharpness] : NULL ) &&
+           launcher_kv_set( kv, "voodoo", settings->voodoo ? "1" : NULL ) &&
+           launcher_kv_set( kv, "voodoo-api", settings->voodoo_api ?
+                            launcher_voodoo_api_values[settings->voodoo_api] : NULL ) &&
+           launcher_kv_set( kv, "voodoo-scaling", settings->voodoo_scaling ?
+                            launcher_voodoo_scaling_values[settings->voodoo_scaling] : NULL ) &&
+           launcher_kv_set( kv, "voodoo-resolution", settings->voodoo_resolution ?
+                            launcher_voodoo_resolution_values[settings->voodoo_resolution] : NULL ) &&
+           launcher_kv_set( kv, "voodoo-msaa", settings->voodoo_msaa ?
+                            launcher_voodoo_msaa_values[settings->voodoo_msaa] : NULL );
 }
 
 #endif
