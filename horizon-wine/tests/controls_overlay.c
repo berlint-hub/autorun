@@ -201,7 +201,7 @@ int main( int argc, char **argv )
 
     /* A tap opens the row under the finger: the second row, on a 1280x720
      * screen with the list in the middle. */
-    wine_nx_controls_overlay_input( 0, 0, 0, 0, 0, 1, 640, 209, now );
+    wine_nx_controls_overlay_input( 0, 0, 0, 0, 0, 1, 640, 234, now );
     now += 16 * MS;
     wine_nx_controls_overlay_input( 0, 0, 0, 0, 0, 0, 0, 0, now );
     now += 16 * MS;
