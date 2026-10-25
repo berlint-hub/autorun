@@ -40,6 +40,7 @@ extern void wine_nx_gl_release_window( void );
 extern int wine_nx_vulkan_owns_screen( void ) __attribute__((weak));
 extern void wine_nx_present_fit( int src_w, int src_h, int src_x, int src_y,
                                  int *dst_x, int *dst_y, int *dst_w, int *dst_h ) __attribute__((weak));
+extern void wine_nx_desktop_size( int *width, int *height ) __attribute__((weak));
 extern void wine_nx_runtime_trace( const char *msg ) __attribute__((weak));
 extern int wine_nx_screenshot_requested( void ) __attribute__((weak));
 extern int wine_nx_screenshot_take( const void *pixels, int width, int height, int stride_px, int format ) __attribute__((weak));
@@ -66,6 +67,23 @@ static void nx_client_surface_destroy( struct client_surface *client )
 {
 }
 
+/* The size of the picture the program draws: the window's own, except a window
+ * that covers the whole screen takes the screen's size.  An exclusive game
+ * draws its display mode's picture 1:1 at the origin whatever its window is
+ * left at, and a window larger than the mode it set would hold that picture in
+ * its corner while the crop shows the empty middle of the buffer. */
+static SIZE nx_picture_size( struct client_surface *client, const RECT *rect )
+{
+    SIZE size = { max( 1, rect->right - rect->left ), max( 1, rect->bottom - rect->top ) };
+    int width = 0, height = 0;
+
+    if (&wine_nx_desktop_size) wine_nx_desktop_size( &width, &height );
+    if (width > 0 && height > 0 && rect->left <= 0 && rect->top <= 0 &&
+        size.cx >= width && size.cy >= height)
+        size = (SIZE){ width, height };
+    return size;
+}
+
 static void nx_client_surface_update( struct client_surface *client )
 {
     struct nx_client_surface *surface = CONTAINING_RECORD( client, struct nx_client_surface, base );
@@ -74,7 +92,7 @@ static void nx_client_surface_update( struct client_surface *client )
     BOOL offscreen, changed;
 
     if (!client->format) return; /* Vulkan clients have no WGL pixel format. */
-    size = (SIZE){ max( 1, rect->right - rect->left ), max( 1, rect->bottom - rect->top ) };
+    size = nx_picture_size( client, rect );
     offscreen = !(get_window_long( client->hwnd, GWL_STYLE ) & WS_VISIBLE);
     if (!offscreen && client->hwnd != client->toplevel) offscreen = !is_window_visible( client->hwnd );
     changed = InterlockedExchange( &client->offscreen, offscreen ) != offscreen;
@@ -129,6 +147,10 @@ BOOL wine_nx_gl_drawable_matches_window( struct opengl_drawable *base )
 
     if (base->funcs != &nx_drawable_funcs) return TRUE;
     if (!base->client || base->client->funcs != &nx_client_surface_funcs) return TRUE;
+    /* Measure the window now: a display mode of the program's own changes the
+     * picture's size without the window moving, and nothing else would raise
+     * the generation the drawable is kept or remade by. */
+    client_surface_update( base->client );
     client = CONTAINING_RECORD( base->client, struct nx_client_surface, base );
     return impl_from_opengl_drawable( base )->generation ==
            InterlockedCompareExchange( &client->generation, 0, 0 );
@@ -476,7 +498,7 @@ static BOOL nx_surface_create( struct client_surface *client, int format, struct
     pthread_mutex_unlock( &nx_screen_mutex );
 
     {
-        SIZE size = gl->base.virtual_size;
+        SIZE size = nx_picture_size( client, client->raw ? &client->monitor_rect : &client->virtual_rect );
 
         if (!(window = wine_nx_gl_acquire_window( size.cx, size.cy )))
         {
