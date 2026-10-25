@@ -129,7 +129,7 @@ int main( int argc, char **argv )
     assert( wine_nx_controls_overlay_visible() );
     assert( wine_nx_controls_overlay_selected() == 0 );
     assert( wine_nx_controls_overlay_frame( 1280, 720, &frame ) );
-    assert( frame.width == 940 && frame.height == 514 && frame.x == 170 && frame.y == 103 );
+    assert( frame.width == 800 && frame.height == 445 && frame.x == 240 && frame.y == 137 );
     assert( frame.generation & 0x80000000u );  /* the keyboard's never are */
     assert( wine_nx_controls_overlay_frame( 1280, 720, &again ) && again.generation == frame.generation );
     {
