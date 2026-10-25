@@ -47,8 +47,9 @@ void launcher_voodoo_options( struct ui *ui, const char *runtime_dir, const char
                   settings.voodoo ? "On" : "Off" );
         rows[VOODOO_ENABLED].help = "On writes dgVoodoo.conf before every start, from the settings below, and "
                                     "uses the dgVoodoo2 wrappers dropped at C:\\dgVoodoo (its MS\\x86 for 32-bit "
-                                    "games); DLLs beside the program still win. Off leaves everything alone: a "
-                                    "conf of your own survives.";
+                                    "games); DLLs beside the program still win, and a DirectDraw of your own in the "
+                                    "system folders (D7VK and such) is set aside while this is on. Off brings it "
+                                    "back and leaves everything alone: a conf of your own survives.";
 
         rows[VOODOO_API].kind = UI_ROW_DROPDOWN;
         rows[VOODOO_API].choices = LAUNCHER_VOODOO_API_COUNT;

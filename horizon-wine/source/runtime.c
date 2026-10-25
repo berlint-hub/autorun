@@ -2512,6 +2512,41 @@ static int voodoo_drop_directories( void )
     return 0;
 }
 
+/* A DirectDraw the user put in the system folders themselves (D7VK's ddraw.dll
+ * standing in for the Wine one, and the like) cannot share a process with the
+ * dgVoodoo wrappers: the program would get one DirectDraw beside it and
+ * another from the system's own loads. Voodoo sets the system copy aside --
+ * renamed, never deleted -- and turning Voodoo off brings the file back at the
+ * next start, whatever happened in between. */
+static void voodoo_system_ddraw( int on )
+{
+    static const char *const dirs[] = { WINE_DRIVE_C "/windows/system32", WINE_DRIVE_C "/windows/syswow64" };
+    char from[300], to[300];
+    unsigned int i;
+
+    for (i = 0; i < sizeof(dirs) / sizeof(dirs[0]); i++)
+    {
+        snprintf( from, sizeof(from), "%s/ddraw.dll", dirs[i] );
+        snprintf( to, sizeof(to), "%s/ddraw.dll.voodoo-away", dirs[i] );
+        if (on)
+        {
+            if (access( from, F_OK ) || !access( to, F_OK )) continue;
+            if (rename( from, to ))
+                log_line( "[VOODOO] %s could not be set aside; a system DirectDraw may shadow the wrappers", from );
+            else
+                log_line( "[VOODOO] %s set aside while Voodoo is on (back with Voodoo off)", from );
+        }
+        else
+        {
+            if (access( to, F_OK ) || !access( from, F_OK )) continue;
+            if (rename( to, from ))
+                log_line( "[VOODOO] %s could not be brought back", to );
+            else
+                log_line( "[VOODOO] %s brought back", from );
+        }
+    }
+}
+
 static NTSTATUS runtime_prepare_left4dead( const char *target, const char *dos_path, int *enabled );
 
 static RTL_USER_PROCESS_PARAMETERS *runtime_create_process_params( const char *target,
@@ -4949,8 +4984,14 @@ int main( int argc, char **argv )
             if (settings.voodoo)
             {
                 struct launcher_kv conf;
-                char voodoo_conf[520], *slash;
+                char voodoo_conf[520], game_ddraw[520], *slash;
+                int have_wrappers;
 
+                snprintf( game_ddraw, sizeof(game_ddraw), "%s", target );
+                if ((slash = strrchr( game_ddraw, '/' )))
+                    strcpy( slash + 1, "ddraw.dll" );
+                have_wrappers = voodoo_drop_directories() || (slash && !access( game_ddraw, F_OK ));
+                if (have_wrappers) voodoo_system_ddraw( 1 );
                 if ((conf.size = launcher_voodoo_config( &settings, conf.text, sizeof(conf.text) )))
                 {
                     snprintf( voodoo_conf, sizeof(voodoo_conf), "%s", target );
@@ -4999,6 +5040,8 @@ int main( int argc, char **argv )
                                   "or leave its MS\\x86 DLLs beside the program" );
                 }
             }
+            else
+                voodoo_system_ddraw( 0 );
             log_line( "[SETTINGS] %s: verbose %s, profiler %s, windows %s, Direct3D %s", settings_path,
                       settings.verbose < 0 ? "global" : settings.verbose ? "on" : "off",
                       settings.profile < 0 ? "global" : settings.profile ? "on" : "off",
