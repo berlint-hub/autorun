@@ -36,10 +36,22 @@ push, and update the pin here; or open it as a pull request against
 `autorunhq/autorun-horizon-dlls`. `build.sh --dlls` then produces both module
 pairs in `switch/wine/drive_c/windows/system32/`.
 
-Until then the `FEX variant` workflow (`.github/workflows/fex-variant.yml`)
-builds the variant on its own and uploads the SD overlay as its artifact:
-unpack `switch/` over the SD card and the variant is live, `fex-variant.txt`
-and all.
+## Who builds what
+
+The FEX tree owns its build. Whoever changes it publishes the modules as the
+**`fex-opt` release** on `berlint-hub/FEX`: `fex-opt-modules.zip` (laid out as
+`switch/wine/`, the two modules and `fex-opt-manifest.json`) and `SHA256SUMS`.
+`fex-variant-release.yml` in this folder is that workflow, ready to drop into
+`.github/workflows/` there.
+
+The `FEX variant` workflow (`.github/workflows/fex-variant.yml`) takes that
+release first, checks it against its checksums, and uploads it as the SD
+overlay artifact: unpack `switch/` over the SD card and the variant is live,
+`fex-variant.txt` and all. While no release is published, it builds the same
+modules from the same sources itself; the moment one appears, the download
+takes over without any change here. The compile fixes the FEX-2610 port needs
+(`tegra-x1-fixes.patch`) belong in the FEX branch itself; until they are
+merged there, both build paths apply them on top.
 
 ## A/B on the Switch
 

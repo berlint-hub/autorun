@@ -1,10 +1,10 @@
-# Build the tuned FEX CPU modules beside the pinned ones, so the two can be
-# compared on the Switch (horizon-wine/fex/variants-build.md). The DLL
-# repository's tools make them, from berlint-hub/FEX's Tegra X1 branch, into
-# an SD-card overlay that is uploaded as the artifact: unpack it over the same
-# place as the autorun archive and the variant is live; delete
-# switch/wine/fex-variant.txt to go back to the pinned modules. Run it from
-# the Actions tab; nothing here runs on its own.
+# The tuned FEX CPU modules beside the pinned ones, so the two can be compared
+# on the Switch (horizon-wine/fex/variants-build.md). The FEX tree owns its
+# build: berlint-hub/FEX publishes the modules as the fex-opt release, and this
+# workflow takes that release and packs it as the SD overlay. While no such
+# release exists, it builds the same modules from the same sources itself.
+# Unpack the artifact's switch/ over the SD card and the variant is live; delete
+# switch/wine/fex-variant.txt to go back to the pinned modules.
 name: FEX variant
 
 on:
@@ -27,18 +27,42 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 120
     steps:
+      # The FEX tree builds its own: its fex-opt release is the modules, with
+      # their checksums. Taken first; the build below is the fallback that
+      # makes them until one is published.
+      - name: Take what the FEX tree publishes
+        id: fetch
+        shell: bash
+        run: |
+          mkdir -p fetched
+          if curl -fsSL --retry 2 -o fetched/fex-opt-modules.zip \
+               https://github.com/berlint-hub/FEX/releases/download/fex-opt/fex-opt-modules.zip \
+             && curl -fsSL --retry 2 -o fetched/SHA256SUMS \
+               https://github.com/berlint-hub/FEX/releases/download/fex-opt/SHA256SUMS; then
+            (cd fetched && sha256sum -c SHA256SUMS)
+            echo "source=release" >> "$GITHUB_OUTPUT"
+            echo "The FEX tree's release was taken." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "source=build" >> "$GITHUB_OUTPUT"
+            echo "No fex-opt release yet: built from source." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
       - uses: actions/checkout@v4
+        if: steps.fetch.outputs.source == 'build'
 
       - name: Fetch the DLL repository
+        if: steps.fetch.outputs.source == 'build'
         run: git submodule update --init horizon-dlls
 
       # The variant recipe is the DLL repository's own patch, kept in
       # horizon-wine/fex/ until it can land there.
       - name: Apply the variant recipe
+        if: steps.fetch.outputs.source == 'build'
         run: git -C horizon-dlls apply "$PWD/horizon-wine/fex/dlls-fex-variants.patch"
 
       # The toolchain build.sh fetches, cached the way Build keeps it.
       - name: Restore llvm-mingw
+        if: steps.fetch.outputs.source == 'build'
         uses: actions/cache/restore@v4
         with:
           path: horizon-wine/toolchains/llvm-mingw-*
@@ -46,6 +70,7 @@ jobs:
           restore-keys: toolchains-fex-
 
       - name: Fetch llvm-mingw
+        if: steps.fetch.outputs.source == 'build'
         run: |
           llvm_version=20260505
           llvm_name="llvm-mingw-$llvm_version-ucrt-ubuntu-22.04-x86_64"
@@ -60,7 +85,7 @@ jobs:
           echo "WINE_NX_LLVM_MINGW=$PWD/$llvm" >> "$GITHUB_ENV"
 
       - name: Save llvm-mingw
-        if: always()
+        if: always() && steps.fetch.outputs.source == 'build'
         uses: actions/cache/save@v4
         with:
           path: horizon-wine/toolchains/llvm-mingw-*
@@ -69,6 +94,7 @@ jobs:
       # The same recipe build-dlls.py's fex-opt entry names, run here on its
       # own; the build is tee'd so a failure can say why in annotations.
       - name: Build the tuned FEX
+        if: steps.fetch.outputs.source == 'build'
         shell: bash
         run: |
           set -o pipefail
@@ -89,22 +115,30 @@ jobs:
           exit 1
 
       - name: Keep the build log
-        if: failure()
+        if: failure() && steps.fetch.outputs.source == 'build'
         uses: actions/upload-artifact@v4
         with:
           name: fex-build-log
           path: fex-build.log
           if-no-files-found: ignore
 
+      # The same overlay either way: the two modules and their manifest, with
+      # the variant file that turns them on and a note on turning them off.
       - name: Package the SD overlay
+        shell: bash
         run: |
-          payload=horizon-wine/toolchains/build-fex-2609-opt-horizon/payload
           stage=overlay/switch/wine
           mkdir -p "$stage/drive_c/windows/system32"
-          cp "$payload/libwow64fex-opt.dll" "$payload/libarm64ecfex-opt.dll" \
-            "$stage/drive_c/windows/system32/"
-          cp "$payload/fex-manifest.json" "$stage/fex-opt-manifest.json"
-          echo opt > "$stage/fex-variant.txt"
+          if [ "${{ steps.fetch.outputs.source }}" = release ]; then
+            python3 -c "import zipfile; zipfile.ZipFile('fetched/fex-opt-modules.zip').extractall('unpacked')"
+            cp -r unpacked/switch/wine/. "$stage/"
+          else
+            payload=horizon-wine/toolchains/build-fex-2609-opt-horizon/payload
+            cp "$payload/libwow64fex-opt.dll" "$payload/libarm64ecfex-opt.dll" \
+              "$stage/drive_c/windows/system32/"
+            cp "$payload/fex-manifest.json" "$stage/fex-opt-manifest.json"
+          fi
+          printf 'opt\n' > "$stage/fex-variant.txt"
           cat > "$stage/README-fex-opt.txt" <<'EOF'
           Vylepšený FEX (Tegra X1) pro A/B porovnání s původním.
 
@@ -114,6 +148,7 @@ jobs:
           Návrat k původnímu: smaž switch/wine/fex-variant.txt (nebo do něj
           napiš "stock").
           EOF
+          ls -la "$stage/drive_c/windows/system32"
 
       - name: Upload the SD overlay
         uses: actions/upload-artifact@v4
