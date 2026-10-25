@@ -594,6 +594,14 @@ static int runtime_dxvk_hud;
 static char runtime_vkd3d_version[32];
 static char runtime_dxvk_version[32];
 
+/* The dgVoodoo2 wrappers, when the user drops the release folder at C:\dgVoodoo
+ * (or C:\dgVoodoo2, C:\voodoo): the folders in it that hold wrapper DLLs, in
+ * C:\ form.  With a game's Voodoo on they go on its DLL path ahead of the
+ * graphics payloads, and the conf the menu writes goes beside them -- the
+ * wrapper reads its conf from beside its own DLLs first. */
+static char runtime_voodoo_dirs[3][80];
+static int runtime_voodoo_dir_count;
+
 /* libdrm_nouveau's switch for CPU-cacheable pinned GPU memory, cleared by
  * sdmc:/switch/wine/gl-uncached.txt containing 1. */
 extern int wine_nx_nouveau_pin_cached __attribute__((weak));
@@ -2460,6 +2468,50 @@ static NTSTATUS runtime_apply_startup_compat( const char *target, void *module, 
     return STATUS_SUCCESS;
 }
 
+/* Where a whole dgVoodoo2 release can be dropped once instead of copying its
+ * DLLs beside each program: MS\x86 holds the wrappers for 32-bit games and
+ * MS\x64 those for 64-bit ones, or the folder root can hold them flat.  The
+ * first of the named folders holding any wrapper DLL wins. */
+static int voodoo_drop_directories( void )
+{
+    static const char *const bases[] = { "dgVoodoo", "dgVoodoo2", "voodoo" };
+    static const char *const arch_host[] = { "MS/x86", "MS/x64" };
+    static const char *const arch_dos[] = { "MS\\x86", "MS\\x64" };
+    static const char *const wrappers[] = { "DDraw.dll", "D3DImm.dll", "D3D8.dll", "D3D9.dll" };
+    char host[260];
+    unsigned int i, j, k;
+
+    for (i = 0; i < sizeof(bases) / sizeof(bases[0]); i++)
+    {
+        runtime_voodoo_dir_count = 0;
+        for (j = 0; j < sizeof(arch_host) / sizeof(arch_host[0]); j++)
+        {
+            for (k = 0; k < sizeof(wrappers) / sizeof(wrappers[0]); k++)
+            {
+                snprintf( host, sizeof(host), "%s/%s/%s/%s", WINE_DRIVE_C, bases[i], arch_host[j], wrappers[k] );
+                if (access( host, F_OK )) continue;
+                snprintf( runtime_voodoo_dirs[runtime_voodoo_dir_count], sizeof(runtime_voodoo_dirs[0]),
+                          "%s\\%s", bases[i], arch_dos[j] );
+                runtime_voodoo_dir_count++;
+                break;
+            }
+        }
+        if (!runtime_voodoo_dir_count)  /* flat: the DLLs right in the folder */
+        {
+            for (k = 0; k < sizeof(wrappers) / sizeof(wrappers[0]); k++)
+            {
+                snprintf( host, sizeof(host), "%s/%s/%s", WINE_DRIVE_C, bases[i], wrappers[k] );
+                if (access( host, F_OK )) continue;
+                snprintf( runtime_voodoo_dirs[0], sizeof(runtime_voodoo_dirs[0]), "%s", bases[i] );
+                runtime_voodoo_dir_count = 1;
+                break;
+            }
+        }
+        if (runtime_voodoo_dir_count) return runtime_voodoo_dir_count;
+    }
+    return 0;
+}
+
 static NTSTATUS runtime_prepare_left4dead( const char *target, const char *dos_path, int *enabled );
 
 static RTL_USER_PROCESS_PARAMETERS *runtime_create_process_params( const char *target,
@@ -2474,7 +2526,7 @@ static RTL_USER_PROCESS_PARAMETERS *runtime_create_process_params( const char *t
     size_t chars, size, i, fex_environment_size;
     WCHAR *cursor;
     const char *cmdline_str, *dxvk_hud = launcher_hud_values[runtime_dxvk_hud];
-    char dxvk_dir[96], vkd3d_dir[96], vkd3d_path[104] = "", graphics_path[208] = "";
+    char dxvk_dir[96], vkd3d_dir[96], vkd3d_path[104] = "", voodoo_path[240] = "", graphics_path[320] = "";
     struct dxvk_version dxvk = {0}, vkd3d = {0};
     int left4dead = 0;
     NTSTATUS status;
@@ -2504,13 +2556,20 @@ static RTL_USER_PROCESS_PARAMETERS *runtime_create_process_params( const char *t
         snprintf( vkd3d_path, sizeof(vkd3d_path), "C:\\%s;", vkd3d_dir );
         log_line( "[VKD3D] payload C:\\%s; application-local DLLs take priority", vkd3d_dir );
     }
+    /* The dgVoodoo2 wrappers dropped at C:\dgVoodoo wrap the program's own
+     * DirectDraw/D3D before anything below sees it, and hand their output to
+     * the payload beneath them.  The program's own folder is searched first,
+     * so DLLs copied beside it still win. */
+    for (i = 0; i < (size_t)runtime_voodoo_dir_count; i++)
+        snprintf( voodoo_path + strlen(voodoo_path), sizeof(voodoo_path) - strlen(voodoo_path),
+                  "C:\\%s;", runtime_voodoo_dirs[i] );
     /* Keep native DXVK DLLs separate for each guest architecture. */
     if (dxvk.installed &&
         launcher_dxvk_version_directory( main_image_info.Machine, runtime_dxvk_source,
                                          dxvk.bundled ? "" : dxvk.version,
                                          dxvk_dir, sizeof(dxvk_dir) ))
     {
-        snprintf( graphics_path, sizeof(graphics_path), "%sC:\\%s;", vkd3d_path, dxvk_dir );
+        snprintf( graphics_path, sizeof(graphics_path), "%s%sC:\\%s;", vkd3d_path, voodoo_path, dxvk_dir );
         if (dxvk.version[0])
             log_line( "[DXVK] %s payload C:\\%s (version %s); application-local DLLs take priority",
                       main_image_info.Machine == IMAGE_FILE_MACHINE_AMD64 ? "AMD64" : "x86", dxvk_dir, dxvk.version );
@@ -2518,8 +2577,12 @@ static RTL_USER_PROCESS_PARAMETERS *runtime_create_process_params( const char *t
             log_line( "[DXVK] %s bundled payload C:\\%s; application-local DLLs take priority",
                       main_image_info.Machine == IMAGE_FILE_MACHINE_AMD64 ? "AMD64" : "x86", dxvk_dir );
     }
-    else if (runtime_d3d != LAUNCHER_D3D_WINE)
-        log_line( "[DXVK] selected payload is not installed; using Wine Direct3D" );
+    else
+    {
+        snprintf( graphics_path, sizeof(graphics_path), "%s%s", vkd3d_path, voodoo_path );
+        if (runtime_d3d != LAUNCHER_D3D_WINE)
+            log_line( "[DXVK] selected payload is not installed; using Wine Direct3D" );
+    }
     snprintf( dll_path, sizeof(dll_path), "%s;%sC:\\windows\\system32;C:\\windows;C:\\",
               current_dir, graphics_path );
     /* The current directory ends in a backslash, as RtlSetCurrentDirectory_U
@@ -4902,6 +4965,38 @@ int main( int argc, char **argv )
                         else
                             log_line( "[VOODOO] %s could not be written", voodoo_conf );
                     }
+                    /* The wrapper reads its conf from beside its own DLLs
+                     * before the program's folder: when the wrappers come
+                     * from the drop folder at C:\dgVoodoo, the same conf goes
+                     * there too, so the settings below always reach it. */
+                    if (voodoo_drop_directories())
+                    {
+                        int n;
+
+                        for (n = 0; n < runtime_voodoo_dir_count; n++)
+                        {
+                            char host[300], name[80];
+                            int m;
+
+                            m = 0;
+                            while (runtime_voodoo_dirs[n][m] && m + 1 < (int)sizeof(name))
+                            {
+                                name[m] = runtime_voodoo_dirs[n][m] == '\\' ? '/' : runtime_voodoo_dirs[n][m];
+                                m++;
+                            }
+                            name[m] = 0;
+                            snprintf( host, sizeof(host), "%s/%s/dgVoodoo.conf", WINE_DRIVE_C, name );
+                            if (launcher_kv_save( &conf, host ))
+                                log_line( "[VOODOO] %s written (the wrapper reads it there first)", host );
+                            else
+                                log_line( "[VOODOO] %s could not be written", host );
+                        }
+                        log_line( "[VOODOO] wrapper DLLs from C:\\%s on the program's DLL path",
+                                  runtime_voodoo_dirs[0] );
+                    }
+                    else
+                        log_line( "[VOODOO] no wrappers at C:\\dgVoodoo: drop the dgVoodoo2 folder there, "
+                                  "or leave its MS\\x86 DLLs beside the program" );
                 }
             }
             log_line( "[SETTINGS] %s: verbose %s, profiler %s, windows %s, Direct3D %s", settings_path,
