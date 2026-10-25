@@ -1,4 +1,4 @@
-From 6f53e4d510b896012cd5d20fae84e04dce2ceafa Mon Sep 17 00:00:00 2001
+From f40a09c81c5a5418427b106471e1059074528b90 Mon Sep 17 00:00:00 2001
 From: danfromtico <tiicu@proton.me>
 Date: Sun, 25 Oct 2026 21:36:23 +0000
 Subject: [PATCH] fex: build a tuned Tegra X1 variant beside the pinned release
@@ -15,9 +15,9 @@ which one runs in the [CPU] log line, so the two can be compared on
 hardware.
 ---
  tools/build-dlls.py  | 48 ++++++++++++++++++++++++++++++++++++++-----
- tools/build-fex.sh   | 40 ++++++++++++++++++++++++++++--------
+ tools/build-fex.sh   | 41 ++++++++++++++++++++++++++++--------
  tools/fex_payload.py | 49 +++++++++++++++++++++++++++++++++-----------
- 3 files changed, 112 insertions(+), 25 deletions(-)
+ 3 files changed, 113 insertions(+), 25 deletions(-)
 
 diff --git a/tools/build-dlls.py b/tools/build-dlls.py
 index ae3a322..40f3760 100755
@@ -103,7 +103,7 @@ index ae3a322..40f3760 100755
  Autorun commit names the DLLs that go with it.
  '''
 diff --git a/tools/build-fex.sh b/tools/build-fex.sh
-index 699e3ae..0457e2d 100644
+index 699e3ae..b17e776 100644
 --- a/tools/build-fex.sh
 +++ b/tools/build-fex.sh
 @@ -1,4 +1,13 @@
@@ -169,7 +169,7 @@ index 699e3ae..0457e2d 100644
  git -C "$source_dir" submodule update --init --depth=1 \
      External/fmt External/xxhash External/range-v3 External/unordered_dense \
      External/rpmalloc Source/Common/cpp-optparse
-@@ -62,13 +79,20 @@ build_module()
+@@ -62,13 +79,21 @@ build_module()
      cmake -S "$source_dir" -B "$1" -G Ninja \
          -DCMAKE_TOOLCHAIN_FILE="$source_dir/Data/CMake/toolchain_mingw.cmake" \
          -DMINGW_TRIPLE="$2" -DCMAKE_BUILD_TYPE=Release \
@@ -189,7 +189,8 @@ index 699e3ae..0457e2d 100644
 +release=${WINE_NX_FEX_VERSION:-FEX-2609}
 +set -- --version "${release#FEX-}" --revision "$revision" --patch "$patch_name" "$@"
 +if [ -n "${WINE_NX_FEX_SUFFIX:-}" ]; then
-+    set -- --suffix "$WINE_NX_FEX_SUFFIX" "$@"
++    # The = form: a suffix like -opt would read as a flag of its own.
++    set -- "--suffix=$WINE_NX_FEX_SUFFIX" "$@"
 +fi
 +AUTORUN="$autorun" "${PYTHON:-python3}" "$here/fex_payload.py" "$@"
 diff --git a/tools/fex_payload.py b/tools/fex_payload.py
