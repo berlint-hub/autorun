@@ -1,77 +1,49 @@
-# Building two FEX builds for comparison
+# FEX variants: the stock release and a tuned build, side by side
 
-The runtime can pick between the stock FEX CPU modules and a differently
-built pair (see `runtime_fex_cpu_module` in source/runtime.c): put the
-variant's name in `sdmc:/switch/wine/fex-variant.txt` and the program
-loads `libwow64fex-<variant>.dll` / `libarm64ecfex-<variant>.dll` when
-they are in system32. An empty file, or modules that are not there, keep
-the stock ones.
+The DLL payload can carry two FEX CPU-module builds, so the two can be
+compared on the Switch without rebuilding or reinstalling:
 
-The modules are the DLL repository's to build
-(autorunhq/autorun-horizon-dlls, `tools/build-fex.sh` and
-`tools/fex_payload.py`). The stock pair stays as it is; a variant pair
-is the same scripts with different inputs. The Tegra X1 build is
-`berlint-hub/FEX` branch `arena/799d045b-fex`, commit
-`2df7c59b234ec70b7221e054802fa62853f9cb45` (FEX-2610 with the Horizon
-port already in it), so no patch is applied on top.
+- **stock** — `libwow64fex.dll` and `libarm64ecfex.dll`, from the pinned
+  `FEX-Emu/FEX@395b132f` (FEX-2609) with `horizon.patch` applied on top,
+  exactly as the release pipeline has always built them;
+- **opt** — `libwow64fex-opt.dll` and `libarm64ecfex-opt.dll`, from
+  `berlint-hub/FEX@b8674872` (FEX-2610 with the Horizon patch already in its
+  tree), built with the Tegra X1 (Cortex-A57) tuning.
 
-## tools/build-fex.sh
+Both share Autorun's ABI headers in `horizon-wine/fex/` and are validated the
+same way; only the CPU back end and the version resources differ.
 
-Take the pin, the patch and the tune from the environment, with today's
-values as the defaults:
+## The build side
 
-```sh
- revision=395b132f346b1a45def246d10c52245edba1ef02
-+revision="${FEX_REVISION:-$revision}"
-+remote="${FEX_REMOTE:-https://github.com/FEX-Emu/FEX.git}"
-+name_suffix="${FEX_NAME_SUFFIX:-}"
-+apply_patch="${FEX_PATCH:-1}"
-+tune_tegra="${FEX_TUNE_TEGRA_X1:-OFF}"
-+override_version="${FEX_OVERRIDE_VERSION:-FEX-2609}"
-```
+The changes live in the `autorun-horizon-dlls` tools and are kept here as
+`dlls-fex-variants.patch` (from `berlint-hub/autorun-horizon-dlls`, branch
+`arena/6fd3131b-fex-variants`) until they land upstream:
 
-Use `$remote` in the clone (`git remote add origin "$remote"`), skip the
-patch block when `apply_patch` is 0 (the tree already carries it), pass
-`-DFEX_TUNE_TEGRA_X1=$tune_tegra` and
-`-DOVERRIDE_VERSION=$override_version` to `build_module`, and hand
-`$name_suffix` to the payload step so the DLLs are written as
-`libarm64ecfex$name_suffix.dll` and `libwow64fex$name_suffix.dll`.
+- `tools/build-fex.sh` takes `WINE_NX_FEX_REMOTE`, `_REVISION`, `_PATCH`
+  (empty for none), `_TUNE_TEGRA_X1`, `_VERSION` and `_SUFFIX`, and gives the
+  modules and their payload directory the suffix when one is set;
+- `tools/fex_payload.py` takes `--suffix`, `--version`, `--revision` and
+  `--patch`, so a variant's manifest honestly records its own source;
+- `tools/build-dlls.py` builds the variant as the `fex-opt` entry, from the
+  recipe in `FEX_VARIANT`, beside the pinned `fex` one.
 
-## tools/fex_payload.py
+To land it: apply the patch on top of the `horizon-dlls` submodule pin
+(`git -C horizon-dlls am ../../horizon-wine/fex/dlls-fex-variants.patch`),
+push, and update the pin here; or open it as a pull request against
+`autorunhq/autorun-horizon-dlls`. `build.sh --dlls` then produces both module
+pairs in `switch/wine/drive_c/windows/system32/`.
 
-Take the suffix as a second argument (or an environment variable) and
-build the `DLLS` dictionary names with it; the manifest keys follow the
-renamed files.
+## A/B on the Switch
 
-## tools/build-dlls.py
-
-A second entry beside `key='fex'`, building the same two DLLs under
-another name from another pin:
-
-```python
-def build_fex_opt(scratch):
-    env = dict(os.environ,
-               WINE_NX_FEX_DIR=str(horizon_wine / 'toolchains/fex-2610-tegra'),
-               WINE_NX_FEX_BUILD_DIR=str(horizon_wine / 'toolchains/build-fex-2610-tegra-horizon'),
-               FEX_REMOTE='https://github.com/berlint-hub/FEX.git',
-               FEX_REVISION='2df7c59b234ec70b7221e054802fa62853f9cb45',
-               FEX_PATCH='0', FEX_TUNE_TEGRA_X1='ON',
-               FEX_OVERRIDE_VERSION='FEX-2610', FEX_NAME_SUFFIX='-opt')
-    ...run tools/build-fex.sh with that environment...
-```
-
-with its manifest identity kept apart from the stock pair, so both are
-installed and the card can hold them at once.
-
-## Comparing
-
-With both pairs in `drive_c/windows/system32`, one line decides which
-runs -- `sdmc:/switch/wine/fex-variant.txt`:
+`sdmc:/switch/wine/fex-variant.txt` holds the variant suffix (`opt`) or is
+absent/empty for stock. The runtime loads the variant's WoW64/ARM64EC CPU
+module when the file names a suffix and that module is present; if the module
+is missing it falls back to the stock one. The start log's `[CPU]` line says
+which one runs:
 
 ```
-opt
+[CPU] FEX (libwow64fex-opt.dll)     <- opt variant
+[CPU] FEX (libwow64fex.dll)         <- stock
 ```
 
-The log says which one it was: `[CPU] FEX (libwow64fex-opt.dll)`. Take
-the file away (or leave it empty) for the stock pair, and the same game
-runs `[CPU] FEX (libwow64fex.dll)`.
+Delete the file (or write `stock`) to go back; no reinstalling is needed.
