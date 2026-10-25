@@ -3164,7 +3164,50 @@ static int launcher_machine( const char *path, unsigned short *machine )
 #ifdef WINE_NX_BOX64_INTERPRETER
 extern NTSTATUS wine_nx_init_wow64_peb( RTL_USER_PROCESS_PARAMETERS *, void * );
 extern NTSTATUS wine_nx_prepare_wow64_ntdll( HMODULE, HMODULE );
-extern NTSTATUS wine_nx_loader_prepare_wow64( HMODULE *, void **, BOOL );
+/* Two FEX builds can sit in system32 at once: the stock CPU modules and a
+ * differently built pair named libwow64fex-<variant>.dll and
+ * libarm64ecfex-<variant>.dll. fex-variant.txt in the runtime folder names
+ * the variant, so a faster and a safer build can be compared without
+ * touching anything else; a missing module falls back to the stock one. */
+static const char *runtime_fex_cpu_module( int amd64 )
+{
+    static char variant[40], warned[2], names[2][80];
+    static int read;
+    const char *stem = amd64 ? "libarm64ecfex" : "libwow64fex";
+    char line[64], path[300];
+    size_t i, at = 0;
+    FILE *file;
+
+    if (!read)
+    {
+        read = 1;
+        if ((file = fopen( WINE_ROOT "/fex-variant.txt", "r" )))
+        {
+            if (fgets( line, sizeof(line), file ))
+                for (i = 0; line[i] && line[i] != '\n' && line[i] != '\r' && at + 1 < sizeof(variant); i++)
+                {
+                    if (!at && (line[i] == ' ' || line[i] == '\t' || line[i] == '-')) continue;
+                    variant[at++] = line[i];
+                }
+            fclose( file );
+        }
+        variant[at] = 0;
+        if (variant[0]) log_line( "[CPU] fex-variant.txt names the \"%s\" modules", variant );
+    }
+    if (variant[0])
+    {
+        snprintf( names[amd64 != 0], sizeof(names[0]), "%s-%s.dll", stem, variant );
+        snprintf( path, sizeof(path), "%s/%s", WINE_SYSTEM_DIR, names[amd64 != 0] );
+        if (!access( path, R_OK )) return names[amd64 != 0];
+        if (!warned[amd64 != 0]++)
+            log_line( "[CPU] %s is not under %s; the stock %s.dll serves instead",
+                      names[amd64 != 0], WINE_SYSTEM_DIR, stem );
+    }
+    snprintf( names[amd64 != 0], sizeof(names[0]), "%s.dll", stem );
+    return names[amd64 != 0];
+}
+
+extern NTSTATUS wine_nx_loader_prepare_wow64( HMODULE *, void **, const char * );
 
 static void *runtime_wow64_initialize;
 extern void (*wine_nx_wow64_thread_start)( PRTL_THREAD_START_ROUTINE, void *, BOOL, TEB * );
@@ -3219,7 +3262,8 @@ static NTSTATUS runtime_start_wow64( void *module, void *entry,
     status = wine_nx_loader_bootstrap( main_nt_name );
     log_line( "[WOW64] native loader bootstrap status=%08x", status );
     if (status) return status;
-    status = wine_nx_loader_prepare_wow64( &native, &initialize, runtime_fex );
+    status = wine_nx_loader_prepare_wow64( &native, &initialize,
+                                           runtime_fex ? runtime_fex_cpu_module( 0 ) : "winebox64.dll" );
     log_line( "[WOW64] native DLLs status=%08x", status );
     if (status) return status;
     status = map_pe_image( WINE_NX_RUNTIME_SYSWOW64 "/ntdll.dll", (void **)&guest, &size );
@@ -3399,7 +3443,7 @@ static NTSTATUS runtime_prepare_arm64ec(void)
 {
     static const char key_path[] = "\\Registry\\Machine\\Software\\Microsoft\\Wow64\\amd64";
     WCHAR cpu_name[32];
-    const char *cpu_module = runtime_fex ? "libarm64ecfex.dll" : "winebox64ec.dll";
+    const char *cpu_module = runtime_fex ? runtime_fex_cpu_module( 1 ) : "winebox64ec.dll";
     unsigned int i;
     UNICODE_STRING value = {0};
     HMODULE ntdll = NULL;
@@ -5096,10 +5140,10 @@ int main( int argc, char **argv )
     if (runtime_fex)
     {
 #ifdef WINE_NX_FEX
-        const char *cpu_module = target_machine == IMAGE_FILE_MACHINE_AMD64 ?
-                                 WINE_SYSTEM_DIR "/libarm64ecfex.dll" :
-                                 WINE_SYSTEM_DIR "/libwow64fex.dll";
+        char cpu_module[300];
 
+        snprintf( cpu_module, sizeof(cpu_module), "%s/%s", WINE_SYSTEM_DIR,
+                  runtime_fex_cpu_module( target_machine == IMAGE_FILE_MACHINE_AMD64 ) );
         if ((target_machine != IMAGE_FILE_MACHINE_AMD64 && target_machine != IMAGE_FILE_MACHINE_I386) ||
             access( cpu_module, R_OK ))
         {
@@ -5117,8 +5161,9 @@ int main( int argc, char **argv )
         return return_to_launcher();
 #endif
     }
-    log_line( "[CPU] %s", target_machine == IMAGE_FILE_MACHINE_ARM64 ? "Native ARM64" :
-                         runtime_fex ? "FEX-2609" : "Box64" );
+    if (target_machine == IMAGE_FILE_MACHINE_ARM64) log_line( "[CPU] Native ARM64" );
+    else if (runtime_fex) log_line( "[CPU] FEX (%s)", runtime_fex_cpu_module( target_machine == IMAGE_FILE_MACHINE_AMD64 ) );
+    else log_line( "[CPU] Box64" );
 #ifdef WINE_NX_AMD64
     if (target_machine == IMAGE_FILE_MACHINE_AMD64)
     {
