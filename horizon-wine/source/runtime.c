@@ -280,6 +280,16 @@ static volatile int stall_watch_quit;
 static int stall_watch_running;
 static Thread stall_watch_thread;
 
+/* The quit chord's first ask: the program is told to close itself (the display
+ * driver sends its windows a WM_CLOSE) and given a moment to run its own exit
+ * code, so whatever it writes on the way out -- settings, saves -- reaches the
+ * card before its threads are parked. Asking again, or the moment's end, ends
+ * it the way the chord always did. */
+volatile int wine_nx_close_asked;
+static u64 close_asked_at;
+extern volatile int wine_nx_quit_requested;
+void wine_nx_request_quit( const char *why );
+
 /* Flushing each line to the SD card serialized every thread behind the file
  * lock. Buffer instead and flush often enough that a hang loses under 200 ms.
  * The same thread emits idle partial output lines and reports interpreter speed. */
@@ -321,6 +331,12 @@ static void *log_flusher( void *arg )
         /* Writes held back from the card, the log's own among them: they
          * reach it as soon as they did when every write went straight out. */
         wine_nx_sd_cache_flush();
+        /* The program was asked to close itself and is taking too long: the
+         * chord's quit goes through the way it always did. */
+        if (__atomic_load_n( (int *)&wine_nx_close_asked, __ATOMIC_SEQ_CST ) &&
+            !__atomic_load_n( (int *)&wine_nx_quit_requested, __ATOMIC_SEQ_CST ) && close_asked_at &&
+            armTicksToNs( armGetSystemTick() - close_asked_at ) >= 5000000000ull)
+            wine_nx_request_quit( "the program did not close itself" );
     }
     return NULL;
 }
@@ -1388,6 +1404,7 @@ static int runtime_wheel[2];
 
 void wine_nx_leave_process( const char *why );
 void wine_nx_request_quit( const char *why );
+void wine_nx_ask_program_quit( const char *why );
 
 
 int wine_nx_pointer_poll( int *x, int *y, unsigned int *buttons )
@@ -1528,7 +1545,7 @@ int wine_nx_pointer_poll( int *x, int *y, unsigned int *buttons )
         else if (armTicksToNs( now - quit_since ) >= 1000000000ull) leave = 1;
     }
     pthread_mutex_unlock( &wine_nx_pointer_mutex );
-    if (leave) wine_nx_request_quit( "+ and - held" );
+    if (leave) wine_nx_ask_program_quit( "+ and - held" );
     wine_nx_cursor_move( *x, *y );
     return moved;
 }
@@ -3910,6 +3927,23 @@ void wine_nx_request_quit( const char *why )
     if (__atomic_exchange_n( (int *)&wine_nx_quit_requested, 1, __ATOMIC_SEQ_CST )) return;
     log_line( "[QUIT] %s; ending %u threads to return to the launcher", why, wine_nx_threads_other() );
     wine_nx_threads_wake();
+}
+
+/* The chord's first press: ask the program to close itself and give it a
+ * moment.  Its own exit code then runs -- Vampire, for one, writes
+ * masquerade.ini on the way out, and the chord used to tear the threads down
+ * before it got there, so the game remembered nothing.  A second press, or
+ * five seconds of the program not going, ends it the hard way. */
+void wine_nx_ask_program_quit( const char *why )
+{
+    if (__atomic_load_n( (int *)&wine_nx_quit_requested, __ATOMIC_SEQ_CST )) return;
+    if (__atomic_exchange_n( (int *)&wine_nx_close_asked, 1, __ATOMIC_SEQ_CST ))
+    {
+        wine_nx_request_quit( why );
+        return;
+    }
+    close_asked_at = armGetSystemTick();
+    log_line( "[QUIT] %s; asking the program to close itself first", why );
 }
 
 /* Wine calls this where it used to park after the program it ran terminated.

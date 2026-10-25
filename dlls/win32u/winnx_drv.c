@@ -42,6 +42,7 @@ extern void  wine_nx_input_take( struct input_snapshot *out );
 extern void  wine_nx_pointer_set_pos( int x, int y );
 extern void  wine_nx_pointer_follow( int x, int y );
 extern void  wine_nx_cursor_show( int visible );
+extern volatile int wine_nx_close_asked __attribute__((weak));
 extern void  wine_nx_runtime_trace( const char *msg ) __attribute__((weak));
 extern int   wine_nx_runtime_verbose __attribute__((weak));
 /* Whether the runtime's OpenGL compositor presents the screen instead of the
@@ -849,9 +850,21 @@ static void wine_nx_update_cursor( void )
     }
 }
 
+/* A close the way a caption's X sends it, to every visible top level window:
+ * the program's own exit code runs (it writes its settings on the way out)
+ * before the runtime parks its threads. */
+static void close_program_windows( void )
+{
+    HWND hwnd;
+
+    for (hwnd = get_window_relative( get_desktop_window(), GW_CHILD ); hwnd;
+         hwnd = get_window_relative( hwnd, GW_HWNDNEXT ))
+        if (is_window_visible( hwnd )) NtUserPostMessage( hwnd, WM_CLOSE, 0, 0 );
+}
+
 BOOL wine_nx_drv_ProcessEvents( DWORD mask )
 {
-    static unsigned int delivering;
+    static unsigned int delivering, close_asked_delivered;
     struct input_snapshot snapshot;
     const struct input_key_event *key_events = snapshot.keys;
     unsigned int key_count, key_after;
@@ -864,6 +877,11 @@ BOOL wine_nx_drv_ProcessEvents( DWORD mask )
 
     (void)mask;
     if (__atomic_exchange_n( &delivering, 1, __ATOMIC_ACQUIRE )) return FALSE;
+    if (&wine_nx_close_asked && wine_nx_close_asked && !close_asked_delivered)
+    {
+        close_asked_delivered = 1;
+        close_program_windows();
+    }
     wine_nx_fb_present();
     /* Poll here too, then deliver everything the polls saw since the last
      * call, including those of the background thread. */
