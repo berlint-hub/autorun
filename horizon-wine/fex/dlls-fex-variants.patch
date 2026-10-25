@@ -1,4 +1,4 @@
-From c12c583fb8f9a58c0e4574acd5c598c3c49bb5f8 Mon Sep 17 00:00:00 2001
+From 3bf3cb73fb5a872d0571afbf6a1c7e37030f9dde Mon Sep 17 00:00:00 2001
 From: danfromtico <tiicu@proton.me>
 Date: Sun, 25 Oct 2026 21:36:23 +0000
 Subject: [PATCH] fex: build a tuned Tegra X1 variant beside the pinned release
@@ -15,9 +15,9 @@ which one runs in the [CPU] log line, so the two can be compared on
 hardware.
 ---
  tools/build-dlls.py  | 48 ++++++++++++++++++++++++++++++++++++++-----
- tools/build-fex.sh   | 41 ++++++++++++++++++++++++++++--------
+ tools/build-fex.sh   | 40 ++++++++++++++++++++++++++++--------
  tools/fex_payload.py | 49 +++++++++++++++++++++++++++++++++-----------
- 3 files changed, 112 insertions(+), 26 deletions(-)
+ 3 files changed, 112 insertions(+), 25 deletions(-)
 
 diff --git a/tools/build-dlls.py b/tools/build-dlls.py
 index ae3a322..95d0dd5 100755
@@ -103,7 +103,7 @@ index ae3a322..95d0dd5 100755
  Autorun commit names the DLLs that go with it.
  '''
 diff --git a/tools/build-fex.sh b/tools/build-fex.sh
-index 699e3ae..b9c3392 100644
+index 699e3ae..0457e2d 100644
 --- a/tools/build-fex.sh
 +++ b/tools/build-fex.sh
 @@ -1,4 +1,13 @@
@@ -134,9 +134,9 @@ index 699e3ae..b9c3392 100644
 +revision=${WINE_NX_FEX_REVISION:-395b132f346b1a45def246d10c52245edba1ef02}
 +patch_name=${WINE_NX_FEX_PATCH-horizon.patch}
 +patch=$horizon_wine/fex/$patch_name
-+tune=none
++tegra=OFF
 +if [ -n "${WINE_NX_FEX_TUNE_TEGRA_X1:-}" ] && [ "${WINE_NX_FEX_TUNE_TEGRA_X1}" != OFF ]; then
-+    tune=tegra_x1
++    tegra=ON
 +fi
  
  if [ -n "${WINE_NX_LLVM_MINGW:-}" ]; then
@@ -169,15 +169,15 @@ index 699e3ae..b9c3392 100644
  git -C "$source_dir" submodule update --init --depth=1 \
      External/fmt External/xxhash External/range-v3 External/unordered_dense \
      External/rpmalloc Source/Common/cpp-optparse
-@@ -62,13 +79,19 @@ build_module()
+@@ -62,13 +79,20 @@ build_module()
      cmake -S "$source_dir" -B "$1" -G Ninja \
          -DCMAKE_TOOLCHAIN_FILE="$source_dir/Data/CMake/toolchain_mingw.cmake" \
          -DMINGW_TRIPLE="$2" -DCMAKE_BUILD_TYPE=Release \
 -        -DOVERRIDE_VERSION=FEX-2609 -DOVERRIDE_HASH="$revision" \
 +        -DOVERRIDE_VERSION="${WINE_NX_FEX_VERSION:-FEX-2609}" -DOVERRIDE_HASH="$revision" \
          -DENABLE_LTO=OFF -DBUILD_TESTING=OFF -DBUILD_FEXCONFIG=OFF \
--        -DENABLE_JEMALLOC_GLIBC_ALLOC=OFF -DENABLE_OFFLINE_TELEMETRY=OFF -DTUNE_CPU=none \
-+        -DENABLE_JEMALLOC_GLIBC_ALLOC=OFF -DENABLE_OFFLINE_TELEMETRY=OFF -DTUNE_CPU=$tune \
+         -DENABLE_JEMALLOC_GLIBC_ALLOC=OFF -DENABLE_OFFLINE_TELEMETRY=OFF -DTUNE_CPU=none \
++        -DFEX_TUNE_TEGRA_X1=$tegra \
          -DFEX_HORIZON=ON -DFEX_HORIZON_ABI_DIR="$horizon_wine/fex"
      cmake --build "$1" --target "$3" -j "${WINE_NX_JOBS:-4}"
  }
