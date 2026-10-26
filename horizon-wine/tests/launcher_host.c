@@ -501,8 +501,9 @@ static void carousel_fixture(void)
 /* Nothing can be installed from here: the screens leading to it are what this
  * harness is for, and the failure they show is the one a console without
  * Atmosphere would give. */
-static unsigned int install_forwarder( const char **step )
+static unsigned int install_forwarder( unsigned int address_space, const char **step )
 {
+    (void)address_space;
     if (step) *step = "opening the content store";
     return 0x4A8;
 }
