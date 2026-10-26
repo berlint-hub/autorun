@@ -9,6 +9,16 @@ name: FEX variant
 
 on:
   workflow_dispatch:
+    inputs:
+      tune:
+        description: >-
+          Cortex-A57 code generation for the variant. "off" builds the byte-twin
+          control instead: the stock flags under the -opt names, which is what
+          tells a startup failure of the variant apart from a failure of the
+          tuning. A control build is never published as the fex-opt release.
+        type: choice
+        options: [ "on", "off" ]
+        default: "on"
   # The dispatch button only sees workflows on the default branch; a change to
   # the recipe or this file on a work branch runs it too.
   push:
@@ -95,17 +105,28 @@ jobs:
       # own; the build is tee'd so a failure can say why in annotations. The
       # defaults of build-fex.sh are the pinned FEX and Autorun's Horizon
       # patch, the same the stock modules take; the variant only tunes code
-      # generation for the Switch's Cortex-A57 and takes the -opt names.
+      # generation for the Switch's Cortex-A57 (-mcpu=cortex-a57; the pinned
+      # tree knows no FEX_TUNE_TEGRA_X1, so that input does nothing there) and
+      # takes the -opt names.
       - name: Build the tuned FEX
         if: steps.fetch.outputs.source == 'build'
         shell: bash
         run: |
           set -o pipefail
           export AUTORUN="$PWD"
-          # The variant is a byte-twin of the stock modules for now: the
-          # Cortex-A57 tune (-mcpu=cortex-a57) is being bisected against a
-          # startup crash (STATUS_DLL_INIT_FAILED at the first guest init);
-          # with no TUNE input the build takes the stock flags.
+          # The variant died at the first guest init once, which read as the
+          # tune's fault; it was ntdll pairing the CPU module by its exact
+          # name, and a byte-twin build died the same way. The pairing is
+          # fixed in the runtime, so the tune is back on: the payload records
+          # it (fex-manifest.json, "tune") and the build stops if it disagrees.
+          # Dispatch with tune=off for the twin, which is the control when a
+          # startup failure has to be placed on the variant path or the flags.
+          if [ "${{ github.event.inputs.tune || 'on' }}" = off ]; then
+            export WINE_NX_FEX_TUNE_TEGRA_X1=OFF
+          else
+            export WINE_NX_FEX_TUNE_TEGRA_X1=ON
+          fi
+          echo "WINE_NX_FEX_TUNE_TEGRA_X1=$WINE_NX_FEX_TUNE_TEGRA_X1" >> "$GITHUB_ENV"
           export WINE_NX_FEX_SUFFIX=-opt
           export WINE_NX_JOBS="$(nproc)"
           if sh horizon-dlls/tools/build-fex.sh 2>&1 | tee fex-build.log; then
@@ -141,7 +162,16 @@ jobs:
             cp "$payload/fex-manifest.json" "$stage/fex-opt-manifest.json"
           fi
           printf 'opt\n' > "$stage/fex-variant.txt"
-          cat > "$stage/README-fex-opt.txt" <<'EOF'
+          # What the modules were tuned for comes from the payload's own
+          # manifest, whichever source it came from, so the card can say which
+          # build it carries without a second source of truth.
+          tune=$(python3 -c "import json;print(json.load(open('$stage/fex-opt-manifest.json')).get('tune') or 'none')")
+          case "$tune" in
+            none) tune_note="kontrolní build: stejné flagy jako původní moduly" ;;
+            *)    tune_note="kód pro $tune" ;;
+          esac
+          echo "The fex-opt overlay is tuned for: $tune" >> "$GITHUB_STEP_SUMMARY"
+          cat > "$stage/README-fex-opt.txt" <<EOF
           Vylepšený FEX (Tegra X1) pro A/B porovnání s původním.
 
           Rozbal překryv switch/ na SD kartu (na stejné místo jako archiv
@@ -150,7 +180,10 @@ jobs:
           fex-variant.txt je výchozí pro hry bez vlastního výběru (obsah
           "opt" = vylepšený). V logu poznáš, co běží:
               [CPU] FEX (libwow64fex-opt.dll)
+
+          Tyhle moduly: $tune_note (fex-opt-manifest.json, "tune").
           EOF
+          cat "$stage/README-fex-opt.txt"
           ls -la "$stage/drive_c/windows/system32"
 
       - name: Upload the SD overlay
@@ -163,15 +196,24 @@ jobs:
       # The contract the builds pull: the same modules as fex-opt-modules.zip
       # (laid out switch/wine/) and their checksums, in the fex-opt release.
       # This is the fallback publisher; the FEX tree's own release takes
-      # precedence over it wherever it is looked for.
+      # precedence over it wherever it is looked for. A control build is not
+      # published: the release is what the main Build fetches into every SD
+      # archive, and it must be the tuned one.
+      - name: A control build is not published
+        if: github.event.inputs.tune == 'off'
+        run: |
+          echo "tune=off: the byte-twin control stays an artifact, not the fex-opt release." \
+            >> "$GITHUB_STEP_SUMMARY"
       - name: Publish the fex-opt release
+        if: github.event.inputs.tune != 'off'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          tune=$(python3 -c "import json;print(json.load(open('overlay/switch/wine/fex-opt-manifest.json')).get('tune') or 'none')")
           (cd overlay && zip -qr ../fex-opt-modules.zip switch)
           sha256sum fex-opt-modules.zip > SHA256SUMS
           gh release create fex-opt fex-opt-modules.zip SHA256SUMS \
             --title "Tuned Horizon FEX modules (fallback build)" \
-            --notes "libwow64fex-opt.dll and libarm64ecfex-opt.dll for Autorun's A/B switch (sdmc:/switch/wine/fex-variant.txt = opt). Built here while the FEX tree publishes none; berlint-hub/FEX's fex-opt release takes precedence." \
+            --notes "libwow64fex-opt.dll and libarm64ecfex-opt.dll for Autorun's A/B switch (sdmc:/switch/wine/fex-variant.txt = opt), tuned for $tune. Built here while the FEX tree publishes none; berlint-hub/FEX's fex-opt release takes precedence." \
             --latest=false 2>/dev/null || \
             gh release upload fex-opt fex-opt-modules.zip SHA256SUMS --clobber

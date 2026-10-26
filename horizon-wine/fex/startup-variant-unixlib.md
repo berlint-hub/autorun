@@ -75,28 +75,38 @@ For a regression check, `--source /path/to/old/virtual.c` runs the same cases
 against the old resolver. The original passes stock module lookup but fails
 on the `-opt` loader name.
 
-## What must be rebuilt and tested on hardware
+## Where this stands
+
+The fix is merged into the game branch (merge `5b21aa3`): `virtual.c` pairs a
+FEX CPU module by its canonical stem, and `check_fex_unixlib.py` (run by
+`horizon-wine/check-runtime-console.sh` and `check-fex.sh`) exercises the real
+resolver with stock and `-opt` names under every build's feature guards.
 
 `virtual.c` is compiled into `wine-virtual-real` and linked into the runtime
-NRO. Rebuild and deploy the **runtime**, not just `ntdll.dll` or the `-opt`
-CPU DLLs. The existing stock-twin `-opt` DLLs can remain unchanged for this
-test; do not mix in a new FEX version or CPU tuning while isolating startup.
+NRO, so what a card needs is a runtime rebuilt from a tree that carries the
+merge -- not just a new `ntdll.dll` or new CPU DLLs. The `-opt` modules are
+tuned again (`variants-build.md`), which is the state the A/B was for.
 
-The game branch owns the working per-game selector and build workflow. Take
-the FEX unixlib fix commits from `arena/21bcd47b-autorun` into that branch,
-then rebuild its runtime through the existing workflow. No game-specific
-changes or writes to that branch are needed from the FEX agent.
+## On the Switch
 
-On the Switch, compare stock FEX and FEX optimized with the same title:
+Compare stock FEX and FEX optimized with the same title:
 
-1. Confirm `[CPU]` names the intended module in each run.
+1. Confirm `[CPU]` names the intended module in each run, and that
+   `switch/wine/fex-opt-manifest.json` says `"tune": "cortex-a57"` for the
+   modules on the card (a control build says `null`).
 2. With `-opt`, check that `[WOW64-DIAG] BTCpuProcessInit call` is followed by
    config-file activity and `BTCpuProcessInit returned`, then `cpu_simulate`.
 3. Verify that startup reaches the game and no longer exits at the initial
    `0xc0000142` window. Recheck stock FEX as the control.
-4. If startup still fails, keep `stderr.txt` and the runtime log from the new
-   build. Missing static FEX mappings are now named in the Wine error log;
-   distinguish that from a later QUERY/exception-attachment failure.
+4. If a tuned build still fails at startup while the stock build passes, run
+   the **FEX variant** workflow with `tune: off` and try the twin under the
+   same names. The twin starting and the tuned build not is the tuning's
+   problem; both failing is the variant path, and the fix above is not the
+   whole of it.
+5. Keep `stderr.txt` and the runtime log from the failing build either way.
+   Missing static FEX mappings are named in the Wine error log by
+   `wine_nx_report_unpaired_unix_lib()`; distinguish that from a later
+   QUERY/exception-attachment failure.
 
 The incomplete FEX-2610 fallback memory layer is a separate problem and is
 not repaired by this name-lookup change.

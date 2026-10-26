@@ -23,6 +23,12 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             libsdl2-dev libsdl2-ttf-dev libpng-dev fonts-dejavu-core
 
+      # The recipe and its workflow are text, and they are what makes an -opt
+      # module tuned: the tuning was switched off for a bisect once and stayed
+      # off through several builds. This reads them back.
+      - name: FEX variant recipe
+        run: python3 horizon-wine/tests/check_fex_variant_recipe.py
+
       - name: Input profiles
         run: |
           cc -std=gnu11 -Wall -Wextra -Werror -O1 -g \

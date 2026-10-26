@@ -7,12 +7,28 @@ compared on the Switch without rebuilding or reinstalling:
   `FEX-Emu/FEX@395b132f` (FEX-2609) with `horizon.patch` applied on top,
   exactly as the release pipeline has always built them;
 - **opt** — `libwow64fex-opt.dll` and `libarm64ecfex-opt.dll`, the same
-  pinned `FEX-Emu/FEX@395b132f` with `horizon.patch`. The Cortex-A57 tuning
-  (`WINE_NX_FEX_TUNE_TEGRA_X1`) is turned off while it is bisected against a
-  startup crash the first tuned build had (`STATUS_DLL_INIT_FAILED` at the
-  first guest init, reproduced on the Switch): with no tune the variant is a
-  byte-twin of the stock modules under the `-opt` names, which is also the
-  clean A/B control.
+  pinned `FEX-Emu/FEX@395b132f` with `horizon.patch`, built for the console's
+  CPU: `WINE_NX_FEX_TUNE_TEGRA_X1=ON` passes `-DTUNE_CPU=cortex-a57` (and
+  `-DFEX_TUNE_TEGRA_X1=ON`, which the pinned tree does not know and ignores;
+  a tree that does know it strips the ARMv8.1+ JIT branches). The payload
+  records what it was tuned for — `"tune": "cortex-a57"` in
+  `fex-opt-manifest.json` — and `build-dlls.py` stops a build whose manifest
+  disagrees with the recipe, so a variant cannot quietly become a copy of the
+  stock modules under another name.
+
+The first tuned variant died at the first guest init with
+`STATUS_DLL_INIT_FAILED`, right after `wow64win` attached and before FEX read
+its config, which read as the tuning's fault. It was not: ntdll paired the CPU
+module by its exact `BaseDllName`, so `libwow64fex-opt.dll` found no unixlib,
+and a byte-twin build with the tuning off died the same way. The stem-based
+pairing (`dlls/ntdll/unix/horizon_unixlib_names.h`, see
+`startup-variant-unixlib.md`) is what fixed it, and the tuning is back on.
+
+The twin is still the control when a startup failure has to be placed: run the
+**FEX variant** workflow with `tune: off` (or build with
+`WINE_NX_FEX_TUNE_TEGRA_X1=OFF` locally) and the modules take the stock flags
+under the `-opt` names. A control build is never published as the `fex-opt`
+release; the release is what the main Build fetches into every SD archive.
 
 Both share Autorun's ABI headers in `horizon-wine/fex/` and are validated the
 same way. The point of the pair is an honest A/B on hardware: the tuning is
@@ -41,6 +57,13 @@ To land it: apply the patch on top of the `horizon-dlls` submodule pin
 push, and update the pin here; or open it as a pull request against
 `autorunhq/autorun-horizon-dlls`. `build.sh --dlls` then produces both module
 pairs in `switch/wine/drive_c/windows/system32/`.
+
+`build-fex.sh` applies one patch from `horizon-wine/fex/`, so a source tree
+that sets `TUNE_ARCH` to `armv8-a+crc` (the FEX-2610 port, which also knows
+`FEX_TUNE_TEGRA_X1`) needs `tegra-x1-arch-crc.patch` as well, or CMake spells
+the arch `armv8-a+crc+crc` and the compiler rejects it. The pinned FEX-2609
+takes `TUNE_CPU=cortex-a57` alone and needs none of it; the patch is kept for
+the day the variant's source changes.
 
 ## Who builds what
 
@@ -110,3 +133,9 @@ which one runs:
 
 Pick a translator per game, or delete the file to return the unpinned ones
 to the stock modules; no reinstalling is needed.
+
+Before believing a run, check which build the card actually carries:
+`switch/wine/fex-opt-manifest.json` says what the modules were tuned for
+(`"tune": "cortex-a57"`, or `null` for the control), and the `[CPU]` line says
+which file the runtime loaded. A tuned build that starts only as the twin is
+not a tuning result, it is the unixlib pairing again.
