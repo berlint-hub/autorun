@@ -160,7 +160,8 @@ The touchscreen works everywhere too.
 - pick how its graphics are drawn (Wine's Direct3D or DXVK), how a picture
   smaller than the screen is enlarged (FSR 1.0, or whole-pixel steps for pixel
   art), and **Frame Generation**;
-- pick the CPU translator (FEX or Box64), and give it its own controls.
+- pick the CPU translator (Box64, FEX, or the Switch-tuned FEX), and give it
+  its own controls.
 
 **Settings (−)**: show hidden games, the controls every game uses by default,
 a [SteamGridDB](https://www.steamgriddb.com) API key for artwork, returning to

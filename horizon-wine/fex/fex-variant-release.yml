@@ -1,12 +1,19 @@
-# The tuned Horizon FEX modules, built here because this tree is what changes
-# them, and published as the fex-opt release that Autorun's FEX variant
-# workflow (and anything else) downloads instead of building FEX itself.
+# The tuned Horizon FEX modules, published as the fex-opt release that
+# Autorun's FEX variant workflow (and anything else) downloads instead of
+# building FEX itself.
 #
 # To start publishing: copy this file to .github/workflows/ on the branch that
-# holds the tuned tree (arena/799d045b-fex). The three compile fixes the port
-# needs are in berlint-hub/autorun's horizon-wine/fex/tegra-x1-fixes.patch;
-# this workflow applies them to the build when the tree does not have them
-# yet, and it is better to merge them into the branch itself.
+# publishes. It builds the recipe build-dlls.py's fex-opt entry names: the
+# pinned FEX release with Autorun's Horizon patch, compiled for the Switch's
+# Cortex-A57 (WINE_NX_FEX_TUNE_TEGRA_X1). The tree this runs on does not
+# supply the source yet: a tree whose own Horizon layer is complete
+# (berlint-hub/FEX's arena/799d045b-fex still runs on fallback stubs -- no
+# W^X JIT alias and no I-cache flush, which faults on hardware) can become
+# the source by setting WINE_NX_FEX_DIR to its checkout (this one is
+# $GITHUB_WORKSPACE), WINE_NX_FEX_REVISION to the commit, and
+# WINE_NX_FEX_VERSION to its version; horizon-wine/fex/tegra-x1-fixes.patch
+# lists what that port was missing to compile, and the Horizon layer it still
+# owes is described in horizon-wine/fex/variants-build.md.
 name: FEX Horizon modules
 
 on:
@@ -36,14 +43,6 @@ jobs:
           git -C "$RUNNER_TEMP/dlls" apply \
             "$RUNNER_TEMP/autorun/horizon-wine/fex/dlls-fex-variants.patch"
 
-      - name: The compile fixes
-        run: |
-          if git apply --check "$RUNNER_TEMP/autorun/horizon-wine/fex/tegra-x1-fixes.patch"; then
-            echo "WINE_NX_FEX_PATCH=tegra-x1-fixes.patch" >> "$GITHUB_ENV"
-          else
-            echo "The compile fixes are already in the tree." >> "$GITHUB_STEP_SUMMARY"
-          fi
-
       - name: Fetch llvm-mingw
         run: |
           llvm_version=20260505
@@ -59,11 +58,8 @@ jobs:
         run: |
           set -o pipefail
           export AUTORUN="$RUNNER_TEMP/autorun"
-          export WINE_NX_FEX_DIR="$GITHUB_WORKSPACE"
-          export WINE_NX_FEX_REVISION="$(git rev-parse HEAD)"
           export WINE_NX_FEX_TUNE_TEGRA_X1=ON
           export WINE_NX_FEX_SUFFIX=-opt
-          export WINE_NX_FEX_VERSION=FEX-2610
           export WINE_NX_JOBS="$(nproc)"
           if sh "$RUNNER_TEMP/dlls/tools/build-fex.sh" 2>&1 | tee fex-build.log; then
             exit 0
