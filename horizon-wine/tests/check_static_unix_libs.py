@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Exercise the Horizon named Unix-library loader for native and WoW64 callers."""
+"""Exercise the Horizon named Unix-library loader for native and WoW64 callers.
+
+The table holds FEX's CPU modules under their canonical stems, so a variant
+build (libwow64fex-opt.dll) pairs with the same unixlib as the stock one.
+"""
 from pathlib import Path
 import re
 import subprocess
@@ -7,6 +11,9 @@ import tempfile
 
 root = Path(__file__).resolve().parents[2]
 source = (root / 'dlls/ntdll/unix/virtual.c').read_text()
+# The matcher the variant table uses lives in its own header, included by
+# virtual.c; the fixture compiles it the same way.
+names_header = (root / 'dlls/ntdll/unix/horizon_unixlib_names.h').read_text()
 
 
 def function(name):
@@ -20,7 +27,8 @@ def function(name):
 
 
 tables = []
-for name in ('wine_nx_static_unix_libs', 'wine_nx_static_wow64_unix_libs'):
+for name in ('wine_nx_static_unix_libs', 'wine_nx_static_wow64_unix_libs',
+             'wine_nx_variant_unix_libs'):
     at = source.index('} ' + name)
     tables.append(source[source.rfind('static const struct', 0, at):source.index('};', at) + 2])
 symbols = sorted(set(re.findall(r'\bwine_nx_\w+_funcs\b', '\n'.join(tables))))
@@ -28,6 +36,7 @@ counts = sorted(set(re.findall(r'\bwine_nx_\w+_count\b', '\n'.join(tables))))
 fixture = r'''
 #include <assert.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <string.h>
 typedef int NTSTATUS, BOOL;
 typedef uint16_t WCHAR;
@@ -41,6 +50,8 @@ typedef struct { uint16_t Length, MaximumLength; WCHAR *Buffer; } UNICODE_STRING
 #define STATUS_DLL_NOT_FOUND ((NTSTATUS)0xc0000135)
 #define STATUS_INVALID_HANDLE ((NTSTATUS)0xc0000008)
 #define ARRAY_SIZE(x) (sizeof(x) / sizeof((x)[0]))
+/* The unpaired-unixlib report is a log line; there is no log here. */
+#define ERR(...) ((void)0)
 #define WINE_NX_FEX
 #define WINE_NX_BOX64_INTERPRETER
 #define WINE_NX_AMD64
@@ -48,12 +59,26 @@ typedef struct { uint16_t Length, MaximumLength; WCHAR *Buffer; } UNICODE_STRING
 static int initialized, init_status;
 static NTSTATUS wine_nx_win32u_unix_init(void) { initialized++; return init_status; }
 '''
+fixture += '\n' + names_header
 fixture += '\n'.join(f'static const unixlib_entry_t {name}[1] = {{0}};' for name in symbols)
 fixture += '\n' + '\n'.join(f'static const unsigned int {name} = 1;' for name in counts)
 fixture += '\n' + '\n'.join(tables)
 fixture += '\n' + '\n'.join(function(name) for name in (
-    'wine_nx_unix_name_equal', 'wine_nx_load_static_unix_lib', 'wine_nx_unload_static_unix_lib'))
+    'wine_nx_unix_name_equal', 'wine_nx_report_unpaired_unix_lib',
+    'wine_nx_load_static_unix_lib', 'wine_nx_unload_static_unix_lib'))
 fixture += r'''
+static NTSTATUS status_of(const char *text, int wow, UINT64 res[2])
+{
+    size_t count = strlen(text), i;
+    WCHAR name[64];
+    UNICODE_STRING string;
+
+    assert(count < ARRAY_SIZE(name));
+    for (i = 0; i < count; i++) name[i] = text[i];
+    string.Length = string.MaximumLength = count * sizeof(WCHAR);
+    string.Buffer = name;
+    return wine_nx_load_static_unix_lib(&string, wow, res);
+}
 static void check(const char *text, int wow, const void *funcs)
 {
     size_t count = strlen(text);
@@ -73,6 +98,34 @@ static void check(const char *text, int wow, const void *funcs)
     name[0] = 0x177;
     assert(wine_nx_load_static_unix_lib(&string, wow, res) == STATUS_DLL_NOT_FOUND);
 }
+/* FEX asks for its unixlib by the canonical stem, by "<stem>.dll" and -- for a
+ * variant build beside the stock one -- by "<stem>-<variant>.dll". Only those
+ * spellings pair; the WoW64 caller keeps its exact-name table. */
+static void check_variant(const char *stem, const void *funcs)
+{
+    char text[64];
+    UINT64 res[2];
+
+    check(stem, 0, funcs);
+    snprintf(text, sizeof(text), "%s.dll", stem);
+    check(text, 0, funcs);
+    snprintf(text, sizeof(text), "%s-opt.dll", stem);
+    check(text, 0, funcs);
+    snprintf(text, sizeof(text), "%s-opt", stem);
+    check(text, 0, funcs);
+    snprintf(text, sizeof(text), "%s-TUNE_2.DLL", stem);
+    check(text, 0, funcs);
+    snprintf(text, sizeof(text), "%s2.dll", stem);
+    assert(status_of(text, 0, res) == STATUS_DLL_NOT_FOUND);
+    snprintf(text, sizeof(text), "%s-opt.exe", stem);
+    assert(status_of(text, 0, res) == STATUS_DLL_NOT_FOUND);
+    snprintf(text, sizeof(text), "%s-.dll", stem);
+    assert(status_of(text, 0, res) == STATUS_DLL_NOT_FOUND);
+    snprintf(text, sizeof(text), "%s.dll.bak", stem);
+    assert(status_of(text, 0, res) == STATUS_DLL_NOT_FOUND);
+    snprintf(text, sizeof(text), "%s-opt.dll", stem);
+    assert(status_of(text, 1, res) == STATUS_DLL_NOT_FOUND);
+}
 int main(void)
 {
     UINT64 res[2] = {0};
@@ -82,6 +135,8 @@ int main(void)
         check(wine_nx_static_unix_libs[i].name, 0, wine_nx_static_unix_libs[i].funcs);
     for (unsigned i = 0; i < ARRAY_SIZE(wine_nx_static_wow64_unix_libs); i++)
         check(wine_nx_static_wow64_unix_libs[i].name, 1, wine_nx_static_wow64_unix_libs[i].funcs);
+    for (unsigned i = 0; i < ARRAY_SIZE(wine_nx_variant_unix_libs); i++)
+        check_variant(wine_nx_variant_unix_libs[i].stem, wine_nx_variant_unix_libs[i].funcs);
     check("WineNXAudio.DRV", 0, wine_nx_audio_unix_funcs);
     check("WINENXAUDIO.DRV", 1, wine_nx_audio_wow64_unix_funcs);
     assert(initialized == 2);

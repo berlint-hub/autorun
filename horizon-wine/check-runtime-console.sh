@@ -16,6 +16,10 @@ flags="-std=gnu11 -Wall -Wextra -Werror -fsanitize=address,undefined -fno-omit-f
 "${CC:-clang}" $flags "$root/horizon-wine/tests/horizon_unixlib_names.c" -o "$build/unixlib_names"
 "$build/unixlib_names"
 CC="${CC:-clang}" python3 "$root/horizon-wine/tests/check_fex_unixlib.py"
+# The same table's contract for everything else it holds: exact names for the
+# native and WoW64 callers, stable handles, and the FEX stems that pair a
+# variant build with its unixlib.
+CC="${CC:-clang}" python3 "$root/horizon-wine/tests/check_static_unix_libs.py"
 "${CC:-clang}" $flags "$root/horizon-wine/tests/pointer_cursor.c" -o "$build/pointer_cursor"
 "$build/pointer_cursor"
 "${CC:-clang}" $flags "$root/horizon-wine/tests/horizon_message_queue.c" -o "$build/message_queue"
