@@ -34,6 +34,8 @@
 #ifdef WINE_NX_HAS_EMBEDDED_LOGO
 #include "forwarder.h"
 #endif
+#include "config_json.h"
+#include "launcher_backup.h"
 #include "launcher_catalog.h"
 #include "launcher_icons.h"
 #include "launcher_list.h"
@@ -3350,13 +3352,13 @@ static int program_menu( struct launcher *l, struct program *p, char *target, si
 
 enum settings_row
 {
-    SET_HIDDEN, SET_HIDE_MISSING, SET_DXVK_ON_ADD, SET_VERBOSE, SET_PROFILE, SET_WINDOWS,
+    SET_HIDDEN, SET_HIDE_MISSING, SET_DXVK_ON_ADD, SET_REMOVE_MISSING, SET_VERBOSE, SET_PROFILE, SET_WINDOWS,
     SET_INPUT, SET_INPUT_END = SET_INPUT + INPUT_ROW_COUNT - 1, SET_STEAMGRIDDB, SET_DOWNLOAD_COVERS,
     SET_DLLS, SET_UPDATE, SET_SETUP, SET_REOPEN, SET_MAKE_MAIN, SET_MAKE_32,
 #ifdef WINE_NX_SWAP_POC
     SET_SWAP_SIZE,
 #endif
-    SET_CREDITS, SETTINGS_ROWS
+    SET_BACKUP, SET_RESTORE, SET_CREDITS, SETTINGS_ROWS
 };
 
 static void save_look( struct launcher *l )
@@ -3533,6 +3535,185 @@ static void credits_screen( struct launcher *l )
 /* The sections of Settings, in the order they stand in the list. */
 enum settings_section { SET_SECTION_LIBRARY, SET_SECTION_DEFAULTS, SET_SECTION_CONTROLS, SET_SECTION_ARTWORK, SET_SECTION_SYSTEM };
 
+/* How many games of the library are not where they were added from. */
+static int missing_games( const struct launcher *l )
+{
+    int i, missing = 0;
+
+    for (i = 0; i < l->program_count; i++)
+        if (l->programs[i].added && !l->programs[i].removed && l->programs[i].missing) missing++;
+    return missing;
+}
+
+/* Every program whose settings a backup takes: the library's, and the ones run
+ * from the browser without being added. */
+static int backup_programs( struct launcher *l, const char **paths, int max )
+{
+    int i, count = 0;
+
+    for (i = 0; i < l->program_count && count < max; i++)
+        if (l->programs[i].path[0]) paths[count++] = l->programs[i].path;
+    return count;
+}
+
+/* The runtime writes its settings file when the launcher closes, so at the
+ * moment a copy is taken it may still hold what the card had before this
+ * session. Written from the rows the copy can see, it holds what they show;
+ * the runtime writes the same values again on the way out. */
+static void sync_defaults( struct launcher *l )
+{
+    struct wine_nx_config config;
+    char path[512];
+
+    runtime_file( l, "config/settings.json", path, sizeof(path) );
+    if (!wine_nx_config_load( &config, path )) return;
+    wine_nx_config_set_bool( &config, "verbose-log", l->options->verbose );
+    wine_nx_config_set_bool( &config, "profiler", l->options->profile );
+    wine_nx_config_set_bool( &config, "windows-through-opengl", !l->options->framebuffer );
+    wine_nx_config_set_bool( &config, "reopen-the-launcher-on-exit", l->options->reopen_launcher );
+    wine_nx_config_set_bool( &config, "dxvk-for-new-games", l->options->dxvk_on_add );
+    wine_nx_config_set_bool( &config, "keyboard-on-text-focus", l->options->swkbd_auto );
+    wine_nx_config_save( &config, path );
+}
+
+/* A copy of every setting on the card, in a folder of its own under the runtime
+ * (launcher_backup.c). Returns 1 and fills made, or 0 with error set. */
+static int keep_backup( struct launcher *l, struct launcher_backup *made, char *error, size_t error_size )
+{
+    const char *paths[LAUNCHER_MAX_ENTRIES];
+    char stamp[LAUNCHER_BACKUP_NAME];
+
+    sync_defaults( l );
+    launcher_backup_stamp( stamp, sizeof(stamp), now_seconds() );
+    return launcher_backup_create( l->options->runtime_dir, stamp, paths,
+                                   backup_programs( l, paths, LAUNCHER_MAX_ENTRIES ),
+                                   made, error, error_size );
+}
+
+static void backup_settings( struct launcher *l )
+{
+    struct launcher_backup made;
+    char detail[64], text[96], error[192];
+
+    if (!keep_backup( l, &made, error, sizeof(error) ))
+    {
+        ui_message( &l->ui, "Back up settings", error );
+        return;
+    }
+    launcher_backup_detail( detail, sizeof(detail), &made );
+    snprintf( text, sizeof(text), "Kept %s", detail );
+    ui_toast( &l->ui, text, 2400 );
+}
+
+/* The runtime's defaults, out of its settings file: the six rows of Game
+ * defaults and Library that it owns. A key the file does not have keeps what is
+ * in memory. */
+static void reload_defaults( struct launcher *l )
+{
+    struct wine_nx_config config;
+    char path[512];
+
+    runtime_file( l, "config/settings.json", path, sizeof(path) );
+    if (!wine_nx_config_load( &config, path )) return;
+    l->options->verbose = wine_nx_config_bool( &config, "verbose-log", l->options->verbose ) != 0;
+    l->options->profile = wine_nx_config_bool( &config, "profiler", l->options->profile ) != 0;
+    l->options->framebuffer = !wine_nx_config_bool( &config, "windows-through-opengl", !l->options->framebuffer );
+    l->options->reopen_launcher = wine_nx_config_bool( &config, "reopen-the-launcher-on-exit", l->options->reopen_launcher ) != 0;
+    l->options->dxvk_on_add = wine_nx_config_bool( &config, "dxvk-for-new-games", l->options->dxvk_on_add ) != 0;
+    l->options->swkbd_auto = wine_nx_config_bool( &config, "keyboard-on-text-focus", l->options->swkbd_auto ) != 0;
+}
+
+/* The look, the defaults and every game's settings, read again from the card
+ * after a backup was put back over them. */
+static void reload_settings( struct launcher *l )
+{
+    char path[512];
+    int i;
+
+    runtime_file( l, "launcher.txt", path, sizeof(path) );
+    launcher_kv_load( &l->look, path );
+    l->show_hidden = launcher_kv_get_int( &l->look, "show-hidden", 0 ) == 1;
+    l->hide_missing = launcher_kv_get_int( &l->look, "hide-missing", 0 ) == 1;
+    if (!launcher_kv_get( &l->look, "browse", l->browse_dir, sizeof(l->browse_dir) ) || !l->browse_dir[0])
+        snprintf( l->browse_dir, sizeof(l->browse_dir), "%s", LAUNCHER_DRIVE_C );
+    reload_defaults( l );
+    for (i = 0; i < l->program_count; i++) load_program_settings( l, &l->programs[i] );
+    rebuild_visible( l, -1 );
+    rebuild_history( l, -1 );
+}
+
+static void restore_settings( struct launcher *l, struct ui_list *list )
+{
+    struct launcher_backup backups[LAUNCHER_BACKUP_MAX], replaced;
+    struct ui_row items[LAUNCHER_BACKUP_MAX];
+    char text[256], error[192];
+    unsigned int restored;
+    int count, chosen, i;
+
+    if (!launcher_backup_list( l->options->runtime_dir, backups, LAUNCHER_BACKUP_MAX, &count ) || !count)
+    {
+        ui_message( &l->ui, "Restore settings", "There is no backup on the card yet. \"Back up settings\" keeps one." );
+        return;
+    }
+    memset( items, 0, sizeof(items) );
+    for (i = 0; i < count; i++)
+    {
+        launcher_backup_title( items[i].label, sizeof(items[i].label), backups[i].name );
+        launcher_backup_detail( items[i].value, sizeof(items[i].value), &backups[i] );
+    }
+    chosen = ui_settings_dropdown( &l->ui, list, items, count, 0 );
+    if (chosen < 0) return;
+    snprintf( text, sizeof(text), "Put back the settings of %s? The settings they replace are kept as a backup of their own.",
+              items[chosen].label );
+    if (!ui_confirm( &l->ui, "Restore settings", text, "Restore" )) return;
+    /* A restore can itself be undone, so what it walks over is kept first. */
+    keep_backup( l, &replaced, error, sizeof(error) );
+    if (!launcher_backup_restore( l->options->runtime_dir, backups[chosen].name, &restored, error, sizeof(error) ))
+    {
+        ui_message( &l->ui, "Restore settings", error );
+        return;
+    }
+    reload_settings( l );
+    snprintf( text, sizeof(text), "%u %s put back", restored, restored == 1 ? "file" : "files" );
+    ui_toast( &l->ui, text, 2600 );
+}
+
+static void remove_missing_games( struct launcher *l )
+{
+    unsigned char touched[LAUNCHER_MAX_ENTRIES] = {0};
+    char text[192];
+    int i, gone = missing_games( l );
+
+    if (!gone)
+    {
+        ui_message( &l->ui, "Remove missing games", "Every game in the library is where it was added from." );
+        return;
+    }
+    if (gone == 1)
+        snprintf( text, sizeof(text), "Take the game whose executable is gone out of the library? "
+                                      "Its settings stay on the card." );
+    else
+        snprintf( text, sizeof(text), "Take %d games whose executable is gone out of the library? "
+                                      "Their settings stay on the card.", gone );
+    if (!ui_confirm( &l->ui, "Remove missing games", text, "Remove" )) return;
+    for (i = 0; i < l->program_count && i < LAUNCHER_MAX_ENTRIES; i++)
+        if (l->programs[i].added && !l->programs[i].removed && l->programs[i].missing)
+        {
+            l->programs[i].removed = 1;
+            touched[i] = 1;
+        }
+    if (!save_library( l ))   /* it says what went wrong, and the library is left as it was */
+    {
+        for (i = 0; i < l->program_count && i < LAUNCHER_MAX_ENTRIES; i++)
+            if (touched[i]) l->programs[i].removed = 0;
+        return;
+    }
+    rebuild_visible( l, -1 );
+    rebuild_history( l, -1 );
+    snprintf( text, sizeof(text), "%d %s removed", gone, gone == 1 ? "game" : "games" );
+    ui_toast( &l->ui, text, 2200 );
+}
+
 static void settings_menu( struct launcher *l )
 {
     static const char *const sections[] = { "Library", "Game defaults", "Controls", "Artwork", "System" };
@@ -3552,6 +3733,7 @@ static void settings_menu( struct launcher *l )
             [SET_HIDDEN] = SET_SECTION_LIBRARY,
             [SET_HIDE_MISSING] = SET_SECTION_LIBRARY,
             [SET_DXVK_ON_ADD] = SET_SECTION_LIBRARY,
+            [SET_REMOVE_MISSING] = SET_SECTION_LIBRARY,
             [SET_VERBOSE] = SET_SECTION_DEFAULTS, [SET_PROFILE] = SET_SECTION_DEFAULTS,
             [SET_WINDOWS] = SET_SECTION_DEFAULTS,
             [SET_STEAMGRIDDB] = SET_SECTION_ARTWORK,
@@ -3565,6 +3747,8 @@ static void settings_menu( struct launcher *l )
 #ifdef WINE_NX_SWAP_POC
             [SET_SWAP_SIZE] = SET_SECTION_SYSTEM,
 #endif
+            [SET_BACKUP] = SET_SECTION_SYSTEM,
+            [SET_RESTORE] = SET_SECTION_SYSTEM,
             [SET_CREDITS] = SET_SECTION_SYSTEM,
         };
 
@@ -3590,6 +3774,18 @@ static void settings_menu( struct launcher *l )
         rows[SET_DXVK_ON_ADD].kind = UI_ROW_SWITCH;
         rows[SET_DXVK_ON_ADD].on = !!l->options->dxvk_on_add;
         rows[SET_DXVK_ON_ADD].help = "New games use DXVK. When off, newly added games use Wine.";
+        {
+            int missing = missing_games( l );
+
+            snprintf( rows[SET_REMOVE_MISSING].label, sizeof(rows[0].label), "Remove missing games" );
+            snprintf( rows[SET_REMOVE_MISSING].value, sizeof(rows[0].value), "%d %s", missing,
+                      missing == 1 ? "game" : "games" );
+            rows[SET_REMOVE_MISSING].kind = UI_ROW_ACTION;
+            rows[SET_REMOVE_MISSING].adjustable = 0;
+            rows[SET_REMOVE_MISSING].disabled = !missing;
+            rows[SET_REMOVE_MISSING].help = "Takes the games whose executable is gone out of the library. "
+                                            "Their settings and artwork stay on the card.";
+        }
         snprintf( rows[SET_VERBOSE].label, sizeof(rows[0].label), "Verbose traces" );
         snprintf( rows[SET_VERBOSE].value, sizeof(rows[0].value), "%s", on_off[!!l->options->verbose] );
         rows[SET_VERBOSE].kind = UI_ROW_SWITCH;
@@ -3674,6 +3870,24 @@ static void settings_menu( struct launcher *l )
                                        "GPU and shared memory stay in RAM. Off removes the swap files.";
         }
 #endif
+        {
+            int backups = launcher_backup_count( l->options->runtime_dir );
+
+            snprintf( rows[SET_BACKUP].label, sizeof(rows[0].label), "Back up settings" );
+            if (backups) snprintf( rows[SET_BACKUP].value, sizeof(rows[0].value), "%d kept", backups );
+            else snprintf( rows[SET_BACKUP].value, sizeof(rows[0].value), "None yet" );
+            rows[SET_BACKUP].kind = UI_ROW_ACTION;
+            rows[SET_BACKUP].adjustable = 0;
+            rows[SET_BACKUP].help = "Keeps a copy of the look, the controls and the settings of every game, under "
+                                    "switch/wine/backups. The last five are kept.";
+            snprintf( rows[SET_RESTORE].label, sizeof(rows[0].label), "Restore settings" );
+            snprintf( rows[SET_RESTORE].value, sizeof(rows[0].value), "%s", backups ? "Choose one" : "None yet" );
+            rows[SET_RESTORE].kind = UI_ROW_ACTION;
+            rows[SET_RESTORE].adjustable = 0;
+            rows[SET_RESTORE].disabled = !backups;
+            rows[SET_RESTORE].help = "Puts the settings of a copy back. The settings it replaces are kept as a "
+                                     "backup of their own.";
+        }
         snprintf( rows[SET_CREDITS].label, sizeof(rows[0].label), "Credits" );
         rows[SET_CREDITS].kind = UI_ROW_ACTION;
         rows[SET_CREDITS].help = "People and projects behind Autorun.";
@@ -3779,6 +3993,16 @@ static void settings_menu( struct launcher *l )
             break;
         }
 #endif
+
+        case SET_REMOVE_MISSING:
+            if (action == UI_ACTION_CHOOSE) remove_missing_games( l );
+            continue;
+        case SET_BACKUP:
+            if (action == UI_ACTION_CHOOSE) backup_settings( l );
+            continue;
+        case SET_RESTORE:
+            if (action == UI_ACTION_CHOOSE) restore_settings( l, &list );
+            continue;
 
         case SET_CREDITS:
             credits_screen( l );

@@ -182,6 +182,16 @@ the whole screen the same way, with no side bars.
 a [SteamGridDB](https://www.steamgriddb.com) API key for artwork, returning to
 Autorun when a game ends, updates, the Windows DLLs, and the credits.
 
+**Back up settings** keeps a copy of the look, the controls and every game's
+settings in `switch/wine/backups`, which is what to come back to when a game
+has been tuned into not starting at all; the last five copies are kept, and
+**Restore settings** puts one back and keeps the settings it replaces as
+another copy, so a restore can be undone the same way. The library itself --
+the games, their artwork and their play time -- is not part of a copy.
+**Remove missing games** takes the games whose executable is gone out of the
+library in one go, for a USB drive that was renamed or unplugged for good, and
+leaves their settings on the card.
+
 ### Frame generation
 
 LSFG-VK doubles the frame rate of Vulkan games (DXVK and VKD3D-Proton count) by

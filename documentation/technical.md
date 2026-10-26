@@ -178,6 +178,24 @@ replaced by it), then adds the difference to `play-seconds` the next time it
 opens, so a game that is closed any way at all is still counted. A run longer
 than a day is credited one day.
 
+Settings > System > **Back up settings** writes a copy of everything above that
+is a setting and not content (`source/launcher_backup.c`), under
+`backups/<stamp>/`: the files themselves as `files/NNNN`, and `manifest.txt`
+saying where each came from, one `<NNNN>\t<path>` line each. It takes
+`launcher.txt`, `keys.txt`, `args.txt` and `config/keys.txt`, the runtime's
+`config/settings.json`, every game's own `NAME.wine-nx.txt`, `NAME.args.txt`,
+`NAME.keys.txt` and `NAME.box64.txt` beside it, and the `program-settings`
+folder that holds the settings of games on USB. Names are the time it was
+taken (`2026-10-26-1745`, and `-2` for a second one in the same minute), which
+is what the list is sorted by, and the last five are kept and the rest
+removed. **Restore settings** copies each file back to the path in its
+manifest, making a folder that is gone again, and takes a copy of the settings
+it is about to replace first, so a restore can be undone by restoring that
+copy. The launcher then re-reads the look, the runtime defaults
+(`config/settings.json`) and every game's settings without a restart; the
+library, the artwork and the play time are not part of a copy and are never
+written by one.
+
 ## Logs
 
 Everything the runtime writes is in `switch/wine/logs`. Each run writes
