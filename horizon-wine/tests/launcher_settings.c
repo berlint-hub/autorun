@@ -432,7 +432,9 @@ int main(void)
     test_panel_follow();
     test_settings( dir );
     snprintf( command, sizeof(command), "rm -rf '%s'", dir );
-    system( command );
+    /* A test directory left behind is not a failure of what was tested, but the
+     * result is read: with fortify on, ignoring it is a build error. */
+    if (system( command )) printf( "launcher_settings: could not remove %s\n", dir );
     printf( "launcher_settings: all tests passed\n" );
     return 0;
 }
