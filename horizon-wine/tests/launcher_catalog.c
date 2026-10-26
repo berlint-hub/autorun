@@ -143,6 +143,20 @@ static void check_play_time(void)
     assert( !strcmp( text, "100h" ) );
     /* A buffer of no room is written to nothing, not overrun. */
     launcher_playtime_text( text, 0, 3725 );
+
+    /* What the Library row of Settings says the card holds. */
+    launcher_library_summary( text, sizeof(text), 0, 0 );
+    assert( !strcmp( text, "No games yet" ) );
+    launcher_library_summary( text, sizeof(text), 1, 0 );
+    assert( !strcmp( text, "1 game, not played yet" ) );
+    launcher_library_summary( text, sizeof(text), 12, 0 );
+    assert( !strcmp( text, "12 games, not played yet" ) );
+    launcher_library_summary( text, sizeof(text), 1, 60 );
+    assert( !strcmp( text, "1 game, 1m played" ) );
+    launcher_library_summary( text, sizeof(text), 12, 3725 );
+    assert( !strcmp( text, "12 games, 1h 2m played" ) );
+    launcher_library_summary( text, sizeof(text), 3, UINT_MAX );
+    assert( !strcmp( text, "3 games, 1193046h 28m played" ) );
     launcher_lastplayed_text( text, sizeof(text), 0, 5000 );
     assert( !strcmp( text, "Never" ) );
 

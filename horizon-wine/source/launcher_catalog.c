@@ -319,6 +319,19 @@ void launcher_playtime_text( char *out, size_t size, unsigned int seconds )
     else snprintf( out, size, "%uh %um", hours, minutes % 60 );
 }
 
+void launcher_library_summary( char *out, size_t size, int games, unsigned int play_seconds )
+{
+    char played[32];
+
+    if (games <= 0) snprintf( out, size, "No games yet" );
+    else if (!play_seconds) snprintf( out, size, "%d %s, not played yet", games, games == 1 ? "game" : "games" );
+    else
+    {
+        launcher_playtime_text( played, sizeof(played), play_seconds );
+        snprintf( out, size, "%d %s, %s played", games, games == 1 ? "game" : "games", played );
+    }
+}
+
 void launcher_lastplayed_text( char *out, size_t size, unsigned int last_played, unsigned int now )
 {
     unsigned int days, count;

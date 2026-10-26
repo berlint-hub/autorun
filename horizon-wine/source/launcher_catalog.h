@@ -82,5 +82,8 @@ int launcher_catalog_settle_sessions( struct launcher_catalog *catalog, unsigned
 void launcher_playtime_text( char *out, size_t size, unsigned int seconds );
 /* "Today", "Yesterday", "3 days ago", "2 months ago"; "Never" for 0. */
 void launcher_lastplayed_text( char *out, size_t size, unsigned int last_played, unsigned int now );
+/* What the library holds, for the row that says it: "12 games, 34h 20m played",
+ * "1 game, not played yet", "No games yet". */
+void launcher_library_summary( char *out, size_t size, int games, unsigned int play_seconds );
 
 #endif

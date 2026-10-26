@@ -173,14 +173,20 @@ played**.
   frame cap in one go, or put the game back to its defaults with **Reset
   settings**. A preset never changes the renderer, the upscaling or frame
   generation, and one that asks for the tuned FEX falls back to the stock
-  modules when they are not installed.
+  modules when they are not installed;
+- take another game's settings with **Copy settings from**, for a series or an
+  engine where every game wants the same ones. The title, whether it is hidden,
+  the arguments, the controls and the artwork stay with each game.
 
 A window smaller than the desktop — an FMV movie player, say — stretches over
 the whole screen the same way, with no side bars.
 
 **Settings (−)**: show hidden games, the controls every game uses by default,
 a [SteamGridDB](https://www.steamgriddb.com) API key for artwork, returning to
-Autorun when a game ends, updates, the Windows DLLs, and the credits.
+Autorun when a game ends, updates, the Windows DLLs, and the credits. Its
+Library section opens with what the library holds — how many games, how long
+they have been played and how many are hidden — and can take the games whose
+executable is gone out of it in one go.
 
 **Back up settings** keeps a copy of the look, the controls and every game's
 settings in `switch/wine/backups`, which is what to come back to when a game
@@ -188,9 +194,8 @@ has been tuned into not starting at all; the last five copies are kept, and
 **Restore settings** puts one back and keeps the settings it replaces as
 another copy, so a restore can be undone the same way. The library itself --
 the games, their artwork and their play time -- is not part of a copy.
-**Remove missing games** takes the games whose executable is gone out of the
-library in one go, for a USB drive that was renamed or unplugged for good, and
-leaves their settings on the card.
+**Remove missing games** does the same for a USB drive that was renamed or
+unplugged for good, and leaves their settings on the card.
 
 ### Frame generation
 
@@ -218,6 +223,9 @@ games, or a game's options (**Y**) -> **Controls** for that game alone. Each
 stick, the d-pad and the touchscreen can move the mouse or send the arrow keys
 or W A S D. Games with controller support see an Xbox 360 controller, through
 XInput or DirectInput.
+
+Starting a game below **15 %** battery asks first, since a console that runs out
+where it stands can take a save with it; on the charger it starts straight away.
 
 **Hold + and − together for a second** to close a game.
 

@@ -16,6 +16,7 @@
  */
 #include <dirent.h>
 #include <errno.h>
+#include <limits.h>
 #include <math.h>
 #include <stdarg.h>
 #include <stdint.h>
@@ -1829,7 +1830,7 @@ static void draw_home( struct launcher *l )
 
 enum program_row
 {
-    ROW_START, ROW_PRESET, ROW_FAVORITE, ROW_ARTWORK, ROW_FORWARDER, ROW_LOCATE, ROW_PLAYED, ROW_TITLE,
+    ROW_START, ROW_PRESET, ROW_COPY, ROW_FAVORITE, ROW_ARTWORK, ROW_FORWARDER, ROW_LOCATE, ROW_PLAYED, ROW_TITLE,
     ROW_ARGS, ROW_RESET, ROW_VERBOSE, ROW_PROFILE,
     ROW_WINDOWS, ROW_ASPECT, ROW_RESOLUTION, ROW_D3D9, ROW_VKD3D_VERSION, ROW_DXVK_VERSION, ROW_DXVK_OPTIONS, ROW_DXVK_HUD, ROW_FRAME_LIMIT, ROW_VSYNC,
     ROW_VOODOO,
@@ -2084,6 +2085,9 @@ static int prepare_program_graphics( struct launcher *l, struct program *p )
 }
 
 
+/* Below this charge a game started now can outlast the battery. */
+#define LAUNCHER_LOW_BATTERY 15
+
 static int start_program( struct launcher *l, struct program *p, char *target, size_t size )
 {
     struct ui *ui = &l->ui;
@@ -2110,6 +2114,11 @@ static int start_program( struct launcher *l, struct program *p, char *target, s
     }
     /* Autorun ships no Windows DLLs: a card without them is offered them here. */
     if (!launcher_dlls_ready( l->dlls )) return 0;
+    /* A run that ends because the battery went can take a save with it. */
+    if ((l->status & LAUNCHER_STATUS_BATTERY) && !l->charging && l->battery < LAUNCHER_LOW_BATTERY &&
+        !ui_confirm( ui, "Low battery", "The battery is nearly empty, and the console turns off where it "
+                                        "stands when it runs out. Start the game anyway?", "Start" ))
+        return 0;
     /* A game with a fix in the game fixes repository is asked about it; one
      * that was applied may have changed its settings, so they are read again. */
     fix_start = launcher_fixes_before_start( l->fixes, p->title, p->path, setup, sizeof(setup) );
@@ -2568,6 +2577,10 @@ static int program_menu_run( struct launcher *l, struct program *p, char *target
             snprintf( row->value, sizeof(row->value), "%s", launcher_preset_label( preset ) );
             row->help = launcher_preset_help( preset );
         }
+        ADD_ROW( ROW_COPY, SECTION_GENERAL, "Copy settings from",
+                 "Takes another game's settings for this one, for games of the same engine or the same kind: "
+                 "the translator, the renderer, the graphics, the frame pacing and frame generation. The title, "
+                 "whether it is hidden, the arguments, the controls and the artwork stay with each game." );
 
         ADD_ROW( ROW_FAVORITE, SECTION_GENERAL, "Favorite", "Keeps the game in the Favorites filter of the library." );
         row->kind = UI_ROW_SWITCH;
@@ -2928,6 +2941,72 @@ static int program_menu_run( struct launcher *l, struct program *p, char *target
             save_program_settings( l, p );
             snprintf( line, sizeof(line), "%s preset applied", launcher_preset_label( selected ) );
             ui_toast( ui, line, 1800 );
+            break;
+        }
+
+        case ROW_COPY:
+        {
+            struct ui_row *sources;
+            struct dxvk_version dxvk, vkd3d;
+            char from_title[128], text[512];
+            int chosen, selectable = 0, j;
+
+            if (action != UI_ACTION_CHOOSE) break;
+            if (!(sources = calloc( (size_t)(l->visible_count ? l->visible_count : 1), sizeof(*sources) )))
+            {
+                ui_message( ui, "Copy settings", "There is not enough memory to list the library." );
+                break;
+            }
+            for (j = 0; j < l->visible_count; j++)
+            {
+                const struct program *from = &l->programs[l->visible[j]];
+
+                snprintf( sources[j].label, sizeof(sources[j].label), "%s", from->title );
+                if (!strcmp( from->path, p->path ))
+                {
+                    sources[j].disabled = 1;
+                    snprintf( sources[j].value, sizeof(sources[j].value), "This one" );
+                }
+                else
+                {
+                    selectable++;
+                    snprintf( sources[j].value, sizeof(sources[j].value), "%s",
+                              launcher_preset_label( launcher_preset_match( &from->settings,
+                                                                            translator_availability( l, from ) ) ) );
+                }
+            }
+            if (!selectable)
+            {
+                free( sources );
+                ui_message( ui, "Copy settings", "There is no other game in the library to take settings from." );
+                break;
+            }
+            /* From the one it can take, since a game does not copy its own. */
+            for (j = 0, chosen = 0; j < l->visible_count; j++)
+                if (!sources[j].disabled) { chosen = j; break; }
+            chosen = ui_settings_dropdown( ui, &list, sources, l->visible_count, chosen );
+            if (chosen < 0 || chosen >= l->visible_count || sources[chosen].disabled)
+            {
+                free( sources );
+                break;
+            }
+            snprintf( from_title, sizeof(from_title), "%s", sources[chosen].label );
+            free( sources );
+            snprintf( text, sizeof(text), "Take the settings of %s for %s? The title, whether it is hidden, the "
+                                          "arguments, the controls and the artwork stay with each game.",
+                      from_title, p->title );
+            if (!ui_confirm( ui, "Copy settings", text, "Copy" )) break;
+            launcher_settings_copy( &p->settings, &l->programs[l->visible[chosen]].settings );
+            /* A DXVK or VKD3D-Proton version the other game picked may not be
+             * installed for this one's machine: the installed one is used. */
+            dxvk_resolve_version( p->settings.dxvk_source, l->options->runtime_dir, p->machine,
+                                  p->settings.dxvk_version, &dxvk );
+            if (!dxvk.installed) p->settings.dxvk_version[0] = 0;
+            vkd3d_resolve_version( l->options->runtime_dir, p->machine, p->settings.vkd3d_version, &vkd3d );
+            if (!vkd3d.installed) p->settings.vkd3d_version[0] = 0;
+            save_program_settings( l, p );
+            save_library( l );
+            ui_toast( ui, "Settings copied", 1800 );
             break;
         }
 
@@ -3352,7 +3431,7 @@ static int program_menu( struct launcher *l, struct program *p, char *target, si
 
 enum settings_row
 {
-    SET_HIDDEN, SET_HIDE_MISSING, SET_DXVK_ON_ADD, SET_REMOVE_MISSING, SET_VERBOSE, SET_PROFILE, SET_WINDOWS,
+    SET_STATS, SET_HIDDEN, SET_HIDE_MISSING, SET_DXVK_ON_ADD, SET_REMOVE_MISSING, SET_VERBOSE, SET_PROFILE, SET_WINDOWS,
     SET_INPUT, SET_INPUT_END = SET_INPUT + INPUT_ROW_COUNT - 1, SET_STEAMGRIDDB, SET_DOWNLOAD_COVERS,
     SET_DLLS, SET_UPDATE, SET_SETUP, SET_REOPEN, SET_MAKE_MAIN, SET_MAKE_32,
 #ifdef WINE_NX_SWAP_POC
@@ -3730,6 +3809,7 @@ static void settings_menu( struct launcher *l )
         int i;
         static const unsigned char row_section[SETTINGS_ROWS] =
         {
+            [SET_STATS] = SET_SECTION_LIBRARY,
             [SET_HIDDEN] = SET_SECTION_LIBRARY,
             [SET_HIDE_MISSING] = SET_SECTION_LIBRARY,
             [SET_DXVK_ON_ADD] = SET_SECTION_LIBRARY,
@@ -3758,6 +3838,30 @@ static void settings_menu( struct launcher *l )
             rows[i].adjustable = 1;
             rows[i].kind = UI_ROW_VALUE;
             rows[i].group = row_section[i];
+        }
+        {
+            unsigned long long played = 0;
+            int games = 0, hidden = 0;
+            char summary[96];
+
+            for (i = 0; i < l->program_count; i++)
+            {
+                const struct program *game = &l->programs[i];
+
+                if (game->removed || !game->added) continue;
+                games++;
+                hidden += game->settings.hidden ? 1 : 0;
+                played += game->play_seconds;
+            }
+            if (played > UINT_MAX) played = UINT_MAX;
+            launcher_library_summary( summary, sizeof(summary), games, (unsigned int)played );
+            snprintf( rows[SET_STATS].label, sizeof(rows[0].label), "Library" );
+            if (hidden) snprintf( rows[SET_STATS].value, sizeof(rows[0].value), "%s, %d hidden", summary, hidden );
+            else snprintf( rows[SET_STATS].value, sizeof(rows[0].value), "%s", summary );
+            rows[SET_STATS].kind = UI_ROW_INFO;
+            rows[SET_STATS].adjustable = 0;
+            rows[SET_STATS].help = "What the library holds: the games added to it, the time they have been played, "
+                                   "and how many of them are hidden from it.";
         }
         snprintf( rows[SET_HIDDEN].label, sizeof(rows[0].label), "Show hidden programs" );
         snprintf( rows[SET_HIDDEN].value, sizeof(rows[0].value), "%s", on_off[l->show_hidden] );

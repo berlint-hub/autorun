@@ -299,6 +299,32 @@ static void test_settings( const char *dir )
     assert( !strcmp( path, "sdmc:/Games/Test/Game.wine-nx.txt" ) );
 }
 
+/* A game that runs the same as another takes its settings, but not its name or
+ * whether it is hidden. */
+static void test_copy(void)
+{
+    struct launcher_settings from, to;
+
+    memset( &from, 0, sizeof(from) );
+    memset( &to, 0xff, sizeof(to) );
+    snprintf( from.title, sizeof(from.title), "SPEED2" );
+    from.hidden = 1;
+    from.fex = 2;
+    from.d3d = LAUNCHER_D3D_DXVK_VKD3D;
+    from.frame_limit = 3;
+    from.vsync = 0;
+    from.upscaling = 1;
+    from.lsfg_enabled = 1;
+    snprintf( from.dxvk_version, sizeof(from.dxvk_version), "2.4.1" );
+
+    launcher_settings_copy( &to, &from );
+    assert( !to.title[0] && !to.hidden );
+    assert( to.fex == 2 && to.d3d == LAUNCHER_D3D_DXVK_VKD3D && to.frame_limit == 3 && !to.vsync );
+    assert( to.upscaling == 1 && to.lsfg_enabled == 1 && !strcmp( to.dxvk_version, "2.4.1" ) );
+    /* The game it came from is left as it was. */
+    assert( !strcmp( from.title, "SPEED2" ) && from.hidden == 1 );
+}
+
 int main(void)
 {
     char dir[] = "/tmp/launcher-settings.XXXXXX", command[64];
@@ -306,6 +332,7 @@ int main(void)
     assert( mkdtemp( dir ) );
     test_get();
     test_set();
+    test_copy();
     test_settings( dir );
     snprintf( command, sizeof(command), "rm -rf '%s'", dir );
     system( command );

@@ -169,7 +169,11 @@ programs. Application-local graphics DLLs have priority. Existing
 `d3d9=dxvk` settings remain readable. A game's settings can be set in one go
 from a preset (Balanced, Performance, Battery, Compatibility), which writes the
 same keys: the preset touches only the translator, the fast paths, vsync and
-the frame limit, never the renderer, the upscaler or frame generation.
+the frame limit, never the renderer, the upscaler or frame generation. Another
+game's settings can be taken whole with Copy settings from
+(`launcher_settings_copy()`): everything but the title and whether it is hidden,
+which belong to the game itself, and a DXVK or VKD3D-Proton version that is not
+installed for the other game's machine is dropped, so the installed one is used.
 
 The launcher's look is kept in `launcher.txt` and its library in
 `launcher-library-v2.ini`. Each game there carries the time it has been played:

@@ -563,6 +563,16 @@ static inline void launcher_settings_read( const struct launcher_kv *kv, struct 
     }
 }
 
+/* Another game's settings, for a game that runs the same way: everything but
+ * the title and whether it is hidden, which belong to the game itself and not
+ * to how it runs. */
+static inline void launcher_settings_copy( struct launcher_settings *into, const struct launcher_settings *from )
+{
+    *into = *from;
+    into->title[0] = 0;
+    into->hidden = 0;
+}
+
 /* Store settings, leaving out what matches the global settings. */
 static inline int launcher_settings_write( struct launcher_kv *kv, const struct launcher_settings *settings )
 {
