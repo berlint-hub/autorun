@@ -670,7 +670,7 @@ add_executable(wine-nx-runtime
 
 target_sources(wine-nx-runtime PRIVATE
     "${CMAKE_CURRENT_BINARY_DIR}/forwarder_embed.c"
-    source/launcher.c source/launcher_graphics.c source/launcher_dxvk.c source/launcher_voodoo.c source/dxvk_options.c source/launcher_catalog.c source/launcher_console.c
+    source/launcher.c source/launcher_graphics.c source/launcher_dxvk.c source/launcher_voodoo.c source/dxvk_options.c source/launcher_catalog.c source/launcher_preset.c source/launcher_console.c
     source/input_profile.c source/launcher_input.c
     source/game_settings.c source/launcher_game_settings.c
     source/launcher_svg.c source/launcher_ui.c source/launcher_audio.c source/launcher_forwarder.c

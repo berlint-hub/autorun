@@ -166,8 +166,17 @@ its executable, named after it:
 
 `d3d=dxvk` selects `C:\dxvk` for x86 programs and `C:\dxvk64` for AMD64
 programs. Application-local graphics DLLs have priority. Existing
-`d3d9=dxvk` settings remain readable. The launcher's look is kept in
-`launcher.txt` and its library in `launcher-library-v2.ini`.
+`d3d9=dxvk` settings remain readable. A game's settings can be set in one go
+from a preset (Balanced, Performance, Battery, Compatibility), which writes the
+same keys: the preset touches only the translator, the fast paths, vsync and
+the frame limit, never the renderer, the upscaler or frame generation.
+
+The launcher's look is kept in `launcher.txt` and its library in
+`launcher-library-v2.ini`. Each game there carries the time it has been played:
+the launcher writes `started-at` as it starts a game (it is about to be
+replaced by it), then adds the difference to `play-seconds` the next time it
+opens, so a game that is closed any way at all is still counted. A run longer
+than a day is credited one day.
 
 ## Logs
 

@@ -153,6 +153,12 @@ decoder that game movies and music play through. It runs by itself, once.
 
 The touchscreen works everywhere too.
 
+Every game shows how long it has been played — a badge on its card in the
+Library, and the date it was last started in its options (**Y**). Autorun
+closes when a game starts, so a run is timed while the game is on and counted
+the next time Autorun is opened; the Library's **−** menu can sort by **Most
+played**.
+
 **A game's options (Y)**:
 - mark it as a favorite or hide it, change its title, give it command-line
   arguments, and download its artwork;
@@ -161,7 +167,13 @@ The touchscreen works everywhere too.
   smaller than the screen is enlarged (FSR 1.0, or whole-pixel steps for pixel
   art), and **Frame Generation**;
 - pick the CPU translator (Box64, FEX, or the Switch-tuned FEX), and give it
-  its own controls.
+  its own controls;
+- pick a **preset** — **Balanced**, **Performance**, **Battery** or
+  **Compatibility** — which sets the translator, the fast paths, vsync and the
+  frame cap in one go, or put the game back to its defaults with **Reset
+  settings**. A preset never changes the renderer, the upscaling or frame
+  generation, and one that asks for the tuned FEX falls back to the stock
+  modules when they are not installed.
 
 A window smaller than the desktop — an FMV movie player, say — stretches over
 the whole screen the same way, with no side bars.

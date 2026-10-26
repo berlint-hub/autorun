@@ -1,4 +1,5 @@
 #include <assert.h>
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -77,6 +78,124 @@ static void check_address_space(void)
     assert( launcher_program_address_space( path ) == LAUNCHER_ADDRESS_UNKNOWN );
 }
 
+/* A run is timed by started_at and credited the next time the launcher is
+ * opened; nothing a broken clock says becomes play time. */
+static void check_play_time(void)
+{
+    struct launcher_catalog catalog;
+    struct launcher_catalog_entry *entry;
+    char text[64];
+
+    launcher_catalog_init( &catalog );
+    assert( launcher_catalog_add( &catalog, "sdmc:/games/one.exe", "One" ) == 0 );
+    assert( launcher_catalog_add( &catalog, "sdmc:/games/two.exe", "Two" ) == 1 );
+    entry = &catalog.entries[0];
+
+    /* A two-minute run, and the other entry was not played. */
+    entry->started_at = 1000;
+    entry->last_played = 1000;
+    assert( launcher_catalog_settle_sessions( &catalog, 1120 ) == 1 );
+    assert( entry->play_seconds == 120 && entry->started_at == 0 && entry->last_played == 1000 );
+    assert( catalog.entries[1].play_seconds == 0 && catalog.entries[1].started_at == 0 );
+    /* Settling again does not count the same run twice. */
+    assert( launcher_catalog_settle_sessions( &catalog, 9000 ) == 0 && entry->play_seconds == 120 );
+
+    /* Two runs add up. */
+    entry->started_at = 9000;
+    assert( launcher_catalog_settle_sessions( &catalog, 9060 ) == 1 );
+    assert( entry->play_seconds == 180 && entry->last_played == 1000 );
+
+    /* A clock that went backwards closes the run without counting it. */
+    entry->started_at = 5000;
+    assert( launcher_catalog_settle_sessions( &catalog, 4000 ) == 1 );
+    assert( entry->play_seconds == 180 && entry->started_at == 0 );
+
+    /* A console left on for days is credited with one day, not with all of it. */
+    entry->started_at = 10;
+    assert( launcher_catalog_settle_sessions( &catalog, 10 + LAUNCHER_SESSION_MAX + 5000 ) == 1 );
+    assert( entry->play_seconds == 180 + LAUNCHER_SESSION_MAX );
+
+    /* And the count saturates instead of wrapping. */
+    entry->play_seconds = UINT_MAX - 5;
+    entry->started_at = 100;
+    assert( launcher_catalog_settle_sessions( &catalog, 1000 ) == 1 );
+    assert( entry->play_seconds == UINT_MAX );
+
+    /* A run whose start was never written is not a run. */
+    entry->started_at = 0;
+    assert( launcher_catalog_settle_sessions( &catalog, 1000 ) == 0 );
+
+    launcher_playtime_text( text, sizeof(text), 0 );
+    assert( !strcmp( text, "Never" ) );
+    launcher_playtime_text( text, sizeof(text), 30 );
+    assert( !strcmp( text, "<1m" ) );
+    launcher_playtime_text( text, sizeof(text), 60 );
+    assert( !strcmp( text, "1m" ) );
+    launcher_playtime_text( text, sizeof(text), 3599 );
+    assert( !strcmp( text, "59m" ) );
+    launcher_playtime_text( text, sizeof(text), 3600 );
+    assert( !strcmp( text, "1h" ) );
+    launcher_playtime_text( text, sizeof(text), 3725 );
+    assert( !strcmp( text, "1h 2m" ) );
+    launcher_playtime_text( text, sizeof(text), 7200 );
+    assert( !strcmp( text, "2h" ) );
+    launcher_playtime_text( text, sizeof(text), 360000 );
+    assert( !strcmp( text, "100h" ) );
+    /* A buffer of no room is written to nothing, not overrun. */
+    launcher_playtime_text( text, 0, 3725 );
+    launcher_lastplayed_text( text, sizeof(text), 0, 5000 );
+    assert( !strcmp( text, "Never" ) );
+
+    launcher_lastplayed_text( text, sizeof(text), 5000, 5000 );
+    assert( !strcmp( text, "Today" ) );
+    launcher_lastplayed_text( text, sizeof(text), 5000, 4000 );
+    assert( !strcmp( text, "Today" ) );
+    launcher_lastplayed_text( text, sizeof(text), 1000, 1000 + 86400 );
+    assert( !strcmp( text, "Yesterday" ) );
+    launcher_lastplayed_text( text, sizeof(text), 1000, 1000 + 3 * 86400 );
+    assert( !strcmp( text, "3 days ago" ) );
+    launcher_lastplayed_text( text, sizeof(text), 1000, 1000 + 20 * 86400 );
+    assert( !strcmp( text, "2 weeks ago" ) );
+    launcher_lastplayed_text( text, sizeof(text), 1000, 1000 + 45 * 86400 );
+    assert( !strcmp( text, "6 weeks ago" ) );
+    launcher_lastplayed_text( text, sizeof(text), 1000, 1000 + 100 * 86400 );
+    assert( !strcmp( text, "3 months ago" ) );
+    launcher_lastplayed_text( text, sizeof(text), 1000, 1000 + 400 * 86400 );
+    assert( !strcmp( text, "1 year ago" ) );
+    launcher_lastplayed_text( text, sizeof(text), 1000, 1000 + 800 * 86400 );
+    assert( !strcmp( text, "2 years ago" ) );
+}
+
+/* A card written before play time was kept: read as it is, with no time. */
+static void check_older_catalog(void)
+{
+    char path[] = "/tmp/wine-nx-catalog-old-XXXXXX";
+    struct launcher_catalog catalog;
+    FILE *file;
+    int fd = mkstemp( path ), version = 0;
+
+    assert( fd >= 0 );
+    close( fd );
+    file = fopen( path, "w" );
+    assert( file );
+    assert( fprintf( file, "version=3\nnext-id=9\n\n[game 1]\npath=sdmc:/games/old.exe\n"
+                           "title=Old\nadded-order=1\nlaunched-order=2\nfavorite=1\n" ) > 0 );
+    assert( !fclose( file ) );
+    assert( launcher_catalog_load( &catalog, path ) == LAUNCHER_CATALOG_OK );
+    assert( catalog.count == 1 && !strcmp( catalog.entries[0].title, "Old" ) );
+    assert( catalog.entries[0].favorite == 1 && catalog.entries[0].launched_order == 2 );
+    assert( !catalog.entries[0].play_seconds && !catalog.entries[0].last_played );
+    assert( !catalog.entries[0].started_at );
+    /* Saving it brings it up to this build's version. */
+    assert( launcher_catalog_save( &catalog, path ) );
+    file = fopen( path, "r" );
+    assert( file && fscanf( file, "version=%d", &version ) == 1 );
+    assert( !fclose( file ) );
+    assert( version == LAUNCHER_CATALOG_VERSION );
+    assert( launcher_catalog_load( &catalog, path ) == LAUNCHER_CATALOG_OK && catalog.count == 1 );
+    unlink( path );
+}
+
 int main(void)
 {
     struct launcher_catalog written, read;
@@ -93,6 +212,8 @@ int main(void)
     assert( index == 0 );
     written.entries[index].favorite = 1;
     written.entries[index].launched_order = 8;
+    written.entries[index].play_seconds = 3725;
+    written.entries[index].last_played = 1700000000u;
     snprintf( written.entries[index].square_art, sizeof(written.entries[index].square_art), "/art/square.png" );
     snprintf( written.entries[index].portrait_art, sizeof(written.entries[index].portrait_art), "/art/portrait.png" );
     snprintf( written.entries[index].hero_art, sizeof(written.entries[index].hero_art), "/art/hero.png" );
@@ -103,6 +224,8 @@ int main(void)
     assert( !strcmp( read.entries[0].path, "sdmc:/Games/A=B/[One]/game.exe" ) );
     assert( !strcmp( read.entries[0].title, "A %= Game" ) );
     assert( read.entries[0].favorite == 1 && read.entries[0].launched_order == 8 );
+    assert( read.entries[0].play_seconds == 3725 && read.entries[0].last_played == 1700000000u );
+    assert( read.entries[0].started_at == 0 );
     assert( !strcmp( read.entries[0].square_art, "/art/square.png" ) );
     assert( !strcmp( read.entries[0].portrait_art, "/art/portrait.png" ) );
     assert( !strcmp( read.entries[0].hero_art, "/art/hero.png" ) );
@@ -129,6 +252,8 @@ int main(void)
     unlink( path );
     unlink( legacy );
     check_address_space();
-    puts( "launcher catalog: entries, art, ordering, legacy import and address space passed" );
+    check_play_time();
+    check_older_catalog();
+    puts( "launcher catalog: entries, art, ordering, play time, legacy import and address space passed" );
     return 0;
 }

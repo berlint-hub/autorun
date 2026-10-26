@@ -50,6 +50,19 @@ jobs:
             horizon-wine/tests/log_repeat.c -o log_repeat
           ./log_repeat
 
+      # The launcher's own logic that needs no SDL: the play time a game keeps,
+      # and the bundles that set a game's emulation and frame pacing at once.
+      - name: Launcher library and presets
+        run: |
+          cc -std=gnu11 -Wall -Wextra -Werror -O1 -g -I horizon-wine/source \
+            horizon-wine/tests/launcher_catalog.c horizon-wine/source/launcher_catalog.c \
+            -o launcher_catalog
+          ./launcher_catalog
+          cc -std=gnu11 -Wall -Wextra -Werror -O1 -g -I horizon-wine/source \
+            horizon-wine/tests/launcher_preset.c horizon-wine/source/launcher_preset.c \
+            -o launcher_preset
+          ./launcher_preset
+
       - name: DirectInput input (raw payload and low-level hooks)
         run: |
           python3 horizon-wine/tests/check_raw_mouse.py

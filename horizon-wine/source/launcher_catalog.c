@@ -117,6 +117,18 @@ enum launcher_address_space launcher_program_address_space( const char *path )
     return LAUNCHER_ADDRESS_LOW;
 }
 
+/* A count of seconds, or 0 for anything a hand-edited line cannot mean. */
+static unsigned int parse_seconds( const char *value )
+{
+    char *end;
+    unsigned long parsed;
+
+    errno = 0;
+    parsed = strtoul( value, &end, 10 );
+    if (errno || *end || parsed > UINT_MAX) return 0;
+    return (unsigned int)parsed;
+}
+
 int launcher_catalog_find( const struct launcher_catalog *catalog, const char *path )
 {
     int i;
@@ -199,10 +211,13 @@ enum launcher_catalog_result launcher_catalog_load( struct launcher_catalog *cat
         else if (!strcmp( key, "favorite" )) entry->favorite = atoi( value ) == 1;
         else if (!strcmp( key, "added-order" )) entry->added_order = strtoul( value, NULL, 10 );
         else if (!strcmp( key, "launched-order" )) entry->launched_order = strtoul( value, NULL, 10 );
+        else if (!strcmp( key, "play-seconds" )) entry->play_seconds = parse_seconds( value );
+        else if (!strcmp( key, "last-played" )) entry->last_played = parse_seconds( value );
+        else if (!strcmp( key, "started-at" )) entry->started_at = parse_seconds( value );
     }
     if (ferror( file )) invalid = 1;
     fclose( file );
-    if (version != 2 && version != LAUNCHER_CATALOG_VERSION) invalid = 1;
+    if (version < 2 || version > LAUNCHER_CATALOG_VERSION) invalid = 1;
     for (int i = 0; !invalid && i < parsed.count; i++)
     {
         if (!parsed.entries[i].path[0]) invalid = 1;
@@ -235,6 +250,9 @@ int launcher_catalog_save( const struct launcher_catalog *catalog, const char *p
         ok &= write_value( file, "title", entry->title );
         ok &= fprintf( file, "added-order=%u\nlaunched-order=%u\nfavorite=%d\n",
                        entry->added_order, entry->launched_order, entry->favorite ) > 0;
+        if (entry->play_seconds) ok &= fprintf( file, "play-seconds=%u\n", entry->play_seconds ) > 0;
+        if (entry->last_played) ok &= fprintf( file, "last-played=%u\n", entry->last_played ) > 0;
+        if (entry->started_at) ok &= fprintf( file, "started-at=%u\n", entry->started_at ) > 0;
         if (entry->square_art[0]) ok &= write_value( file, "square-art", entry->square_art );
         if (entry->portrait_art[0]) ok &= write_value( file, "portrait-art", entry->portrait_art );
         if (entry->hero_art[0]) ok &= write_value( file, "hero-art", entry->hero_art );
@@ -265,4 +283,86 @@ int launcher_catalog_import_legacy( struct launcher_catalog *catalog, const char
         if (line[0] && launcher_catalog_add( catalog, line, "" ) < 0) { fclose( file ); return 0; }
     }
     return !ferror( file ) && !fclose( file );
+}
+
+int launcher_catalog_settle_sessions( struct launcher_catalog *catalog, unsigned int now )
+{
+    int i, changed = 0;
+
+    for (i = 0; i < catalog->count; i++)
+    {
+        struct launcher_catalog_entry *entry = &catalog->entries[i];
+        unsigned int elapsed;
+
+        if (!entry->started_at) continue;
+        /* A clock that went backwards or was never set says nothing about how
+         * long the game ran: the run is closed without being counted. */
+        elapsed = now > entry->started_at ? now - entry->started_at : 0;
+        if (elapsed > LAUNCHER_SESSION_MAX) elapsed = LAUNCHER_SESSION_MAX;
+        if (elapsed > UINT_MAX - entry->play_seconds) entry->play_seconds = UINT_MAX;
+        else entry->play_seconds += elapsed;
+        if (!entry->last_played) entry->last_played = entry->started_at;
+        entry->started_at = 0;
+        changed++;
+    }
+    return changed;
+}
+
+void launcher_playtime_text( char *out, size_t size, unsigned int seconds )
+{
+    unsigned int minutes = seconds / 60, hours = minutes / 60;
+
+    if (!seconds) snprintf( out, size, "Never" );
+    else if (!minutes) snprintf( out, size, "<1m" );
+    else if (!hours) snprintf( out, size, "%um", minutes );
+    else if (minutes % 60 == 0) snprintf( out, size, "%uh", hours );
+    else snprintf( out, size, "%uh %um", hours, minutes % 60 );
+}
+
+void launcher_lastplayed_text( char *out, size_t size, unsigned int last_played, unsigned int now )
+{
+    unsigned int days, count;
+
+    if (!last_played)
+    {
+        snprintf( out, size, "Never" );
+        return;
+    }
+    /* A clock that went backwards, or one the console never set, cannot say
+     * the game was started before today. */
+    if (now <= last_played)
+    {
+        snprintf( out, size, "Today" );
+        return;
+    }
+    days = (now - last_played) / 86400;
+    if (!days)
+    {
+        snprintf( out, size, "Today" );
+        return;
+    }
+    if (days == 1)
+    {
+        snprintf( out, size, "Yesterday" );
+        return;
+    }
+    if (days < 14)
+    {
+        snprintf( out, size, "%u days ago", days );
+        return;
+    }
+    if (days < 60)
+    {
+        count = days / 7;
+        snprintf( out, size, count == 1 ? "1 week ago" : "%u weeks ago", count );
+        return;
+    }
+    if (days < 365)
+    {
+        count = days / 30;
+        snprintf( out, size, count == 1 ? "1 month ago" : "%u months ago", count );
+        return;
+    }
+    count = days / 365;
+    snprintf( out, size, count == 1 ? "1 year ago" : "%u years ago", count );
 }

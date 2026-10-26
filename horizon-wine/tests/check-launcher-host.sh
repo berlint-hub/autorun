@@ -41,6 +41,12 @@ clang -std=gnu11 -Wall -Wextra -Werror -O1 -g -fsanitize=address,undefined -fno-
 
 clang -std=gnu11 -Wall -Wextra -Werror -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer \
     "$horizon_wine/tests/launcher_catalog.c" "$horizon_wine/source/launcher_catalog.c" -o "$build/launcher_catalog"
+# One row sets the translator, the fast paths and the frame pacing at once: the
+# bundles, their fallbacks on a card with the stock modules only, and that a
+# game nobody configured reads as Balanced.
+clang -std=gnu11 -Wall -Wextra -Werror -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer \
+    "$horizon_wine/tests/launcher_preset.c" "$horizon_wine/source/launcher_preset.c" -o "$build/launcher_preset"
+"$build/launcher_preset"
 
 # The three NCAs a forwarder is made of, built here and taken apart again: the
 # loader's NPDM comes out of whichever build dir has one, since it is what the
@@ -77,7 +83,7 @@ python3 "$horizon_wine/tools/make-embed.py" "$build/forwarder-icon.c" \
     wine_nx_joycons "$horizon_wine/assets/controls/joycons.png"
 clang -std=gnu11 -Wall -Wextra -Werror -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer \
     -I "$horizon_wine/source" $(sdl2-config --cflags) -I/opt/homebrew/include -I/opt/homebrew/opt/openssl/include \
-    "$horizon_wine/tests/launcher_host.c" "$horizon_wine/source/launcher.c" "$horizon_wine/source/launcher_catalog.c" "$horizon_wine/source/launcher_ui.c" "$horizon_wine/source/launcher_audio.c" \
+    "$horizon_wine/tests/launcher_host.c" "$horizon_wine/source/launcher.c" "$horizon_wine/source/launcher_catalog.c" "$horizon_wine/source/launcher_preset.c" "$horizon_wine/source/launcher_ui.c" "$horizon_wine/source/launcher_audio.c" \
     "$horizon_wine/source/game_settings.c" "$horizon_wine/source/launcher_game_settings.c" \
     "$horizon_wine/source/input_profile.c" "$horizon_wine/source/launcher_input.c" \
     "$horizon_wine/source/launcher_graphics.c" "$horizon_wine/source/launcher_dxvk.c" "$horizon_wine/source/launcher_voodoo.c" "$horizon_wine/source/dxvk_options.c" \
@@ -176,7 +182,7 @@ SCRIPT
 cd "$build/card"
 SDL_VIDEODRIVER=dummy "$build/launcher_host" "$font" "$build/script.txt" > "$build/out.txt" 2>&1 || { cat "$build/out.txt"; exit 1; }
 grep -q "launcher returned 1 target 'sdmc:/switch/wine/drive_c/openttd/openttd.exe'" "$build/out.txt" || { cat "$build/out.txt"; exit 1; }
-grep -q '^version=3$' "sdmc:/switch/wine/launcher-library-v2.ini"
+grep -q '^version=4$' "sdmc:/switch/wine/launcher-library-v2.ini"
 grep -q '^path=sdmc:/switch/wine/drive_c/openttd/openttd.exe$' "sdmc:/switch/wine/launcher-library-v2.ini"
 test "$(grep -c '^\[game ' "sdmc:/switch/wine/launcher-library-v2.ini")" -eq 1
 grep -qx "sdmc:/switch/wine/drive_c/openttd/openttd.exe" "sdmc:/switch/wine/target.txt"

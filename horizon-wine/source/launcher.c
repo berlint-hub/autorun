@@ -24,6 +24,7 @@
 #include <string.h>
 #include <strings.h>
 #include <sys/stat.h>
+#include <time.h>
 
 #ifdef __SWITCH__
 #include <switch.h>
@@ -38,6 +39,7 @@
 #include "launcher_list.h"
 #include "launcher_pe.h"
 #include "launcher_input.h"
+#include "launcher_preset.h"
 #include "launcher_settings.h"
 #include "launcher_ui.h"
 #include "launcher_forwarder.h"
@@ -122,6 +124,9 @@ struct program
     unsigned int catalog_id;
     unsigned int added_order;
     unsigned int launched_order;
+    /* Seconds of play and the start of the run in progress, as the library
+     * keeps them (launcher_catalog.h). */
+    unsigned int play_seconds, last_played, started_at;
     int favorite;
     int missing;
     char square_art[512];
@@ -258,6 +263,14 @@ extern int wine_nx_launcher_console_run( const char *drive_c, const char *runtim
 /***********************************************************************
  * Platform
  */
+
+/* Seconds from the epoch, or 0 when the clock says nothing worth keeping. */
+static unsigned int now_seconds(void)
+{
+    time_t now = time( NULL );
+
+    return now > 0 ? (unsigned int)(unsigned long long)now : 0;
+}
 
 static void launcher_log( const char *format, ... )
 {
@@ -459,11 +472,8 @@ static void load_program_settings( struct launcher *l, struct program *p )
     size_t len;
 
     p->own_files = 0;
-    memset( &p->settings, 0, sizeof(p->settings) );
-    p->settings.verbose = p->settings.profile = p->settings.framebuffer = -1;
-    p->settings.four_cores = 1;
-    /* -1: no CPU translator choice of its own; fex-variant.txt decides. */
-    p->settings.fex = -1;
+    /* What the file does not say is what a preset calls Balanced. */
+    launcher_preset_defaults( &p->settings );
     if (launcher_program_settings_path( l->options->runtime_dir, p->path, path, sizeof(path) ) &&
         launcher_kv_load( &kv, path ))
     {
@@ -506,6 +516,9 @@ static void describe_catalog_program( struct launcher *l, struct program *p,
     p->catalog_id = entry->id;
     p->added_order = entry->added_order;
     p->launched_order = entry->launched_order;
+    p->play_seconds = entry->play_seconds;
+    p->last_played = entry->last_played;
+    p->started_at = entry->started_at;
     p->favorite = entry->favorite;
     snprintf( p->square_art, sizeof(p->square_art), "%s", entry->square_art );
     snprintf( p->portrait_art, sizeof(p->portrait_art), "%s", entry->portrait_art );
@@ -582,6 +595,9 @@ static int save_library( struct launcher *l )
         snprintf( entry->path, sizeof(entry->path), "%s", p->path );
         snprintf( entry->title, sizeof(entry->title), "%s", p->title );
         entry->launched_order = p->launched_order;
+        entry->play_seconds = p->play_seconds;
+        entry->last_played = p->last_played;
+        entry->started_at = p->started_at;
         entry->favorite = p->favorite;
         snprintf( entry->square_art, sizeof(entry->square_art), "%s", p->square_art );
         snprintf( entry->portrait_art, sizeof(entry->portrait_art), "%s", p->portrait_art );
@@ -620,6 +636,11 @@ static void load_library( struct launcher *l )
         launcher_catalog_init( &l->catalog );
         ui_message( &l->ui, "Library", "The game library is unreadable. It was preserved and no games were loaded." );
     }
+    /* The launcher closes when a game starts, so this is where the run that
+     * just ended is added to its play time. */
+    if (launcher_catalog_settle_sessions( &l->catalog, now_seconds() ) &&
+        !launcher_catalog_save( &l->catalog, path ))
+        launcher_log( "[LAUNCHER] Could not save the play time" );
     for (i = 0; i < l->catalog.count && l->program_count < LAUNCHER_MAX_ENTRIES; i++)
         describe_catalog_program( l, &l->programs[l->program_count++], &l->catalog.entries[i] );
 }
@@ -648,6 +669,8 @@ static int compare_visible( const void *a, const void *b )
         return x->added_order < y->added_order ? 1 : -1;
     if (sort_launcher->sort_order == 2 && x->launched_order != y->launched_order)
         return x->launched_order < y->launched_order ? 1 : -1;
+    if (sort_launcher->sort_order == 3 && x->play_seconds != y->play_seconds)
+        return x->play_seconds < y->play_seconds ? 1 : -1;
     order = strcasecmp( x->title, y->title );
 
     return order ? order : strcasecmp( x->dos, y->dos );
@@ -1194,6 +1217,20 @@ static void draw_card( struct launcher *l, int index, int x, int y, const struct
     }
     /* Only a program that has no picture at all gets the drawn one. */
     else if (p->icon_state == ICON_MISSING) draw_placeholder( l, p, cx, cy - 4, target, dim );
+
+    /* How long the game has run, as Steam and the handhelds show it. Under a
+     * minute there is nothing worth a badge, and a bar of "0m" on every card
+     * would be noise. */
+    if (p->play_seconds >= 60)
+    {
+        char played[32];
+
+        launcher_playtime_text( played, sizeof(played), p->play_seconds );
+        text_w = ui_text_width( ui, ui->small, played );
+        ui_rounded( ui, x + 8, y + g->card - 32, text_w + 16, TTF_FontHeight( ui->small ) + 4, 10,
+                    (SDL_Color){ 0, 0, 0, 140 } );
+        ui_text( ui, ui->small, x + 16, y + g->card - 30, played, ui->dim );
+    }
 
     if (p->settings.hidden)
     {
@@ -1761,8 +1798,22 @@ static void draw_home( struct launcher *l )
                                 : SHELL_MARGIN + HOME_FOCUS_W + HOME_FOCUS_GAP;
         ui_text_fit( ui, ui->normal, title_x, HOME_TITLE_Y, ui->width - SHELL_MARGIN - title_x - 120, p->title,
                      ui->value, 1 );
-        if (p->missing)
-            draw_tag( ui, title_x, HOME_TITLE_Y + TTF_FontHeight( ui->normal ) + 20, "Missing", 1 );
+        {
+            int tag_x = title_x, tag_y = HOME_TITLE_Y + TTF_FontHeight( ui->normal ) + 20;
+
+            if (p->missing) tag_x += draw_tag( ui, tag_x, tag_y, "Missing", 1 ) + 8;
+            /* The last game in this row is the one about to be started, so it
+             * says how much it has had. */
+            if (p->play_seconds >= 60)
+            {
+                char playtime[32], last[32], played[96];
+
+                launcher_playtime_text( playtime, sizeof(playtime), p->play_seconds );
+                launcher_lastplayed_text( last, sizeof(last), p->last_played, now_seconds() );
+                snprintf( played, sizeof(played), "Played %s, %s", playtime, last );
+                draw_tag( ui, tag_x, tag_y, played, 0 );
+            }
+        }
 
         if (l->zone == ZONE_HEADER) hints[0].label = "Select";
         ui_hints_right( ui, hints, 3, ui->width - SHELL_MARGIN, HOME_HINT_Y );
@@ -1776,7 +1827,8 @@ static void draw_home( struct launcher *l )
 
 enum program_row
 {
-    ROW_START, ROW_FAVORITE, ROW_ARTWORK, ROW_FORWARDER, ROW_LOCATE, ROW_TITLE, ROW_ARGS, ROW_VERBOSE, ROW_PROFILE,
+    ROW_START, ROW_PRESET, ROW_FAVORITE, ROW_ARTWORK, ROW_FORWARDER, ROW_LOCATE, ROW_PLAYED, ROW_TITLE,
+    ROW_ARGS, ROW_RESET, ROW_VERBOSE, ROW_PROFILE,
     ROW_WINDOWS, ROW_ASPECT, ROW_RESOLUTION, ROW_D3D9, ROW_VKD3D_VERSION, ROW_DXVK_VERSION, ROW_DXVK_OPTIONS, ROW_DXVK_HUD, ROW_FRAME_LIMIT, ROW_VSYNC,
     ROW_VOODOO,
     ROW_LSFG, ROW_LSFG_DLL, ROW_LSFG_PERFORMANCE, ROW_LSFG_FLOW,
@@ -2083,6 +2135,9 @@ static int start_program( struct launcher *l, struct program *p, char *target, s
     if (p->settings.d3d != LAUNCHER_D3D_WINE && !prepare_program_graphics( l, p )) return 0;
     p->missing = 0;
     p->launched_order = l->catalog.next_order++;
+    /* The run is timed from here, and counted when the launcher is next up:
+     * save_library() writes it into the catalog the settle reads. */
+    if ((p->last_played = now_seconds())) p->started_at = p->last_played;
     save_library( l );
 
     ui_background( ui );
@@ -2379,6 +2434,41 @@ static void fex_options_menu( struct launcher *l, struct program *p )
     }
 }
 
+/* The CPU translators this card can run the program with, as the preset row
+ * sees them: Box64 always, FEX when its modules are installed, the tuned FEX
+ * when its own are. 0 when there is nothing to choose, and a preset then leaves
+ * the translator alone. */
+static int translator_availability( struct launcher *l, const struct program *p )
+{
+#ifdef WINE_NX_FEX
+    const char *plain, *tuned;
+    char path[768];
+    int mask = LAUNCHER_TRANSLATOR_BOX64;
+
+    if (p->machine == 0x8664)
+    {
+        plain = "drive_c/windows/system32/libarm64ecfex.dll";
+        tuned = "drive_c/windows/system32/libarm64ecfex-opt.dll";
+    }
+    else if (p->machine == 0x014c)
+    {
+        plain = "drive_c/windows/system32/libwow64fex.dll";
+        tuned = "drive_c/windows/system32/libwow64fex-opt.dll";
+    }
+    else return 0;
+    runtime_file( l, plain, path, sizeof(path) );
+    if (!file_exists( path )) return mask;
+    mask |= LAUNCHER_TRANSLATOR_FEX;
+    runtime_file( l, tuned, path, sizeof(path) );
+    if (file_exists( path )) mask |= LAUNCHER_TRANSLATOR_FEX_OPT;
+    return mask;
+#else
+    (void)l;
+    (void)p;
+    return 0;
+#endif
+}
+
 /* Returns 1 when the program is to be started. */
 /* The sections of Game Settings, in the order they stand in the list. */
 enum program_section
@@ -2464,9 +2554,41 @@ static int program_menu_run( struct launcher *l, struct program *p, char *target
                 row->value_tone = tone;
             else count--;
         }
+        ADD_ROW( ROW_PRESET, SECTION_GENERAL, "Preset",
+                 "Sets the emulator and the frame pacing of this game at once. What a game that has "
+                 "never been configured runs with is Balanced; a preset leaves the renderer, "
+                 "upscaling and frame generation alone." );
+        row->kind = UI_ROW_DROPDOWN;
+        row->choices = LAUNCHER_PRESET_COUNT;
+        {
+            int preset = launcher_preset_match( &p->settings, translator_availability( l, p ) );
+
+            snprintf( row->value, sizeof(row->value), "%s", launcher_preset_label( preset ) );
+            row->help = launcher_preset_help( preset );
+        }
+
         ADD_ROW( ROW_FAVORITE, SECTION_GENERAL, "Favorite", "Keeps the game in the Favorites filter of the library." );
         row->kind = UI_ROW_SWITCH;
         row->on = p->favorite;
+
+        /* Read-only, and the one place that says when the game was last on. A
+         * program run once from the browser has no library entry to count
+         * against. */
+        if (in_library)
+        {
+            char playtime[32], last[32];
+
+            ADD_ROW( ROW_PLAYED, SECTION_LIBRARY, "Played",
+                     "How long this game has run and when it was last started. A run is timed while "
+                     "the game is on and counted when Autorun is next opened." );
+            row->kind = UI_ROW_INFO;
+            row->adjustable = 0;
+            launcher_playtime_text( playtime, sizeof(playtime), p->play_seconds );
+            launcher_lastplayed_text( last, sizeof(last), p->last_played, now_seconds() );
+            if (!p->play_seconds && !p->last_played) snprintf( row->value, sizeof(row->value), "Never" );
+            else snprintf( row->value, sizeof(row->value), "%s, %s", playtime, last );
+        }
+
         ADD_ROW( ROW_ARTWORK, SECTION_LIBRARY, "Download artwork", "Preview and choose this game's icon, cover and background from SteamGridDB." );
         ADD_ROW( ROW_FORWARDER, SECTION_LIBRARY, "Create game forwarder", "A HOME Menu icon that launches this library game directly with its own settings." );
         row->disabled = !p->added || !l->options->install_game_forwarder;
@@ -2486,6 +2608,10 @@ static int program_menu_run( struct launcher *l, struct program *p, char *target
         else if (read_line( path, global_line, sizeof(global_line) ) && launcher_args_match( global_line, p->dos ))
             snprintf( row->value, sizeof(row->value), "args.txt: %s", global_line );
         else snprintf( row->value, sizeof(row->value), "None" );
+
+        ADD_ROW( ROW_RESET, SECTION_GENERAL, "Reset settings",
+                 "Back to the defaults for the title, whether it is hidden, the emulation, graphics "
+                 "and frame settings. Arguments, controls and artwork are separate and stay." );
 
 #ifdef WINE_NX_FEX
         if (x86 || x64)
@@ -2773,6 +2899,49 @@ static int program_menu_run( struct launcher *l, struct program *p, char *target
                 ui_toast( ui, "The fix is offered the next time the game starts", 2500 );
             else ui_toast( ui, "Could not save the program's settings", 2500 );
             load_program_settings( l, p );
+            break;
+
+        case ROW_PRESET:
+        {
+            struct ui_row items[LAUNCHER_PRESET_COUNT] = {0};
+            int translators = translator_availability( l, p ), selected, preset;
+
+            if (action == UI_ACTION_RESET)
+            {
+                /* What a game that has never been configured runs with. */
+                launcher_preset_defaults( &p->settings );
+                save_program_settings( l, p );
+                save_library( l );
+                ui_toast( ui, "Settings reset", 1500 );
+                break;
+            }
+            if (action != UI_ACTION_CHOOSE) break;
+            for (i = 0; i < LAUNCHER_PRESET_COUNT; i++)
+                snprintf( items[i].label, sizeof(items[i].label), "%s", launcher_preset_label( i ) );
+            preset = launcher_preset_match( &p->settings, translators );
+            selected = ui_settings_dropdown( ui, &list, items, LAUNCHER_PRESET_COUNT,
+                                             preset < 0 ? 0 : preset );
+            if (selected < 0) break;
+            launcher_preset_apply( &p->settings, selected, translators );
+            save_program_settings( l, p );
+            snprintf( line, sizeof(line), "%s preset applied", launcher_preset_label( selected ) );
+            ui_toast( ui, line, 1800 );
+            break;
+        }
+
+        case ROW_RESET:
+            if (action != UI_ACTION_CHOOSE) break;
+            if (!ui_confirm( ui, "Reset settings",
+                             "Put this game's title, whether it is hidden, and its emulation, graphics "
+                             "and frame settings back to their defaults? Arguments, controls and "
+                             "artwork are separate files and stay.", "Reset" )) break;
+            launcher_preset_defaults( &p->settings );
+            save_program_settings( l, p );
+            /* A game added today gets DXVK (Settings > Give a new game DXVK),
+             * so a reset one does too. */
+            apply_new_game_renderer( l, p );
+            save_library( l );
+            ui_toast( ui, "Settings reset", 1500 );
             break;
 
         case ROW_FAVORITE:
@@ -3624,7 +3793,7 @@ static void library_menu( struct launcher *l )
 {
     struct ui_row rows[4];
     struct ui_list list = {0};
-    static const char *sort_names[] = { "Title", "Recently added", "Recently launched" };
+    static const char *sort_names[] = { "Title", "Recently added", "Recently launched", "Most played" };
 
     for (;;)
     {
@@ -3653,7 +3822,7 @@ static void library_menu( struct launcher *l )
             break;
         case 2:
             if (action == UI_ACTION_RESET) l->sort_order = 0;
-            else l->sort_order = (l->sort_order + (action == UI_ACTION_LEFT ? 2 : 1)) % 3;
+            else l->sort_order = (l->sort_order + (action == UI_ACTION_LEFT ? 3 : 1)) % 4;
             break;
         case 3:
             if (action == UI_ACTION_CHOOSE) settings_menu( l );

@@ -46,7 +46,7 @@ def write_png(path, width, height, rgb):
 
 
 def stage(card, exe, count):
-    lines = ['version=3']
+    lines = ['version=4']
     for game in range(count):
         folder = card / f'games/Game {game:03d}'
         folder.mkdir(parents=True, exist_ok=True)

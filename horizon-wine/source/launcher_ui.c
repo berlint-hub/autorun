@@ -2420,7 +2420,8 @@ enum ui_action ui_settings_run( struct ui *ui, struct ui_list *list, const char 
         else if (list->in_rows)
         {
             hints[hint_count++] = (struct ui_hint){ UI_LEFT, "Sections" };
-            if (!row->disabled)
+            /* A read-only row says what it has to and opens nothing. */
+            if (!row->disabled && row->kind != UI_ROW_INFO)
                 hints[hint_count++] = (struct ui_hint){ UI_A, row->kind == UI_ROW_SWITCH ? "Turn over" :
                                                              row->adjustable ? "Change" : "Choose" };
             hints[hint_count++] = (struct ui_hint){ UI_B, "Back" };
