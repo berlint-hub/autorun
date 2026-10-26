@@ -2012,9 +2012,13 @@ static int settings_dropdown( struct ui *ui, const struct ui_list *anchor,
             }
             if (direction)
             {
-                selection += direction;
-                if (selection < 0) selection = 0;
-                if (selection >= count) selection = count - 1;
+                int step = direction > 0 ? 1 : -1, next = selection + direction;
+
+                /* A row that cannot be chosen is stepped over, so the focus
+                 * always stands on a row A can take; a move that finds none
+                 * leaves it where it was. */
+                while (next >= 0 && next < count && rows[next].disabled) next += step;
+                if (next >= 0 && next < count) selection = next;
             }
         }
         if (!ui->running) break;

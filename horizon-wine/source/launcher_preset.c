@@ -120,7 +120,11 @@ int launcher_preset_apply( struct launcher_settings *settings, int preset, int t
     after.vsync = fields->vsync;
     after.frame_limit = fields->frame_limit;
     if (launcher_preset_translator( fields->translator, translators, &translator )) after.fex = translator;
-    if (!memcmp( settings, &after, sizeof(after) )) return 0;
+    /* The fields it owns, compared one by one: the struct has padding, and a
+     * byte comparison would say a bundle changed a setting it did not. */
+    if (settings->four_cores == after.four_cores && settings->lazy_file_views == after.lazy_file_views &&
+        settings->fast_sync == after.fast_sync && settings->vsync == after.vsync &&
+        settings->frame_limit == after.frame_limit && settings->fex == after.fex) return 0;
     *settings = after;
     return 1;
 }

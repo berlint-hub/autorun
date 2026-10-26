@@ -210,6 +210,37 @@ static void check_older_catalog(void)
     unlink( path );
 }
 
+/* An order a hand-edited line made too large for the counter: the file is still
+ * read, the line is read as no order at all, and next_order stays a number the
+ * next game can be given. */
+static void check_order_beyond_the_counter(void)
+{
+    char path[] = "/tmp/wine-nx-catalog-order-XXXXXX";
+    struct launcher_catalog catalog;
+    FILE *file;
+    int fd = mkstemp( path ), index;
+
+    assert( fd >= 0 );
+    close( fd );
+    file = fopen( path, "w" );
+    assert( file );
+    assert( fprintf( file, "version=%d\nnext-id=9\n\n[game 1]\npath=sdmc:/games/a.exe\n"
+                           "added-order=4294967295\nlaunched-order=4294967295\n",
+                     LAUNCHER_CATALOG_VERSION ) > 0 );
+    assert( !fclose( file ) );
+    assert( launcher_catalog_load( &catalog, path ) == LAUNCHER_CATALOG_OK );
+    assert( catalog.count == 1 );
+    assert( catalog.entries[0].added_order && catalog.entries[0].added_order < UINT_MAX );
+    assert( !catalog.entries[0].launched_order );
+    assert( catalog.next_order > catalog.entries[0].added_order );
+    /* A game added now gets an order of its own, above the one that was read. */
+    index = launcher_catalog_add( &catalog, "sdmc:/games/b.exe", "B" );
+    assert( index == 1 && catalog.entries[index].added_order > catalog.entries[0].added_order );
+    assert( launcher_catalog_save( &catalog, path ) );
+    assert( launcher_catalog_load( &catalog, path ) == LAUNCHER_CATALOG_OK && catalog.count == 2 );
+    unlink( path );
+}
+
 int main(void)
 {
     struct launcher_catalog written, read;
@@ -268,6 +299,7 @@ int main(void)
     check_address_space();
     check_play_time();
     check_older_catalog();
+    check_order_beyond_the_counter();
     puts( "launcher catalog: entries, art, ordering, play time, legacy import and address space passed" );
     return 0;
 }

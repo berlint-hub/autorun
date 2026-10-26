@@ -117,6 +117,21 @@ enum launcher_address_space launcher_program_address_space( const char *path )
     return LAUNCHER_ADDRESS_LOW;
 }
 
+/* An order, or 0 for anything a hand-edited line cannot mean. 0 is what the
+ * loader gives a line without one, and it must not reach the counter: an order
+ * of UINT_MAX would make next_order wrap to 0 and leave every new game with no
+ * place in the list at all. */
+static unsigned int parse_order( const char *value )
+{
+    char *end;
+    unsigned long parsed;
+
+    errno = 0;
+    parsed = strtoul( value, &end, 10 );
+    if (errno || *end || parsed >= UINT_MAX) return 0;
+    return (unsigned int)parsed;
+}
+
 /* A count of seconds, or 0 for anything a hand-edited line cannot mean. */
 static unsigned int parse_seconds( const char *value )
 {
@@ -209,8 +224,8 @@ enum launcher_catalog_result launcher_catalog_load( struct launcher_catalog *cat
             invalid |= !copy_value( entry->portrait_art, sizeof(entry->portrait_art), value );
         else if (!strcmp( key, "hero-art" )) invalid |= !copy_value( entry->hero_art, sizeof(entry->hero_art), value );
         else if (!strcmp( key, "favorite" )) entry->favorite = atoi( value ) == 1;
-        else if (!strcmp( key, "added-order" )) entry->added_order = strtoul( value, NULL, 10 );
-        else if (!strcmp( key, "launched-order" )) entry->launched_order = strtoul( value, NULL, 10 );
+        else if (!strcmp( key, "added-order" )) entry->added_order = parse_order( value );
+        else if (!strcmp( key, "launched-order" )) entry->launched_order = parse_order( value );
         else if (!strcmp( key, "play-seconds" )) entry->play_seconds = parse_seconds( value );
         else if (!strcmp( key, "last-played" )) entry->last_played = parse_seconds( value );
         else if (!strcmp( key, "started-at" )) entry->started_at = parse_seconds( value );
@@ -282,7 +297,13 @@ int launcher_catalog_import_legacy( struct launcher_catalog *catalog, const char
         trim( line );
         if (line[0] && launcher_catalog_add( catalog, line, "" ) < 0) { fclose( file ); return 0; }
     }
-    return !ferror( file ) && !fclose( file );
+    /* Read before closing: a failure to close would hide one to read. */
+    {
+        int read = ferror( file );
+
+        if (fclose( file )) return 0;
+        return !read;
+    }
 }
 
 int launcher_catalog_settle_sessions( struct launcher_catalog *catalog, unsigned int now )

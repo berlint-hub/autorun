@@ -581,7 +581,13 @@ static inline int launcher_settings_write( struct launcher_kv *kv, const struct 
 {
     static const char *states[] = { NULL, "0", "1" };
 
-    if (settings->d3d < LAUNCHER_D3D_WINE || settings->d3d > LAUNCHER_D3D_DXVK_VKD3D ||
+    /* Every field that is written through a table, or is a state, is checked:
+     * states[verbose + 1] would read past the table otherwise. */
+    if (settings->fex < -1 || settings->fex > 2 ||
+        settings->verbose < -1 || settings->verbose > 1 ||
+        settings->profile < -1 || settings->profile > 1 ||
+        settings->framebuffer < -1 || settings->framebuffer > 1 ||
+        settings->d3d < LAUNCHER_D3D_WINE || settings->d3d > LAUNCHER_D3D_DXVK_VKD3D ||
         settings->dxvk_hud < 0 || settings->dxvk_hud >= LAUNCHER_HUD_COUNT ||
         settings->dxvk_source < 0 || settings->dxvk_source >= DXVK_SOURCE_COUNT ||
         settings->frame_limit < 0 || settings->frame_limit >= LAUNCHER_FRAME_LIMIT_COUNT ||

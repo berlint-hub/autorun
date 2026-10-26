@@ -38,10 +38,16 @@ void launcher_backup_title( char *out, size_t size, const char *name );
 void launcher_backup_detail( char *out, size_t size, const struct launcher_backup *backup );
 
 /* Takes the copy. `programs` are the executables in the library, whose own
- * files are beside them. Returns 1 and fills `out`, or 0 with `error` set. */
+ * files are beside them. `keep` says how many are kept afterwards: 0 for
+ * LAUNCHER_BACKUP_MAX, -1 to keep everything (a copy taken to be undone, whose
+ * oldest may be the one the caller is about to read). Returns 1 and fills
+ * `out`, or 0 with `error` set. */
 int launcher_backup_create( const char *runtime_dir, const char *stamp,
-                            const char *const *programs, int program_count,
+                            const char *const *programs, int program_count, int keep,
                             struct launcher_backup *out, char *error, size_t error_size );
+
+/* Drops the oldest until `keep` are left. 0 or less keeps LAUNCHER_BACKUP_MAX. */
+void launcher_backup_prune( const char *runtime_dir, int keep );
 
 /* The backups on the card, newest first. Returns 1 even when there are none. */
 int launcher_backup_list( const char *runtime_dir, struct launcher_backup *backups,

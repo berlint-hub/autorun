@@ -2114,7 +2114,10 @@ static int start_program( struct launcher *l, struct program *p, char *target, s
     }
     /* Autorun ships no Windows DLLs: a card without them is offered them here. */
     if (!launcher_dlls_ready( l->dlls )) return 0;
-    /* A run that ends because the battery went can take a save with it. */
+    /* A run that ends because the battery went can take a save with it. The
+     * header reads the battery once a second while it is drawn; a game's own
+     * menu need not have drawn it for minutes. */
+    l->status = launcher_platform_status( &l->clock_hour, &l->clock_minute, &l->battery, &l->charging );
     if ((l->status & LAUNCHER_STATUS_BATTERY) && !l->charging && l->battery < LAUNCHER_LOW_BATTERY &&
         !ui_confirm( ui, "Low battery", "The battery is nearly empty, and the console turns off where it "
                                         "stands when it runs out. Start the game anyway?", "Start" ))
@@ -2550,10 +2553,15 @@ static int program_menu_run( struct launcher *l, struct program *p, char *target
                       launcher_dxvk_vkd3d_compatible( p->settings.dxvk_source, dxvk.version ));
 
         count = 0;
+        /* A row is one of the enum's, and the enum is what the arrays are
+         * sized by; the guard is for the day a row is added to this list and
+         * not to the enum, which would otherwise write past the end. */
 #define ADD_ROW(i, section, text, help_text) \
-        do { row = rows + count; memset( row, 0, sizeof(*row) ); ids[count++] = (i); \
+        do { if (count < PROGRAM_ROWS + GAME_SETTINGS_MAX_ROWS) { \
+             row = rows + count; memset( row, 0, sizeof(*row) ); ids[count++] = (i); \
              row->group = (section); row->kind = UI_ROW_ACTION; \
-             snprintf( row->label, sizeof(row->label), "%s", (text) ); row->help = (help_text); } while (0)
+             snprintf( row->label, sizeof(row->label), "%s", (text) ); row->help = (help_text); } \
+        } while (0)
 
         ADD_ROW( ROW_START, SECTION_GENERAL, "Start", "Runs the game." );
         {
@@ -2601,6 +2609,9 @@ static int program_menu_run( struct launcher *l, struct program *p, char *target
             launcher_playtime_text( playtime, sizeof(playtime), p->play_seconds );
             launcher_lastplayed_text( last, sizeof(last), p->last_played, now_seconds() );
             if (!p->play_seconds && !p->last_played) snprintf( row->value, sizeof(row->value), "Never" );
+            /* Started and closed within the same second: last_played says so,
+             * and "Never, Today" would not. */
+            else if (!p->play_seconds) snprintf( row->value, sizeof(row->value), "<1m, %s", last );
             else snprintf( row->value, sizeof(row->value), "%s, %s", playtime, last );
         }
 
@@ -2962,7 +2973,7 @@ static int program_menu_run( struct launcher *l, struct program *p, char *target
                 const struct program *from = &l->programs[l->visible[j]];
 
                 snprintf( sources[j].label, sizeof(sources[j].label), "%s", from->title );
-                if (!strcmp( from->path, p->path ))
+                if (!strcasecmp( from->path, p->path ))
                 {
                     sources[j].disabled = 1;
                     snprintf( sources[j].value, sizeof(sources[j].value), "This one" );
@@ -3657,7 +3668,8 @@ static void sync_defaults( struct launcher *l )
 
 /* A copy of every setting on the card, in a folder of its own under the runtime
  * (launcher_backup.c). Returns 1 and fills made, or 0 with error set. */
-static int keep_backup( struct launcher *l, struct launcher_backup *made, char *error, size_t error_size )
+static int keep_backup( struct launcher *l, struct launcher_backup *made, int keep,
+                        char *error, size_t error_size )
 {
     const char *paths[LAUNCHER_MAX_ENTRIES];
     char stamp[LAUNCHER_BACKUP_NAME];
@@ -3665,7 +3677,7 @@ static int keep_backup( struct launcher *l, struct launcher_backup *made, char *
     sync_defaults( l );
     launcher_backup_stamp( stamp, sizeof(stamp), now_seconds() );
     return launcher_backup_create( l->options->runtime_dir, stamp, paths,
-                                   backup_programs( l, paths, LAUNCHER_MAX_ENTRIES ),
+                                   backup_programs( l, paths, LAUNCHER_MAX_ENTRIES ), keep,
                                    made, error, error_size );
 }
 
@@ -3674,7 +3686,7 @@ static void backup_settings( struct launcher *l )
     struct launcher_backup made;
     char detail[64], text[96], error[192];
 
-    if (!keep_backup( l, &made, error, sizeof(error) ))
+    if (!keep_backup( l, &made, 0, error, sizeof(error) ))
     {
         ui_message( &l->ui, "Back up settings", error );
         return;
@@ -3725,7 +3737,7 @@ static void restore_settings( struct launcher *l, struct ui_list *list )
 {
     struct launcher_backup backups[LAUNCHER_BACKUP_MAX], replaced;
     struct ui_row items[LAUNCHER_BACKUP_MAX];
-    char text[256], error[192];
+    char text[320], error[192];
     unsigned int restored;
     int count, chosen, i;
 
@@ -3745,13 +3757,23 @@ static void restore_settings( struct launcher *l, struct ui_list *list )
     snprintf( text, sizeof(text), "Put back the settings of %s? The settings they replace are kept as a backup of their own.",
               items[chosen].label );
     if (!ui_confirm( &l->ui, "Restore settings", text, "Restore" )) return;
-    /* A restore can itself be undone, so what it walks over is kept first. */
-    keep_backup( l, &replaced, error, sizeof(error) );
+    /* A restore can itself be undone, so what it walks over is kept first. None
+     * are dropped yet: the oldest may be the copy the user chose, and it has to
+     * still be there when it is read. */
+    if (!keep_backup( l, &replaced, -1, error, sizeof(error) ))
+    {
+        snprintf( text, sizeof(text), "The settings this would replace could not be kept, so nothing "
+                                      "was changed: %s", error );
+        ui_message( &l->ui, "Restore settings", text );
+        return;
+    }
     if (!launcher_backup_restore( l->options->runtime_dir, backups[chosen].name, &restored, error, sizeof(error) ))
     {
         ui_message( &l->ui, "Restore settings", error );
         return;
     }
+    /* The copy that was just read goes with the oldest of the rotation. */
+    launcher_backup_prune( l->options->runtime_dir, LAUNCHER_BACKUP_MAX );
     reload_settings( l );
     snprintf( text, sizeof(text), "%u %s put back", restored, restored == 1 ? "file" : "files" );
     ui_toast( &l->ui, text, 2600 );

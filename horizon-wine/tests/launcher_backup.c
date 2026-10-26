@@ -159,7 +159,7 @@ static void check_create_and_restore(void)
     int count, i;
 
     stage_card();
-    assert( launcher_backup_create( "runtime", "2026-10-26-1745", programs, 3, &made, error, sizeof(error) ) );
+    assert( launcher_backup_create( "runtime", "2026-10-26-1745", programs, 3, 0, &made, error, sizeof(error) ) );
     assert( !strcmp( made.name, "2026-10-26-1745" ) );
     /* launcher.txt, keys.txt, args.txt, config/keys.txt, config/settings.json,
      * the USB settings folder's one file, and SPEED2's three files beside it. */
@@ -180,7 +180,7 @@ static void check_create_and_restore(void)
 
     /* The same minute twice: the second one gets a suffix, and the list is
      * newest first. */
-    assert( launcher_backup_create( "runtime", "2026-10-26-1745", programs, 3, &made, error, sizeof(error) ) );
+    assert( launcher_backup_create( "runtime", "2026-10-26-1745", programs, 3, 0, &made, error, sizeof(error) ) );
     assert( !strcmp( made.name, "2026-10-26-1745-2" ) );
     assert( launcher_backup_list( "runtime", kept, LAUNCHER_BACKUP_MAX, &count ) );
     assert( count == 2 && !strcmp( kept[0].name, "2026-10-26-1745-2" ) );
@@ -218,7 +218,7 @@ static void check_create_and_restore(void)
         char stamp[LAUNCHER_BACKUP_NAME];
 
         snprintf( stamp, sizeof(stamp), "2026-11-01-120%d", i );
-        assert( launcher_backup_create( "runtime", stamp, programs, 3, &made, error, sizeof(error) ) );
+        assert( launcher_backup_create( "runtime", stamp, programs, 3, 0, &made, error, sizeof(error) ) );
     }
     assert( launcher_backup_list( "runtime", kept, LAUNCHER_BACKUP_MAX, &count ) );
     assert( count == LAUNCHER_BACKUP_MAX );
@@ -230,7 +230,7 @@ static void check_create_and_restore(void)
     /* Nothing to take: no settings have been written yet. */
     remove_tree( "runtime" );
     make_dirs( "runtime" );
-    assert( !launcher_backup_create( "runtime", "2026-12-01-0000", no_programs, 0, &made, error, sizeof(error) ) );
+    assert( !launcher_backup_create( "runtime", "2026-12-01-0000", no_programs, 0, 0, &made, error, sizeof(error) ) );
     assert( strstr( error, "no settings" ) );
     assert( !exists( "runtime/backups/2026-12-01-0000" ) );   /* a failed copy leaves nothing behind */
 }
@@ -244,9 +244,9 @@ static void check_missing_places(void)
 
     /* A runtime folder that is not there yet: the copy says so with the path. */
     write_text( "runtime/launcher.txt", "show-hidden=0\n" );
-    assert( launcher_backup_create( "runtime", "2026-01-02-0304", programs, 1, &made, error, sizeof(error) ) );
+    assert( launcher_backup_create( "runtime", "2026-01-02-0304", programs, 1, 0, &made, error, sizeof(error) ) );
     remove_tree( "runtime" );
-    assert( !launcher_backup_create( "runtime", "2026-01-02-0304", programs, 1, &made, error, sizeof(error) ) );
+    assert( !launcher_backup_create( "runtime", "2026-01-02-0304", programs, 1, 0, &made, error, sizeof(error) ) );
     assert( strstr( error, "runtime" ) );
 
     /* A list of no folder is a list of nothing, not a failure. */
@@ -268,6 +268,93 @@ static void check_missing_places(void)
     assert( !strcmp( text, "2026-10-26-1745" ) );
 }
 
+/* A copy taken while another one is being read must not drop it, and the
+ * keeping is what the caller says. */
+static void check_keeping(void)
+{
+    static const char *const programs[] = { "sdmc:/games/SPEED2.EXE" };
+    struct launcher_backup made, kept[LAUNCHER_BACKUP_MAX + 1];
+    char error[192], stamp[LAUNCHER_BACKUP_NAME];
+    int count, i;
+
+    remove_tree( "runtime" );
+    stage_card();
+    for (i = 0; i < LAUNCHER_BACKUP_MAX + 1; i++)
+    {
+        snprintf( stamp, sizeof(stamp), "2026-12-02-120%d", i );
+        assert( launcher_backup_create( "runtime", stamp, programs, 1, 0, &made, error, sizeof(error) ) );
+    }
+    assert( launcher_backup_list( "runtime", kept, LAUNCHER_BACKUP_MAX + 1, &count ) );
+    assert( count == LAUNCHER_BACKUP_MAX );
+
+    /* -1 keeps them all: the copy just taken and the four that were there. */
+    assert( launcher_backup_create( "runtime", "2026-12-03-0900", programs, 1, -1, &made, error, sizeof(error) ) );
+    assert( launcher_backup_list( "runtime", kept, LAUNCHER_BACKUP_MAX + 1, &count ) );
+    assert( count == LAUNCHER_BACKUP_MAX + 1 );
+    assert( launcher_backup_count( "runtime" ) == LAUNCHER_BACKUP_MAX + 1 );
+
+    /* Pruning to five drops the oldest, which is the one an undo would read. */
+    launcher_backup_prune( "runtime", LAUNCHER_BACKUP_MAX );
+    assert( launcher_backup_list( "runtime", kept, LAUNCHER_BACKUP_MAX + 1, &count ) );
+    assert( count == LAUNCHER_BACKUP_MAX );
+    assert( !strcmp( kept[0].name, "2026-12-03-0900" ) );
+    assert( !strcmp( kept[count - 1].name, "2026-12-02-1202" ) );
+    assert( !exists( "runtime/backups/2026-12-02-1201" ) );
+
+    /* A number to keep that is below what is there, and nothing to keep. */
+    launcher_backup_prune( "runtime", 2 );
+    assert( launcher_backup_count( "runtime" ) == 2 );
+    launcher_backup_prune( "runtime", 0 );   /* 0 keeps LAUNCHER_BACKUP_MAX, and two are below it */
+    assert( launcher_backup_count( "runtime" ) == 2 );
+}
+
+/* A manifest is a list of where to put files back. One that climbs out of its
+ * folder, or one with nothing in it, is refused before anything is written. */
+static void check_restore_refusals(void)
+{
+    static const char *const programs[] = { "sdmc:/games/SPEED2.EXE" };
+    struct launcher_backup made;
+    char error[192], text[1024];
+    unsigned int restored;
+
+    remove_tree( "runtime" );
+    stage_card();
+    assert( launcher_backup_create( "runtime", "2026-12-04-1000", programs, 1, 0, &made, error, sizeof(error) ) );
+    assert( launcher_backup_restore( "runtime", "2026-12-04-1000", &restored, error, sizeof(error) ) );
+    /* The launcher's five, the settings folder under the runtime, and the three
+     * beside the game. */
+    assert( restored == 9 );
+
+    write_text( "runtime/backups/2026-12-04-1000/manifest.txt", "0000\t../escaped.txt\n" );
+    write_text( "outside.txt", "kept\n" );
+    assert( !launcher_backup_restore( "runtime", "2026-12-04-1000", &restored, error, sizeof(error) ) );
+    assert( strstr( error, "may put back" ) );
+    assert( restored == 0 );
+    read_text( "outside.txt", text, sizeof(text) );
+    assert( !strcmp( text, "kept\n" ) );   /* the file it pointed at is untouched */
+
+    write_text( "runtime/backups/2026-12-04-1000/manifest.txt", "" );
+    assert( !launcher_backup_restore( "runtime", "2026-12-04-1000", &restored, error, sizeof(error) ) );
+    assert( strstr( error, "no files" ) );
+}
+
+/* A folder that carries the name of a settings file is skipped, not copied and
+ * not a reason to fail. */
+static void check_odd_files(void)
+{
+    static const char *const programs[] = { "sdmc:/games/SPEED2.EXE" };
+    struct launcher_backup made;
+    char error[192];
+
+    remove_tree( "runtime" );
+    stage_card();
+    assert( !remove( "sdmc:/games/SPEED2.args.txt" ) );
+    assert( !mkdir( "sdmc:/games/SPEED2.args.txt", 0777 ) );
+    assert( launcher_backup_create( "runtime", "2026-12-05-1100", programs, 1, 0, &made, error, sizeof(error) ) );
+    assert( made.files == 8 );   /* launcher.txt, keys.txt, args.txt, two config, three beside the game */
+    assert( !strstr( error, "Could not" ) );
+}
+
 int main(void)
 {
     char folder[] = "/tmp/wine-nx-backup-XXXXXX", start[512];
@@ -280,6 +367,9 @@ int main(void)
     check_detail();
     check_create_and_restore();
     check_missing_places();
+    check_keeping();
+    check_restore_refusals();
+    check_odd_files();
 
     assert( !chdir( start ) );
     remove_tree( folder );

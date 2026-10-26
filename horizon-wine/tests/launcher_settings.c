@@ -299,6 +299,40 @@ static void test_settings( const char *dir )
     assert( !strcmp( path, "sdmc:/Games/Test/Game.wine-nx.txt" ) );
 }
 
+/* A settings file is written through tables and states: a field outside what
+ * they hold is refused rather than read past the end of one. */
+static void test_write_refuses_what_it_cannot_say(void)
+{
+    struct launcher_kv kv;
+    struct launcher_settings settings;
+
+    memset( &kv, 0, sizeof(kv) );
+    memset( &settings, 0, sizeof(settings) );   /* every field at the first of its table */
+    assert( launcher_settings_write( &kv, &settings ) );
+
+    settings.verbose = 2;
+    assert( !launcher_settings_write( &kv, &settings ) );
+    settings.verbose = -1;
+
+    settings.framebuffer = 3;
+    assert( !launcher_settings_write( &kv, &settings ) );
+    settings.framebuffer = -1;
+
+    settings.fex = 3;
+    assert( !launcher_settings_write( &kv, &settings ) );
+    settings.fex = -1;
+
+    settings.frame_limit = LAUNCHER_FRAME_LIMIT_COUNT;
+    assert( !launcher_settings_write( &kv, &settings ) );
+    settings.frame_limit = 0;
+
+    settings.d3d = LAUNCHER_D3D_DXVK_VKD3D + 1;
+    assert( !launcher_settings_write( &kv, &settings ) );
+    settings.d3d = LAUNCHER_D3D_DXVK;
+
+    assert( launcher_settings_write( &kv, &settings ) );
+}
+
 /* A game that runs the same as another takes how the other runs, but keeps its
  * own name and whether it is hidden. */
 static void test_copy(void)
@@ -340,6 +374,7 @@ int main(void)
     assert( mkdtemp( dir ) );
     test_get();
     test_set();
+    test_write_refuses_what_it_cannot_say();
     test_copy();
     test_settings( dir );
     snprintf( command, sizeof(command), "rm -rf '%s'", dir );

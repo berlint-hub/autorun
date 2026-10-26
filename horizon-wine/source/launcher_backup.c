@@ -17,6 +17,9 @@
 /* Files one backup may hold: every game's settings and options, with room to
  * spare for a card fuller than the library shows. */
 #define BACKUP_FILES 4096
+/* The width a manifest line's path is scanned with, which is BACKUP_PATH - 1. */
+#define BACKUP_PATH_SCAN "1023"
+_Static_assert( BACKUP_PATH == 1024, "BACKUP_PATH_SCAN must lose one digit" );
 
 /* The launcher's own settings, beside the runtime: the look, the arguments, the
  * controls, and the defaults the runtime keeps for games without settings of
@@ -110,9 +113,14 @@ static int copy_file( const char *from, const char *to, unsigned long long *byte
 {
     char buffer[8192];
     unsigned long long total = 0;
+    struct stat st;
     FILE *in, *out;
     size_t got;
 
+    if (stat( from, &st )) return errno == ENOENT ? 0 : -1;
+    /* A folder that happens to carry the name of a settings file is no
+     * settings file: it is left alone rather than failing the whole copy. */
+    if (!S_ISREG( st.st_mode )) return 0;
     if (!(in = fopen( from, "rb" ))) return errno == ENOENT ? 0 : -1;
     if (!(out = fopen( to, "wb" )))
     {
@@ -210,27 +218,29 @@ static int read_manifest( const char *manifest_path, backup_file_fn file, void *
 {
     char line[BACKUP_PATH + 32], path[BACKUP_PATH];
     unsigned int index;
-    int ok = 1;
+    int broken = 0;
     FILE *handle;
 
     *count = 0;
     if (!(handle = fopen( manifest_path, "r" ))) return 0;
-    while (ok && fgets( line, sizeof(line), handle ))
+    while (!broken && fgets( line, sizeof(line), handle ))
     {
         char *newline = strchr( line, '\n' );
 
-        if (!newline && !feof( handle )) { ok = 0; break; }   /* longer than a path */
+        /* A line too long for a path is no line this module wrote, and reading
+         * on would restore a list with a hole in it. */
+        if (!newline && !feof( handle )) { broken = 1; continue; }
         path[0] = 0;
-        if (sscanf( line, "%u\t%1023[^\n]", &index, path ) != 2) continue;
+        if (sscanf( line, "%u\t%" BACKUP_PATH_SCAN "[^\n]", &index, path ) != 2) continue;
         path[strcspn( path, "\r" )] = 0;
         if (!path[0]) continue;
         (*count)++;
-        if (!file( opaque, index, path )) ok = 0;
+        if (!file( opaque, index, path )) broken = 1;
     }
-    if (ferror( handle )) ok = 0;
+    if (ferror( handle )) broken = 1;
     fclose( handle );
-    if (!ok) *count = 0;
-    return ok;
+    if (broken) *count = 0;
+    return !broken;
 }
 
 struct manifest_total
@@ -251,6 +261,27 @@ static int sum_file( void *opaque, unsigned int index, const char *path )
     return 1;
 }
 
+/* A path a manifest may name back: not empty, not a folder, and with no step
+ * that climbs out of the folder the copy came from. The copies are written from
+ * paths the launcher made, but a hand-edited card must not be able to send a
+ * restore anywhere else. */
+static int restore_path_valid( const char *path )
+{
+    const char *at = path;
+
+    if (!path[0] || path[strlen( path ) - 1] == '/') return 0;
+    while (*at)
+    {
+        const char *end = strchr( at, '/' );
+        size_t length = end ? (size_t)(end - at) : strlen( at );
+
+        if (length == 2 && at[0] == '.' && at[1] == '.') return 0;
+        if (!end) break;
+        at = end + 1;
+    }
+    return 1;
+}
+
 struct restore_state
 {
     const char *directory;
@@ -264,6 +295,11 @@ static int put_file_back( void *opaque, unsigned int index, const char *path )
     struct restore_state *state = opaque;
     char from[BACKUP_PATH], folder[BACKUP_PATH], *slash;
 
+    if (!restore_path_valid( path ))
+    {
+        set_error( state->error, state->error_size, "Not a path a backup may put back: %s", path );
+        return 0;
+    }
     if (!entry_path( from, sizeof(from), state->directory, index )) return 0;
     /* The folder may be gone: a USB game's settings folder is made again rather
      * than failing the whole restore. */
@@ -351,7 +387,7 @@ void launcher_backup_detail( char *out, size_t size, const struct launcher_backu
 }
 
 int launcher_backup_create( const char *runtime_dir, const char *stamp,
-                            const char *const *programs, int program_count,
+                            const char *const *programs, int program_count, int keep,
                             struct launcher_backup *out, char *error, size_t error_size )
 {
     char root[BACKUP_PATH], directory[BACKUP_PATH], manifest[BACKUP_PATH], path[BACKUP_PATH], name[LAUNCHER_BACKUP_NAME];
@@ -430,16 +466,26 @@ done:
         out->files = writer.files;
         out->bytes = writer.bytes;
     }
-
     /* The oldest go once there are more than are kept. */
-    {
-        struct launcher_backup kept[LAUNCHER_BACKUP_MAX + 8];
-        int count, old;
-
-        if (launcher_backup_list( runtime_dir, kept, (int)(sizeof(kept) / sizeof(kept[0])), &count ))
-            for (old = LAUNCHER_BACKUP_MAX; old < count; old++) remove_backup( runtime_dir, kept[old].name );
-    }
+    if (keep >= 0) launcher_backup_prune( runtime_dir, keep );
     return 1;
+}
+
+void launcher_backup_prune( const char *runtime_dir, int keep )
+{
+    struct launcher_backup kept[LAUNCHER_BACKUP_MAX + 8];
+    const int max = (int)(sizeof(kept) / sizeof(kept[0]));
+    char last[LAUNCHER_BACKUP_NAME] = {0};
+    int count;
+
+    if (keep <= 0) keep = LAUNCHER_BACKUP_MAX;
+    while (launcher_backup_list( runtime_dir, kept, max, &count ) && count > keep)
+    {
+        /* A folder that will not go must not keep the loop here. */
+        if (!strcmp( kept[count - 1].name, last )) return;
+        snprintf( last, sizeof(last), "%s", kept[count - 1].name );
+        remove_backup( runtime_dir, last );
+    }
 }
 
 int launcher_backup_list( const char *runtime_dir, struct launcher_backup *backups, int max, int *count )
@@ -487,6 +533,15 @@ int launcher_backup_list( const char *runtime_dir, struct launcher_backup *backu
     return 1;
 }
 
+/* One of a manifest's files, kept or not: a count only reads the list. */
+static int count_file( void *opaque, unsigned int index, const char *path )
+{
+    (void)opaque;
+    (void)index;
+    (void)path;
+    return 1;
+}
+
 int launcher_backup_count( const char *runtime_dir )
 {
     char root[BACKUP_PATH], directory[BACKUP_PATH], manifest[BACKUP_PATH];
@@ -497,11 +552,13 @@ int launcher_backup_count( const char *runtime_dir )
     if (!backups_root( runtime_dir, root, sizeof(root) ) || !(dir = opendir( root ))) return 0;
     while ((entry = readdir( dir )))
     {
+        unsigned int files;
+
         if (!backup_name_valid( entry->d_name )) continue;
         if (!backup_folder( runtime_dir, entry->d_name, directory, sizeof(directory) ) ||
-            !join_path( manifest, sizeof(manifest), directory, "manifest.txt" ) ||
-            access( manifest, F_OK )) continue;
-        count++;
+            !join_path( manifest, sizeof(manifest), directory, "manifest.txt" )) continue;
+        /* Read, not just looked for: the row must count what the picker lists. */
+        if (read_manifest( manifest, count_file, NULL, &files )) count++;
     }
     closedir( dir );
     return count;
@@ -530,6 +587,7 @@ int launcher_backup_restore( const char *runtime_dir, const char *name,
         if (!error[0]) set_error( error, error_size, "Could not read the backup %s", name );
         return 0;
     }
+    if (!files) return set_error( error, error_size, "The backup %s holds no files", name );
     if (restored) *restored = state.restored;
     return 1;
 }
