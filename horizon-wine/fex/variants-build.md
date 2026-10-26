@@ -6,15 +6,20 @@ compared on the Switch without rebuilding or reinstalling:
 - **stock** — `libwow64fex.dll` and `libarm64ecfex.dll`, from the pinned
   `FEX-Emu/FEX@395b132f` (FEX-2609) with `horizon.patch` applied on top,
   exactly as the release pipeline has always built them;
-- **opt** — `libwow64fex-opt.dll` and `libarm64ecfex-opt.dll`, the same
-  pinned `FEX-Emu/FEX@395b132f` with `horizon.patch`, built for the console's
-  CPU: `WINE_NX_FEX_TUNE_TEGRA_X1=ON` passes `-DTUNE_CPU=cortex-a57` (and
-  `-DFEX_TUNE_TEGRA_X1=ON`, which the pinned tree does not know and ignores;
-  a tree that does know it strips the ARMv8.1+ JIT branches). The payload
-  records what it was tuned for — `"tune": "cortex-a57"` in
-  `fex-opt-manifest.json` — and `build-dlls.py` stops a build whose manifest
-  disagrees with the recipe, so a variant cannot quietly become a copy of the
-  stock modules under another name.
+- **opt** — `libwow64fex-opt.dll` and `libarm64ecfex-opt.dll`, the tuned
+  build of the same translator (the pinned `FEX-Emu/FEX@395b132f` with
+  `horizon.patch`, compiled for the console's Cortex-A57 and whatever else the
+  FEX work tunes next). Its payload records what it was tuned for —
+  `"tune"` in `fex-opt-manifest.json` — so a card can say which build it
+  carries.
+
+**This repository does not build FEX.** The tuning, the source tree, the
+compile and the `fex-opt` release are the FEX work's
+(`arena/21bcd47b-autorun`, publishing from `berlint-hub/FEX`); this branch
+only takes that release, checks it against its checksums and ships it — into
+the SD archive (`build.yml`) and as a small overlay for the A/B
+(`fex-variant.yml`). Nothing here compiles, tunes or publishes a module, so
+the modules a card runs have one author.
 
 The first tuned variant died at the first guest init with
 `STATUS_DLL_INIT_FAILED`, right after `wow64win` attached and before FEX read
@@ -24,20 +29,21 @@ and a byte-twin build with the tuning off died the same way. The stem-based
 pairing (`dlls/ntdll/unix/horizon_unixlib_names.h`, see
 `startup-variant-unixlib.md`) is what fixed it, and the tuning is back on.
 
-The twin is still the control when a startup failure has to be placed: run the
-**FEX variant** workflow with `tune: off` (or build with
-`WINE_NX_FEX_TUNE_TEGRA_X1=OFF` locally) and the modules take the stock flags
-under the `-opt` names. A control build is never published as the `fex-opt`
-release; the release is what the main Build fetches into every SD archive.
+The twin is still the control when a startup failure has to be placed: the FEX
+work builds it with `WINE_NX_FEX_TUNE_TEGRA_X1=OFF` (the stock flags under the
+`-opt` names) and publishes it the same way; a run that pairs the twin's
+`fex-opt` with this runtime then tells a tuning problem from a variant-path
+problem. Ask for it there rather than building one here.
 
 Both share Autorun's ABI headers in `horizon-wine/fex/` and are validated the
 same way. The point of the pair is an honest A/B on hardware: the tuning is
 expected to be a small, safe win. The larger step, a newer FEX translator,
 is held back until its Horizon layer is complete (see below).
 
-## The build side
+## The build side (the FEX work's)
 
-The changes live in the `autorun-horizon-dlls` tools and are kept here as
+Recorded here because this branch reads the result, not because it runs any of
+it. The changes live in the `autorun-horizon-dlls` tools and are kept as
 `dlls-fex-variants.patch`, made against the `horizon-dlls` submodule pin,
 until they land upstream:
 
@@ -67,26 +73,56 @@ the day the variant's source changes.
 
 ## Who builds what
 
-The FEX tree owns its build. Whoever changes it publishes the modules as the
-**`fex-opt` release** on `berlint-hub/FEX`: `fex-opt-modules.zip` (laid out as
-`switch/wine/`, the two modules and `fex-opt-manifest.json`) and `SHA256SUMS`.
-`fex-variant-release.yml` in this folder is that workflow, ready to drop into
-`.github/workflows/` there.
+**The FEX work builds.** It is `arena/21bcd47b-autorun` and the tree it
+publishes from, `berlint-hub/FEX`; the modules come out of there as the
+**`fex-opt` release**: `fex-opt-modules.zip` (laid out as `switch/wine/`, the
+two modules and `fex-opt-manifest.json`) and `SHA256SUMS`.
+`fex-variant-release.yml` in this folder is the workflow that publishes it.
 
-The `FEX variant` workflow (`.github/workflows/fex-variant.yml`) takes that
-release first, checks it against its checksums, and uploads it as the SD
-overlay artifact; while no release is published, it builds the same modules
-from the same sources itself and publishes them as this repository's own
-`fex-opt` release, the publisher of last resort. The moment the FEX tree's
-release appears, the download takes over without any change here.
+**This branch ships.** Two places take that release and nothing else:
 
-The main build takes the modules the same way (the `Fetch the tuned FEX` step
-of `build.yml`, into `package-autorun.py --extra`): whichever `fex-opt`
-release exists is checked and staged with `fex-variant.txt` set to `opt`, so
-the SD archive runs the tuned variant out of the box and returns to the
-pinned ones when that file is deleted. `verify-package.py` knows the two
-variant module names as the one thing in the package not from the DLL
-repository.
+- the `FEX variant` workflow (`.github/workflows/fex-variant.yml`) downloads
+  it, checks the checksums, and packs it as the SD overlay artifact — a drop
+  that needs no rebuild to try on the console. A run reached without a release
+  fails and says to ask the FEX work; nothing is built as a fallback.
+- the main build (the `Fetch the tuned FEX` step of `build.yml`, into
+  `package-autorun.py --extra`) stages it with `fex-variant.txt` set to `opt`,
+  so the SD archive runs the tuned variant out of the box and returns to the
+  pinned ones when that file is deleted. `verify-package.py` knows the two
+  variant module names as the one thing in the package not from the DLL
+  repository.
+
+`check_fex_payload_source.py` (run by the Build job's host tests) reads both
+workflows back and stops the world if either starts compiling, tuning or
+publishing FEX again: a second builder is how the A/B ends up comparing builds
+nobody chose, which is exactly what happened while the startup crash was
+bisected.
+
+## Handing over an optimisation
+
+The tuning loop is: a run on the console, its log, a proposal, then the FEX
+work compiles it. This branch does not compile anything, so a proposal has to
+carry what the FEX work needs to build it on its own:
+
+- **What to change** — the knob or the source-level change, by name: a CMake
+  input (`TUNE_CPU`, `TUNE_ARCH`, `FEX_TUNE_TEGRA_X1`, `ENABLE_LTO`, …), a
+  patch against the FEX tree, or a change in `horizon.patch`'s side of the
+  Horizon layer. One change per proposal, so an A/B can attribute it.
+- **Why** — the evidence in the log, quoted by line: which `[PROF]`,
+  `[CPU]`, `[EXC]` or timing line shows the cost, and what the change should
+  take off it. "It might be faster" is not a proposal.
+- **How it lands** — the module names it should keep (`-opt`), whether the
+  stock modules must stay untouched, and any ABI the runtime has to match
+  (`horizon-wine/runtime-interfaces.json`; `fex_payload.py` checks it).
+- **How to tell it worked** — the run to make and the lines to compare with
+  the previous build's, e.g. the same game, the same scene, `[CPU]` naming the
+  intended module and the `[PROF]` total for the frame loop.
+- **The risk** — what breaks if the CPU or the tree is not what it is assumed
+  to be (the ARMv8.1+ assumptions, the W^X aliasing, the I-cache flush), and
+  which of those a failure in the log would look like.
+
+A proposal in that shape is something the FEX work can build and publish
+without a round trip; anything less comes back as a question.
 
 ## Why the FEX-2610 port is not the variant yet
 

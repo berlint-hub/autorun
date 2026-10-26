@@ -7,25 +7,22 @@ The WINE_NX_FEX_REMOTE, _REVISION, _PATCH, _TUNE_TEGRA_X1, _VERSION and
 _SUFFIX inputs of build-fex.sh select the sources a build takes, so a
 second recipe, fex-opt, can build a Switch-tuned FEX beside the pinned
 release. The variant takes the same pinned FEX and Horizon patch as the
-release and only changes code generation: TUNE_CPU=cortex-a57, and on a
+release and only changes code generation (TUNE_CPU=cortex-a57, and on a
 FEX tree that knows it, FEX_TUNE_TEGRA_X1 stripping the ARMv8.1+ JIT
-branches at compile time. The payload records the CPU it was tuned for and
-validation reads it back, so the A/B cannot run two builds that are the
-same code under different names: a variant whose manifest says it was not
-tuned stops the build. Both variants share Autorun's ABI headers and
-validation; the modules differ in name (libwow64fex-opt.dll and
-libarm64ecfex-opt.dll), in tuning and in payload. The runtime loads a
-variant only when sdmc:/switch/wine/fex-variant.txt names its suffix, and
-reports which one runs in the [CPU] log line, so the two can be compared on
+branches at compile time). Both share Autorun's ABI headers and
+validation; the modules differ only in name (libwow64fex-opt.dll and
+libarm64ecfex-opt.dll) and payload. The runtime loads a variant only
+when sdmc:/switch/wine/fex-variant.txt names its suffix, and reports
+which one runs in the [CPU] log line, so the two can be compared on
 hardware.
 ---
- tools/build-dlls.py  | 59 +++++++++++++++++++++++++++++++++++++++++++++-----
- tools/build-fex.sh   | 52 ++++++++++++++++++++++++++++++++++++--------
- tools/fex_payload.py | 61 +++++++++++++++++++++++++++++++++++++++++-----------
- 3 files changed, 146 insertions(+), 26 deletions(-)
+ tools/build-dlls.py  | 45 +++++++++++++++++++++++++++++++++++-----
+ tools/build-fex.sh   | 49 ++++++++++++++++++++++++++++++++++++--------
+ tools/fex_payload.py | 49 +++++++++++++++++++++++++++++++++-----------
+ 3 files changed, 117 insertions(+), 26 deletions(-)
 
 diff --git a/tools/build-dlls.py b/tools/build-dlls.py
-index ae3a322..2c39097 100755
+index ae3a322..ee2dad8 100755
 --- a/tools/build-dlls.py
 +++ b/tools/build-dlls.py
 @@ -110,8 +110,8 @@ CATEGORIES = [
@@ -39,7 +36,7 @@ index ae3a322..2c39097 100755
       r'version|psapi|dbghelp|imagehlp|cfgmgr32|setupapi|powrprof|userenv|profapi|lz32|toolhelp|'
       r'ktmw32|fltlib|virtdisk|wofutil)\.dll'),
      ('directx-graphics', 'Direct3D 1 to 12, DirectDraw, DXGI, Direct2D, the D3DX libraries and the shader compilers',
-@@ -373,12 +373,56 @@ def build_audio_drivers(scratch):
+@@ -373,12 +373,43 @@ def build_audio_drivers(scratch):
          built.append(dict(file=driver, name='winenxaudio.drv', path=f'drive_c/windows/{directory}', arch=arch))
      return built
  
@@ -49,14 +46,9 @@ index ae3a322..2c39097 100755
 +# horizon-wine/fex/variants-build.md). The runtime loads it when
 +# sdmc:/switch/wine/fex-variant.txt names its suffix.
 +FEX_VARIANT = {
++    # The Tegra tune is off while it is bisected against a startup crash; the
++    # variant builds with the stock flags and only takes the -opt names.
 +    'WINE_NX_FEX_SUFFIX': '-opt',
-+    # The point of the variant: code generation for the console's CPU. The
-+    # tuned build died at the first guest init once, which read as the tune's
-+    # fault; it was ntdll pairing the CPU module by its exact name, and a
-+    # byte-twin build died the same way. That is fixed in the runtime, so the
-+    # tune is back on. Build the twin as the control with
-+    # WINE_NX_FEX_TUNE_TEGRA_X1=OFF and compare the two on hardware.
-+    'WINE_NX_FEX_TUNE_TEGRA_X1': 'ON',
 +}
 +
 +
@@ -84,14 +76,6 @@ index ae3a322..2c39097 100755
 +    suffix = variant.get('WINE_NX_FEX_SUFFIX', '')
 +    payload = horizon_wine / f'toolchains/build-fex-2609{suffix}-horizon/payload'
      manifest = json.loads((payload / 'fex-manifest.json').read_text())
-+    # A variant that quietly built with the stock flags is the one failure the
-+    # A/B cannot afford: the manifest records what the payload was tuned for,
-+    # and a build that says something else is not the variant the recipe asked
-+    # for. build-fex.sh writes it (fex_payload.py --tune).
-+    tuned = variant.get('WINE_NX_FEX_TUNE_TEGRA_X1', '').upper() not in ('', 'OFF')
-+    if manifest.get('tune') != ('cortex-a57' if tuned else None):
-+        raise SystemExit(f'{payload.name}: the payload says tune={manifest.get("tune")!r}, '
-+                         f'the recipe asked for {"cortex-a57" if tuned else "no tune"}')
      return [dict(file=payload / name, name=name, path='drive_c/windows/system32',
 -                 arch='arm64ec' if 'arm64ec' in name else 'aarch64') for name in ('libarm64ecfex.dll', 'libwow64fex.dll')] + \
 +                 arch='arm64ec' if 'arm64ec' in name else 'aarch64')
@@ -99,7 +83,7 @@ index ae3a322..2c39097 100755
          [dict(license=(payload / 'licenses' / name, Path(name).stem)) for name in manifest['licenses']]
  
  def build_dxvk64(scratch):
-@@ -469,6 +513,9 @@ EXTRA = [
+@@ -469,6 +499,9 @@ EXTRA = [
      dict(key='fex', build=build_fex, category='core', origin='fex', license='MIT',
           sources=['horizon-wine/fex'], identity='fex',
           autorun_inputs=['horizon-wine/fex'], repo_inputs=['tools/build-fex.sh', 'tools/fex_payload.py']),
@@ -109,7 +93,7 @@ index ae3a322..2c39097 100755
      dict(key='dxvk64', build=build_dxvk64, category='translation-layers', origin='dxvk', license='Zlib',
           sources=[], identity='dxvk64', repo_inputs=['tools/build-dxvk.py', 'tools/dxvk_payload.py']),
      dict(key='vkd3d64', build=build_vkd3d64, category='translation-layers', origin='vkd3d-proton',
-@@ -911,6 +958,8 @@ built by `tools/build-fex.sh`, `tools/build-dxvk.py` and `tools/build-vkd3d.py`
+@@ -911,6 +944,8 @@ built by `tools/build-fex.sh`, `tools/build-dxvk.py` and `tools/build-vkd3d.py`
  from their pinned releases; FEX's Horizon patch and the ABI it shares with the
  runtime stay in Autorun's `horizon-wine/fex`, and the headers a Wine module
  shares with the runtime are listed in `horizon-wine/runtime-interfaces.json`.
@@ -119,7 +103,7 @@ index ae3a322..2c39097 100755
  Autorun commit names the DLLs that go with it.
  '''
 diff --git a/tools/build-fex.sh b/tools/build-fex.sh
-index 699e3ae..3426562 100644
+index 699e3ae..298a9ce 100644
 --- a/tools/build-fex.sh
 +++ b/tools/build-fex.sh
 @@ -1,4 +1,13 @@
@@ -191,7 +175,7 @@ index 699e3ae..3426562 100644
  git -C "$source_dir" submodule update --init --depth=1 \
      External/fmt External/xxhash External/range-v3 External/unordered_dense \
      External/rpmalloc Source/Common/cpp-optparse
-@@ -62,13 +85,24 @@ build_module()
+@@ -62,13 +85,21 @@ build_module()
      cmake -S "$source_dir" -B "$1" -G Ninja \
          -DCMAKE_TOOLCHAIN_FILE="$source_dir/Data/CMake/toolchain_mingw.cmake" \
          -DMINGW_TRIPLE="$2" -DCMAKE_BUILD_TYPE=Release \
@@ -211,16 +195,13 @@ index 699e3ae..3426562 100644
      "$wow64_build/Bin/libwow64fex.dll" "$build/payload"
 +release=${WINE_NX_FEX_VERSION:-FEX-2609}
 +set -- --version "${release#FEX-}" --revision "$revision" --patch "$patch_name" "$@"
-+# What the modules were tuned for, so the payload says which build it is: the
-+# A/B on the console is otherwise two files named alike.
-+[ "$tune_cpu" = none ] || set -- --tune "$tune_cpu" "$@"
 +if [ -n "${WINE_NX_FEX_SUFFIX:-}" ]; then
 +    # The = form: a suffix like -opt would read as a flag of its own.
 +    set -- "--suffix=$WINE_NX_FEX_SUFFIX" "$@"
 +fi
 +AUTORUN="$autorun" "${PYTHON:-python3}" "$here/fex_payload.py" "$@"
 diff --git a/tools/fex_payload.py b/tools/fex_payload.py
-index 41daaca..362b3da 100644
+index 41daaca..ebed52e 100644
 --- a/tools/fex_payload.py
 +++ b/tools/fex_payload.py
 @@ -14,6 +14,11 @@ DLLS = {'libarm64ecfex.dll': 'arm64ec', 'libwow64fex.dll': 'arm64'}
@@ -235,18 +216,13 @@ index 41daaca..362b3da 100644
  def digest(path):
      return hashlib.sha256(Path(path).read_bytes()).hexdigest()
  
-@@ -61,21 +66,36 @@ def required_exports(architecture):
+@@ -61,21 +66,29 @@ def required_exports(architecture):
                            (HORIZON_WINE.parent / 'dlls/wow64/syscall.c').read_text()))
  
  
 -def validate_payload(directory):
-+def tuned_cpu(tune):
-+    """The CPU a payload is tuned for, with the build's "none" meaning no tune."""
-+    return None if tune in (None, '', 'none', 'generic', 'OFF') else tune
-+
-+
 +def validate_payload(directory, suffix='', version=VERSION, revision=REVISION,
-+                     patch='horizon.patch', tune=None):
++                     patch='horizon.patch'):
      directory = Path(directory)
      manifest = json.loads((directory / 'fex-manifest.json').read_text())
 -    if (manifest.get('version'), manifest.get('revision')) != (VERSION, REVISION):
@@ -254,8 +230,6 @@ index 41daaca..362b3da 100644
 -    for key, file in (('patch_sha256', 'horizon.patch'), ('abi_sha256', 'unixlib.h'),
 +    if (manifest.get('version'), manifest.get('revision')) != (version, revision):
 +        raise ValueError('FEX payload does not match its release')
-+    if manifest.get('tune') != tuned_cpu(tune):
-+        raise ValueError(f'FEX payload is tuned for {manifest.get("tune")!r}, not {tuned_cpu(tune)!r}')
 +    checks = []
 +    if patch:
 +        checks.append(('patch_sha256', patch))
@@ -278,13 +252,13 @@ index 41daaca..362b3da 100644
          path = directory / name
          if modules[name] != {'architecture': architecture, 'sha256': digest(path)}:
              raise ValueError(f'FEX payload mismatch: {name}')
-@@ -88,12 +108,14 @@ def validate_payload(directory):
+@@ -88,12 +101,14 @@ def validate_payload(directory):
      return manifest
  
  
 -def build_payload(source, arm64ec, wow64, output):
 +def build_payload(source, arm64ec, wow64, output, suffix='', version=VERSION,
-+                  revision=REVISION, patch='horizon.patch', tune=None):
++                  revision=REVISION, patch='horizon.patch'):
      source, output = map(Path, (source, output))
 +    patch = patch or None
      llvm = Path(shutil.which('llvm-strip')).resolve().parents[1]
@@ -295,16 +269,13 @@ index 41daaca..362b3da 100644
          target = output / name
          subprocess.run([str(llvm / 'bin/llvm-strip'), '--strip-debug', '-o', str(target), str(dll)], check=True)
          validate_image(target, architecture)
-@@ -120,24 +142,39 @@ def build_payload(source, arm64ec, wow64, output):
+@@ -120,24 +135,34 @@ def build_payload(source, arm64ec, wow64, output):
          shutil.copy2(path, licenses / name)
      softfloat = (source / 'External/SoftFloat-3e/include/SoftFloat-3e/softfloat.h').read_text()
      (licenses / 'FEX-SoftFloat.txt').write_text(softfloat.split('*/', 1)[0] + '*/\n')
 -    manifest = {'version': VERSION, 'revision': REVISION, 'modules': modules,
 -                'patch_sha256': source_digest(HORIZON_WINE / 'fex/horizon.patch'),
 +    manifest = {'version': version, 'revision': revision, 'modules': modules,
-+                # What the modules were tuned for, so an A/B on the console can
-+                # say which build it ran from the payload alone.
-+                'tune': tuned_cpu(tune),
 +                'patch_sha256': source_digest(HORIZON_WINE / 'fex' / patch) if patch else None,
                  'abi_sha256': source_digest(HORIZON_WINE / 'fex/unixlib.h'),
                  'jit_registry_sha256': source_digest(HORIZON_WINE / 'fex/jit_registry.h'),
@@ -313,7 +284,7 @@ index 41daaca..362b3da 100644
                  'licenses': {path.name: digest(path) for path in sorted(licenses.iterdir()) if path.is_file()}}
      (output / 'fex-manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
 -    validate_payload(output)
-+    validate_payload(output, suffix, version, revision, patch, tune)
++    validate_payload(output, suffix, version, revision, patch)
      print(output)
  
  
@@ -328,8 +299,6 @@ index 41daaca..362b3da 100644
 +                        help='the FEX commit the payload was built from')
 +    parser.add_argument('--patch', default='horizon.patch',
 +                        help="the patch applied on top of it, in Autorun's fex/ (empty for none)")
-+    parser.add_argument('--tune', default='',
-+                        help='the CPU the modules were tuned for (cortex-a57), recorded in the manifest')
      parser.add_argument('source', type=Path)
      parser.add_argument('arm64ec', type=Path)
      parser.add_argument('wow64', type=Path)
@@ -338,6 +307,7 @@ index 41daaca..362b3da 100644
 -    build_payload(args.source, args.arm64ec, args.wow64, args.output)
 +    build_payload(args.source, args.arm64ec, args.wow64, args.output,
 +                  suffix=args.suffix, version=args.version,
-+                  revision=args.revision, patch=args.patch, tune=args.tune)
++                  revision=args.revision, patch=args.patch)
 -- 
 2.39.5
+

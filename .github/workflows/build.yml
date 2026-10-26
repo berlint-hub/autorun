@@ -23,11 +23,11 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             libsdl2-dev libsdl2-ttf-dev libpng-dev fonts-dejavu-core
 
-      # The recipe and its workflow are text, and they are what makes an -opt
-      # module tuned: the tuning was switched off for a bisect once and stayed
-      # off through several builds. This reads them back.
-      - name: FEX variant recipe
-        run: python3 horizon-wine/tests/check_fex_variant_recipe.py
+      # The FEX modules are not built here: this checks that the workflows only
+      # take the FEX work's release, and that the docs still say who builds and
+      # who packs -- the split that keeps the A/B honest.
+      - name: FEX payload source
+        run: python3 horizon-wine/tests/check_fex_payload_source.py
 
       - name: Input profiles
         run: |
@@ -123,10 +123,12 @@ jobs:
           key: toolchains-${{ hashFiles('horizon-wine/switch-dev.txt', 'horizon-wine/build-boot-bundle.sh', 'horizon-wine/mesosphere/**') }}
           restore-keys: toolchains-
 
-      # The tuned FEX modules, from whichever fex-opt release exists: the FEX
-      # tree's own first, this repository's fallback build second. They are
-      # staged into the package with the variant file that turns them on; a
-      # build reached without a release ships the pinned modules alone.
+      # The tuned FEX modules, taken from whichever fex-opt release the FEX
+      # work published: berlint-hub/FEX's own first, this repository's second.
+      # Nothing is built here -- the tuning is that work's (variants-build.md).
+      # They are staged into the package with the variant file that turns them
+      # on; a build reached without a release ships the pinned modules alone,
+      # and says so.
       - name: Fetch the tuned FEX
         shell: bash
         run: |
@@ -145,6 +147,8 @@ jobs:
               break
             fi
           done
+          [ -f horizon-wine/fex/opt-modules/switch/wine/fex-variant.txt ] || \
+            echo "::warning::No fex-opt release (berlint-hub/FEX or berlint-hub/autorun): the archive ships the pinned modules alone."
 
       # build.sh tees to build.log so a failure can say why in annotations,
       # which the job's checks carry even when the log archive is out of reach.
