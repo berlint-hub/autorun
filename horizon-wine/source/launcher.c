@@ -2152,7 +2152,10 @@ static int start_program( struct launcher *l, struct program *p, char *target, s
     /* The run is timed from here, and counted when the launcher is next up:
      * save_library() writes it into the catalog the settle reads. */
     if ((p->last_played = now_seconds())) p->started_at = p->last_played;
-    save_library( l );
+    /* The game starts either way: the library it could not be written to is
+     * saved again when the launcher comes back, and the log says what the toast
+     * cannot -- this frame is the last one before the game takes the screen. */
+    if (!save_library( l )) launcher_log( "[LAUNCHER] Could not save the library before starting a game" );
 
     ui_background( ui );
     ui_text_centered( ui, ui->large, ui->width / 2, (ui->height - TTF_FontHeight( ui->large )) / 2,
@@ -3678,7 +3681,9 @@ static int backup_programs( struct launcher *l, const char **paths, int max )
 static void sync_defaults( struct launcher *l )
 {
     struct wine_nx_config config;
-    char path[512];
+    /* As long as the paths the backup keeps, so a runtime folder deep on a card
+     * still has its defaults written rather than silently skipped. */
+    char path[1024];
 
     runtime_file( l, "config/settings.json", path, sizeof(path) );
     if (!wine_nx_config_load( &config, path )) return;

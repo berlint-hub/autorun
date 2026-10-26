@@ -82,6 +82,22 @@ static int make_folder( const char *path )
     return errno == EEXIST ? 0 : -1;
 }
 
+/* Every folder above a file, from the top down, so a restore into a program's
+ * folder that lost more than its last level still lands. */
+static void make_folders( char *path )
+{
+    char *at;
+
+    for (at = path + 1; *at; at++)
+        if (*at == '/')
+        {
+            *at = 0;
+            make_folder( path );
+            *at = '/';
+        }
+    make_folder( path );
+}
+
 static int backups_root( const char *runtime_dir, char *out, size_t size )
 {
     return join_path( out, size, runtime_dir, "backups" );
@@ -107,22 +123,31 @@ static int backup_name_valid( const char *name )
     return 1;
 }
 
-/* 1 when copied, 0 when the source is not there, -1 on a failure. */
+/* 1 when copied, 0 when the source is not there, -1 on a failure. The copy is
+ * written beside its target and moved over it: a restore writes onto the card's
+ * only other copy of a setting, and a card that fills up or a console that
+ * loses power in the middle of it must not leave that file truncated. */
 static int copy_file( const char *from, const char *to, unsigned long long *bytes,
                       char *error, size_t error_size )
 {
-    char buffer[8192];
+    char buffer[8192], temp[BACKUP_PATH + 16];
     unsigned long long total = 0;
     struct stat st;
     FILE *in, *out;
     size_t got;
+    int written;
 
     if (stat( from, &st )) return errno == ENOENT ? 0 : -1;
     /* A folder that happens to carry the name of a settings file is no
      * settings file: it is left alone rather than failing the whole copy. */
     if (!S_ISREG( st.st_mode )) return 0;
+    if ((size_t)snprintf( temp, sizeof(temp), "%s.autorun-new", to ) >= sizeof(temp) )
+    {
+        set_error( error, error_size, "Too long a path to write: %s", to );
+        return -1;
+    }
     if (!(in = fopen( from, "rb" ))) return errno == ENOENT ? 0 : -1;
-    if (!(out = fopen( to, "wb" )))
+    if (!(out = fopen( temp, "wb" )))
     {
         fclose( in );
         set_error( error, error_size, "Could not write %s", to );
@@ -134,20 +159,36 @@ static int copy_file( const char *from, const char *to, unsigned long long *byte
         total += got;
     }
     if (ferror( in )) goto failed;
-    if (fclose( out ))
-    {
-        fclose( in );
-        remove( to );
-        set_error( error, error_size, "Could not write %s", to );
-        return -1;
-    }
+    written = !fflush( out );
+    if (written && fsync( fileno( out ) )) written = 0;
+    if (fclose( out ) || !written) goto not_written;
     fclose( in );
+    /* Moved over the target. A filesystem that will not rename onto an existing
+     * file has to lose it first -- but only a file, never a folder or anything
+     * else that happens to carry the name the manifest gave. */
+    if (rename( temp, to ))
+    {
+        struct stat target;
+
+        if (stat( to, &target ) || !S_ISREG( target.st_mode ) ||
+            remove( to ) || rename( temp, to ))
+        {
+            remove( temp );
+            set_error( error, error_size, "Could not write %s", to );
+            return -1;
+        }
+    }
     if (bytes) *bytes += total;
     return 1;
+not_written:
+    fclose( in );
+    remove( temp );
+    set_error( error, error_size, "Could not write %s", to );
+    return -1;
 failed:
     fclose( out );
     fclose( in );
-    remove( to );
+    remove( temp );
     set_error( error, error_size, "Could not copy %s", from );
     return -1;
 }
@@ -301,13 +342,13 @@ static int put_file_back( void *opaque, unsigned int index, const char *path )
         return 0;
     }
     if (!entry_path( from, sizeof(from), state->directory, index )) return 0;
-    /* The folder may be gone: a USB game's settings folder is made again rather
-     * than failing the whole restore. */
+    /* The folders may be gone: a USB game's settings folder is made again rather
+     * than failing the whole restore, however many levels of it went. */
     snprintf( folder, sizeof(folder), "%s", path );
     if ((slash = strrchr( folder, '/' )))
     {
         *slash = 0;
-        make_folder( folder );
+        make_folders( folder );
     }
     if (copy_file( from, path, NULL, state->error, state->error_size ) <= 0)
     {

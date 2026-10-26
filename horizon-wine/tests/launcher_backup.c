@@ -346,6 +346,52 @@ static void check_restore_refusals(void)
     assert( strstr( error, "no files" ) );
 }
 
+/* A restore puts a file into folders that may be gone with more than the last
+ * level, and a copy that cannot be made lands nowhere: no truncated settings
+ * file, no temporary beside it, and nothing else moved out of the way. */
+static void check_restore_paths(void)
+{
+    static const char *const programs[] = { "sdmc:/games/SPEED2.EXE" };
+    struct launcher_backup made;
+    char error[192], text[1024];
+    unsigned int restored;
+
+    remove_tree( "runtime" );
+    remove_tree( "sdmc:/games/deep" );
+    remove_tree( "sdmc:/games/DIR" );
+    stage_card();
+    assert( launcher_backup_create( "runtime", "2026-12-06-0900", programs, 1, 0, &made, error, sizeof(error) ) );
+
+    /* The copy goes two folders deeper than anything that exists. */
+    write_text( "runtime/backups/2026-12-06-0900/files/0000", "cpu=fex-opt\n" );
+    write_text( "runtime/backups/2026-12-06-0900/manifest.txt",
+                "0000\tsdmc:/games/deep/one/two/SET.wine-nx.txt\n" );
+    assert( launcher_backup_restore( "runtime", "2026-12-06-0900", &restored, error, sizeof(error) ) );
+    assert( restored == 1 );
+    read_text( "sdmc:/games/deep/one/two/SET.wine-nx.txt", text, sizeof(text) );
+    assert( !strcmp( text, "cpu=fex-opt\n" ) );
+    assert( !exists( "sdmc:/games/deep/one/two/SET.wine-nx.txt.autorun-new" ) );
+
+    /* A folder carries the name the manifest names: it is not a file, and it is
+     * not removed to make room for one. */
+    assert( !mkdir( "sdmc:/games/DIR", 0777 ) );
+    write_text( "runtime/backups/2026-12-06-0900/manifest.txt", "0000\tsdmc:/games/DIR\n" );
+    assert( !launcher_backup_restore( "runtime", "2026-12-06-0900", &restored, error, sizeof(error) ) );
+    assert( error[0] && restored == 0 );
+    assert( exists( "sdmc:/games/DIR" ) );
+    assert( !exists( "sdmc:/games/DIR.autorun-new" ) );
+
+    /* A file that is there gets the new bytes whole, with nothing left over. */
+    write_text( "sdmc:/games/SETTINGS.txt", "old setting\n" );
+    write_text( "runtime/backups/2026-12-06-0900/files/0000", "new setting\n" );
+    write_text( "runtime/backups/2026-12-06-0900/manifest.txt", "0000\tsdmc:/games/SETTINGS.txt\n" );
+    assert( launcher_backup_restore( "runtime", "2026-12-06-0900", &restored, error, sizeof(error) ) );
+    assert( restored == 1 );
+    read_text( "sdmc:/games/SETTINGS.txt", text, sizeof(text) );
+    assert( !strcmp( text, "new setting\n" ) );
+    assert( !exists( "sdmc:/games/SETTINGS.txt.autorun-new" ) );
+}
+
 /* A folder that carries the name of a settings file is skipped, not copied and
  * not a reason to fail. */
 static void check_odd_files(void)
@@ -377,6 +423,7 @@ int main(void)
     check_missing_places();
     check_keeping();
     check_restore_refusals();
+    check_restore_paths();
     check_odd_files();
 
     assert( !chdir( start ) );
