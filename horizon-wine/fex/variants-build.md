@@ -20,8 +20,8 @@ is held back until its Horizon layer is complete (see below).
 ## The build side
 
 The changes live in the `autorun-horizon-dlls` tools and are kept here as
-`dlls-fex-variants.patch` (from `berlint-hub/autorun-horizon-dlls`, branch
-`arena/6fd3131b-fex-variants`) until they land upstream:
+`dlls-fex-variants.patch`, made against the `horizon-dlls` submodule pin,
+until they land upstream:
 
 - `tools/build-fex.sh` takes `WINE_NX_FEX_REMOTE`, `_REVISION`, `_PATCH`
   (empty for none), `_TUNE_TEGRA_X1`, `_VERSION` and `_SUFFIX`, and gives the
