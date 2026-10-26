@@ -59,6 +59,11 @@ want("manifest.get('tune') != tuned_cpu(tune)" in recipe,
 want('WINE_NX_FEX_TUNE_TEGRA_X1=ON' in workflow and "': 'ON'" in recipe,
      'the workflow and the recipe disagree on whether the variant is tuned')
 
+# The workflow reads the tune back out of the payload it just packed: a build
+# that says ON but shipped nothing tuned is what the A/B cannot see.
+want('"$tune" = cortex-a57' in workflow and '[ "$tune" = none ]' in workflow,
+     'the packaged overlay is not checked against the tune this run asked for')
+
 # The control exists to be documented; it is no use if nobody finds it.
 want('WINE_NX_FEX_TUNE_TEGRA_X1' in doc and 'tune: off' in doc,
      'variants-build.md does not say how to build the control')

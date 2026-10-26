@@ -171,6 +171,20 @@ jobs:
             *)    tune_note="kód pro $tune" ;;
           esac
           echo "The fex-opt overlay is tuned for: $tune" >> "$GITHUB_STEP_SUMMARY"
+          # A build of our own must carry what this run asked for; a release
+          # taken from the FEX tree is theirs and is only reported.
+          case "${WINE_NX_FEX_TUNE_TEGRA_X1:-}" in
+            ON)
+              [ "$tune" = cortex-a57 ] || {
+                echo "::error::the payload is tuned for '$tune', this build asked for cortex-a57" >&2
+                exit 1
+              } ;;
+            OFF)
+              [ "$tune" = none ] || {
+                echo "::error::the control build is tuned for '$tune', it was asked for no tune" >&2
+                exit 1
+              } ;;
+          esac
           cat > "$stage/README-fex-opt.txt" <<EOF
           Vylepšený FEX (Tegra X1) pro A/B porovnání s původním.
 
@@ -212,8 +226,13 @@ jobs:
           tune=$(python3 -c "import json;print(json.load(open('overlay/switch/wine/fex-opt-manifest.json')).get('tune') or 'none')")
           (cd overlay && zip -qr ../fex-opt-modules.zip switch)
           sha256sum fex-opt-modules.zip > SHA256SUMS
-          gh release create fex-opt fex-opt-modules.zip SHA256SUMS \
-            --title "Tuned Horizon FEX modules (fallback build)" \
-            --notes "libwow64fex-opt.dll and libarm64ecfex-opt.dll for Autorun's A/B switch (sdmc:/switch/wine/fex-variant.txt = opt), tuned for $tune. Built here while the FEX tree publishes none; berlint-hub/FEX's fex-opt release takes precedence." \
-            --latest=false 2>/dev/null || \
+          notes="libwow64fex-opt.dll and libarm64ecfex-opt.dll for Autorun's A/B switch (sdmc:/switch/wine/fex-variant.txt = opt), tuned for $tune. Built here while the FEX tree publishes none; berlint-hub/FEX's fex-opt release takes precedence."
+          if ! gh release create fex-opt fex-opt-modules.zip SHA256SUMS \
+                 --title "Tuned Horizon FEX modules (fallback build)" \
+                 --notes "$notes" --latest=false 2>/dev/null; then
             gh release upload fex-opt fex-opt-modules.zip SHA256SUMS --clobber
+            # The notes carry what the modules were tuned for, so an existing
+            # release is told about a new build rather than left saying the old
+            # one's.
+            gh release edit fex-opt --notes "$notes"
+          fi
