@@ -7,10 +7,12 @@ compared on the Switch without rebuilding or reinstalling:
   `FEX-Emu/FEX@395b132f` (FEX-2609) with `horizon.patch` applied on top,
   exactly as the release pipeline has always built them;
 - **opt** — `libwow64fex-opt.dll` and `libarm64ecfex-opt.dll`, the same
-  pinned `FEX-Emu/FEX@395b132f` with `horizon.patch`, compiled for the
-  Switch's Cortex-A57 (`WINE_NX_FEX_TUNE_TEGRA_X1` = `-mcpu=cortex-a57`, and
-  on a FEX tree that knows the option, the ARMv8.1+ JIT branches compiled
-  out). Same translator, same Horizon layer; only code generation is tuned.
+  pinned `FEX-Emu/FEX@395b132f` with `horizon.patch`. The Cortex-A57 tuning
+  (`WINE_NX_FEX_TUNE_TEGRA_X1`) is turned off while it is bisected against a
+  startup crash the first tuned build had (`STATUS_DLL_INIT_FAILED` at the
+  first guest init, reproduced on the Switch): with no tune the variant is a
+  byte-twin of the stock modules under the `-opt` names, which is also the
+  clean A/B control.
 
 Both share Autorun's ABI headers in `horizon-wine/fex/` and are validated the
 same way. The point of the pair is an honest A/B on hardware: the tuning is

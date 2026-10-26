@@ -36,7 +36,7 @@ index ae3a322..ee2dad8 100755
       r'version|psapi|dbghelp|imagehlp|cfgmgr32|setupapi|powrprof|userenv|profapi|lz32|toolhelp|'
       r'ktmw32|fltlib|virtdisk|wofutil)\.dll'),
      ('directx-graphics', 'Direct3D 1 to 12, DirectDraw, DXGI, Direct2D, the D3DX libraries and the shader compilers',
-@@ -373,12 +373,42 @@ def build_audio_drivers(scratch):
+@@ -373,12 +373,43 @@ def build_audio_drivers(scratch):
          built.append(dict(file=driver, name='winenxaudio.drv', path=f'drive_c/windows/{directory}', arch=arch))
      return built
  
@@ -46,7 +46,8 @@ index ae3a322..ee2dad8 100755
 +# horizon-wine/fex/variants-build.md). The runtime loads it when
 +# sdmc:/switch/wine/fex-variant.txt names its suffix.
 +FEX_VARIANT = {
-+    'WINE_NX_FEX_TUNE_TEGRA_X1': 'ON',
++    # The Tegra tune is off while it is bisected against a startup crash; the
++    # variant builds with the stock flags and only takes the -opt names.
 +    'WINE_NX_FEX_SUFFIX': '-opt',
 +}
 +

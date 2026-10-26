@@ -102,7 +102,10 @@ jobs:
         run: |
           set -o pipefail
           export AUTORUN="$PWD"
-          export WINE_NX_FEX_TUNE_TEGRA_X1=ON
+          # The variant is a byte-twin of the stock modules for now: the
+          # Cortex-A57 tune (-mcpu=cortex-a57) is being bisected against a
+          # startup crash (STATUS_DLL_INIT_FAILED at the first guest init);
+          # with no TUNE input the build takes the stock flags.
           export WINE_NX_FEX_SUFFIX=-opt
           export WINE_NX_JOBS="$(nproc)"
           if sh horizon-dlls/tools/build-fex.sh 2>&1 | tee fex-build.log; then
