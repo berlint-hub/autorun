@@ -52,6 +52,18 @@ jobs:
             horizon-wine/tests/display_sync.c -o display_sync
           ./display_sync
 
+      # The SaltySD bridge against a fake console: which named port is asked
+      # for, how the CMIF reply is read, which rate the panel is asked for and
+      # that FPSlocked goes back as it was found.
+      - name: SaltySD display bridge
+        run: |
+          cc -std=gnu11 -Wall -Wextra -Werror -O1 -g -fsanitize=address,undefined \
+            -D__SWITCH__ -D WINE_NX_SALTY_TEST \
+            -I horizon-wine/source -I horizon-wine/tests/salty_shim \
+            horizon-wine/tests/salty_display.c horizon-wine/source/salty_display.c \
+            -o salty_display
+          ./salty_display
+
       - name: Log flood fold
         run: |
           cc -std=gnu11 -Wall -Wextra -Werror -O1 -g \
@@ -76,6 +88,9 @@ jobs:
             horizon-wine/tests/launcher_backup.c horizon-wine/source/launcher_backup.c \
             -o launcher_backup
           ./launcher_backup
+          cc -std=gnu11 -Wall -Wextra -Werror -O1 -g -I horizon-wine/source \
+            horizon-wine/tests/launcher_settings.c -o launcher_settings
+          ./launcher_settings
 
       # The boot setup: the Hekate entry it writes, the loader it replaces, and
       # what it puts back when a power cut stops it half way.

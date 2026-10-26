@@ -367,6 +367,59 @@ static void test_copy(void)
     assert( !to.title[0] );
 }
 
+/* A game whose panel follows its own frame rate: the switch is per game and
+ * defaults to off, it survives the settings file, and while it is on the DXVK
+ * profile carries no cap of its own to fight the panel with. */
+static void test_panel_follow(void)
+{
+    struct launcher_kv kv;
+    struct launcher_settings settings;
+    char config[512];
+
+    load_text( &kv, "frame-limit-sync=1\nframe-limit=60\n" );
+    launcher_settings_read( &kv, &settings );
+    assert( settings.frame_limit_sync == 1 && settings.frame_limit == 4 );
+    assert( launcher_settings_write( &kv, &settings ) && strstr( kv.text, "frame-limit-sync=1" ) );
+
+    load_text( &kv, "frame-limit-sync=on\n" );
+    launcher_settings_read( &kv, &settings );
+    assert( settings.frame_limit_sync == 1 );
+    load_text( &kv, "frame-limit-sync=off\n" );
+    launcher_settings_read( &kv, &settings );
+    assert( settings.frame_limit_sync == 0 );
+    /* Anything else is off: a switch nobody can read is not a cap anyone keeps. */
+    load_text( &kv, "frame-limit-sync=yes please\n" );
+    launcher_settings_read( &kv, &settings );
+    assert( settings.frame_limit_sync == 0 );
+
+    /* Absent means off, and off is not written out. */
+    load_text( &kv, "" );
+    launcher_settings_read( &kv, &settings );
+    assert( settings.frame_limit_sync == 0 );
+    settings.frame_limit = 4;
+    assert( launcher_settings_write( &kv, &settings ) );
+    assert( strstr( kv.text, "frame-limit=60" ) && !strstr( kv.text, "frame-limit-sync" ) );
+
+    /* With the switch on, a limit set in the same file is kept in the file but
+     * not handed to DXVK: the panel is the limiter then. */
+    settings.frame_limit_sync = 1;
+    assert( launcher_dxvk_config( &settings, config, sizeof(config) ) );
+    assert( !strstr( config, "maxFrameRate" ) );
+    settings.frame_limit_sync = 0;
+    assert( launcher_dxvk_config( &settings, config, sizeof(config) ) );
+    assert( strstr( config, "dxvk.maxFrameRate = 60" ) );
+
+    /* A game that switches it on keeps the switch across a copy into a preset. */
+    settings.frame_limit_sync = 1;
+    {
+        struct launcher_settings into;
+
+        memset( &into, 0, sizeof(into) );
+        launcher_settings_copy( &into, &settings );
+        assert( into.frame_limit_sync == 1 );
+    }
+}
+
 int main(void)
 {
     char dir[] = "/tmp/launcher-settings.XXXXXX", command[64];
@@ -376,6 +429,7 @@ int main(void)
     test_set();
     test_write_refuses_what_it_cannot_say();
     test_copy();
+    test_panel_follow();
     test_settings( dir );
     snprintf( command, sizeof(command), "rm -rf '%s'", dir );
     system( command );

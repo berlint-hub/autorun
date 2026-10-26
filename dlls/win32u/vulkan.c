@@ -110,6 +110,34 @@ extern int wine_nx_screenshot_requested( void ) __attribute__((weak));
 extern int wine_nx_screenshot_take( const void *pixels, int width, int height, int stride_px, int format ) __attribute__((weak));
 #endif
 
+/* The per-game "panel follows the game" bridge (horizon-wine/source/
+ * salty_display.c): what a frame costs is the time between one present
+ * returning and the next reaching its present. The wait for the display is
+ * outside that window, so the measurement is the program's own work and does
+ * not carry the panel's pacing -- which is what makes it usable as a signal. */
+extern void wine_nx_display_sync_note_frame( uint64_t busy_ns ) __attribute__((weak));
+
+static uint64_t nx_now_ns( void )
+{
+    struct timespec now;
+
+    if (clock_gettime( CLOCK_MONOTONIC, &now )) return 0;
+    return (uint64_t)now.tv_sec * 1000000000ull + now.tv_nsec;
+}
+
+/* Set as the present call begins; read when it returns. */
+static uint64_t nx_present_started, nx_present_returned;
+
+static void nx_note_frame_work( void )
+{
+    uint64_t now = nx_now_ns();
+
+    if (!wine_nx_display_sync_note_frame || !now) return;
+    if (nx_present_returned && nx_present_started > nx_present_returned)
+        wine_nx_display_sync_note_frame( nx_present_started - nx_present_returned );
+    nx_present_returned = now;
+}
+
 static void nx_pace_present( uint64_t *previous )
 {
     struct timespec now, delay;
@@ -4171,6 +4199,9 @@ static VkResult win32u_vkQueuePresentKHR( VkQueue client_queue, const VkPresentI
     }
 
     pthread_mutex_lock( &present_lock );
+#if defined(__SWITCH__) && defined(WINE_NX_MESA_SWITCH)
+    nx_present_started = nx_now_ns();
+#endif
 #ifdef __SWITCH__
     nx_osk_present( queue, present_info, client_swapchains, &pool );
 #endif
@@ -4202,6 +4233,9 @@ static VkResult win32u_vkQueuePresentKHR( VkQueue client_queue, const VkPresentI
                                !swapchain_from_handle( client_swapchains[0] )->lsfg_acquires, present_info, &res ))
 #endif
     res = device->p_vkQueuePresentKHR( queue->host.queue, present_info );
+#if defined(__SWITCH__) && defined(WINE_NX_MESA_SWITCH)
+    nx_note_frame_work();
+#endif
     pthread_mutex_unlock( &present_lock );
 
     for (uint32_t i = 0; i < present_info->swapchainCount; i++)

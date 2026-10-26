@@ -196,6 +196,7 @@ struct launcher_settings
     char dxvk_version[32]; /* empty: newest installed release */
     int dxvk_hud;
     int frame_limit;
+    int frame_limit_sync;  /* 1: the panel follows the game's own rate instead of a cap */
     int vsync;
     int resolution;  /* the screen a program starts with: index into launcher_resolution_labels */
     int voodoo;      /* 1: write dgVoodoo.conf beside the program from the voodoo settings below */
@@ -305,7 +306,9 @@ static inline int launcher_dxvk_config( const struct launcher_settings *settings
         if (extra < 0 || (size_t)extra >= size - length) return 0;
         length += extra;
     }
-    if (settings->frame_limit)
+    /* With the panel following the game the cap is the panel's; a maxFrameRate
+     * here as well would fight it, and DXVK's is the one that wins. */
+    if (settings->frame_limit && !settings->frame_limit_sync)
     {
         int extra = snprintf( out + length, size - length,
                               "dxgi.maxFrameRate = %d\nd3d9.maxFrameRate = %d\ndxvk.maxFrameRate = %d\n",
@@ -513,6 +516,7 @@ static inline void launcher_settings_read( const struct launcher_kv *kv, struct 
     if (launcher_kv_get( kv, "frame-limit", value, sizeof(value) ))
         for (int i = 1; i < LAUNCHER_FRAME_LIMIT_COUNT; i++)
             if (!strcasecmp( value, launcher_frame_limit_labels[i] )) settings->frame_limit = i;
+    settings->frame_limit_sync = launcher_setting_state( kv, "frame-limit-sync" ) == 1;
     settings->vsync = launcher_setting_state( kv, "vsync" ) != 0;
     settings->resolution = 0;
     if (launcher_kv_get( kv, "resolution", value, sizeof(value) ))
@@ -618,6 +622,7 @@ static inline int launcher_settings_write( struct launcher_kv *kv, const struct 
            launcher_kv_set( kv, "dxvk-hud", settings->dxvk_hud ? launcher_hud_values[settings->dxvk_hud] : NULL ) &&
            launcher_kv_set( kv, "frame-limit", settings->frame_limit ?
                             launcher_frame_limit_labels[settings->frame_limit] : NULL ) &&
+           launcher_kv_set( kv, "frame-limit-sync", settings->frame_limit_sync ? "1" : NULL ) &&
            launcher_kv_set( kv, "resolution", settings->resolution ?
                             launcher_resolution_labels[settings->resolution] : NULL ) &&
            launcher_kv_set( kv, "vsync", settings->vsync ? NULL : "0" ) &&

@@ -73,6 +73,7 @@ extern void wine_nx_fex_exception_detach(void);
 #ifdef WINE_NX_LSFG
 #include "lsfg_config.h"
 #endif
+#include "salty_display.h"
 
 /* The sampler finds an x86 context through these without Wine's headers. */
 C_ASSERT( FIELD_OFFSET( TEB, TlsSlots[WOW64_TLS_CPURESERVED] ) == NX_PROF_TEB_CPU_AREA );
@@ -4265,6 +4266,10 @@ static int return_to_launcher( void )
 {
     int i, still_lent = 0;
 
+    /* Hand FPSlocked back before the game's processes are gone: the panel rate
+     * belongs to the game, and the launcher draws at the console's own. */
+    wine_nx_display_sync_shutdown();
+
     /* The widescreen hack belongs to the game: the launcher's own screen comes
      * back through the plain fill-the-panel transform again. */
     wine_nx_fit_stretch43 = 0;
@@ -4947,6 +4952,8 @@ int main( int argc, char **argv )
         wine_nx_fit_stretch43 = 0;
 #ifdef WINE_NX_MESA_SWITCH
         wine_nx_graphics_configure( 0, 1 );
+        /* Off until the program's own settings say otherwise. */
+        wine_nx_display_sync_configure( 0 );
         wine_nx_upscaling_configure( 0, 0.4f );
         wine_nx_aspect_configure( 0 );
 #endif
@@ -4975,11 +4982,23 @@ int main( int argc, char **argv )
             runtime_d3d = settings.d3d;
             runtime_dxvk_source = settings.dxvk_source;
             runtime_dxvk_hud = settings.dxvk_hud;
-            wine_nx_graphics_configure( launcher_frame_limits[settings.frame_limit], settings.vsync );
+            /* With the panel following the game there is no frame cap of the
+             * launcher's: a second limit would fight the panel it is asking
+             * for. The manual limit stays in the settings for when the toggle
+             * goes back off. */
+            wine_nx_graphics_configure( settings.frame_limit_sync ? 0 :
+                                        launcher_frame_limits[settings.frame_limit], settings.vsync );
             wine_nx_upscaling_configure( settings.upscaling, launcher_sharpness_values[settings.upscaling_sharpness] );
             wine_nx_aspect_configure( settings.aspect_stretch );
 #ifdef WINE_NX_LSFG
             wine_nx_lsfg_configure( settings.lsfg_enabled, settings.lsfg_performance, settings.lsfg_flow );
+            /* LSFG fills in the frames between the game's own, so what the panel
+             * should follow is the generated stream, not the frame work this
+             * bridge measures; the two chasers would fight. LSFG has its own
+             * pacing, and it keeps it. */
+            wine_nx_display_sync_configure( settings.frame_limit_sync && !settings.lsfg_enabled );
+#else
+            wine_nx_display_sync_configure( settings.frame_limit_sync );
 #endif
             memcpy( runtime_vkd3d_version, settings.vkd3d_version, sizeof(runtime_vkd3d_version) );
             memcpy( runtime_dxvk_version, settings.dxvk_version, sizeof(runtime_dxvk_version) );

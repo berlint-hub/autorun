@@ -1832,7 +1832,7 @@ enum program_row
 {
     ROW_START, ROW_PRESET, ROW_COPY, ROW_FAVORITE, ROW_ARTWORK, ROW_FORWARDER, ROW_LOCATE, ROW_PLAYED, ROW_TITLE,
     ROW_ARGS, ROW_RESET, ROW_VERBOSE, ROW_PROFILE,
-    ROW_WINDOWS, ROW_ASPECT, ROW_RESOLUTION, ROW_D3D9, ROW_VKD3D_VERSION, ROW_DXVK_VERSION, ROW_DXVK_OPTIONS, ROW_DXVK_HUD, ROW_FRAME_LIMIT, ROW_VSYNC,
+    ROW_WINDOWS, ROW_ASPECT, ROW_RESOLUTION, ROW_D3D9, ROW_VKD3D_VERSION, ROW_DXVK_VERSION, ROW_DXVK_OPTIONS, ROW_DXVK_HUD, ROW_FRAME_LIMIT, ROW_FRAME_LIMIT_SYNC, ROW_VSYNC,
     ROW_VOODOO,
     ROW_LSFG, ROW_LSFG_DLL, ROW_LSFG_PERFORMANCE, ROW_LSFG_FLOW,
     ROW_UPSCALING, ROW_UPSCALING_SHARPNESS,
@@ -2778,6 +2778,20 @@ static int program_menu_run( struct launcher *l, struct program *p, char *target
             row->kind = UI_ROW_DROPDOWN;
             snprintf( row->value, sizeof(row->value), "%s", launcher_frame_limit_labels[p->settings.frame_limit] );
             row->choices = LAUNCHER_FRAME_LIMIT_COUNT;
+            /* Not applied while the panel follows the game: a second limit
+             * would fight the rate the panel is being asked for. The value is
+             * kept for when the toggle goes back off. */
+            row->disabled = p->settings.frame_limit_sync;
+
+            ADD_ROW( ROW_FRAME_LIMIT_SYNC, SECTION_GRAPHICS, "Panel follows the game",
+                     "Slows the display's own refresh rate down to what the game actually reaches, "
+                     "instead of capping the game. Needs SaltyNX with FPSLocker and stops at 45 Hz, the "
+                     "lowest steady rate the handheld panel takes. A game at 60 fps or more stays at 60. "
+                     "The frame rate limit above is not applied while this is on, and LSFG keeps its own "
+                     "pacing." );
+            row->kind = UI_ROW_SWITCH;
+            row->on = p->settings.frame_limit_sync;
+            snprintf( row->value, sizeof(row->value), "%s", p->settings.frame_limit_sync ? "Enabled" : "Disabled" );
 
             ADD_ROW( ROW_VSYNC, SECTION_GRAPHICS, "VSync",
                      "Synchronizes Vulkan, DXVK and VKD3D presentation to the display. LSFG-VK always uses synchronized presentation." );
@@ -3311,6 +3325,11 @@ static int program_menu_run( struct launcher *l, struct program *p, char *target
             save_program_settings( l, p );
             break;
         }
+
+        case ROW_FRAME_LIMIT_SYNC:
+            p->settings.frame_limit_sync = action == UI_ACTION_RESET ? 0 : !p->settings.frame_limit_sync;
+            save_program_settings( l, p );
+            break;
 
         case ROW_VSYNC:
         {
