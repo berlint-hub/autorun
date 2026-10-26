@@ -24,6 +24,8 @@ copies to the SD card and start them from Autorun's library.
   through [VKD3D-Proton](https://github.com/HansKristian-Work/vkd3d-proton).
 - **Frame generation** with [LSFG-VK](https://git.lsfg-vk.dev/lsfg-vk-archive.git),
   for Vulkan games, with your own copy of Lossless Scaling.
+- **A panel that follows the game**: a game that cannot hold 60 fps runs the
+  display at the rate it does reach, through SaltyNX with FPSLocker.
 - **The Windows DLLs games need** are downloaded and kept up to date by the app.
 - **Game fixes**: the app recognises games that need extra setup on the Switch
   and offers their fix before the game starts. See
@@ -204,6 +206,23 @@ drawing a frame between each two the game draws. It needs Lossless Scaling's
 `Lossless.dll`, which Autorun does not include: copy it from your own
 installation to `switch/wine/lsfg/Lossless.dll`, then turn on **LSFG-VK (2x)** in
 the game's **Frame Generation** options.
+
+### Refresh rate that follows the game
+
+A game that cannot hold 60 fps looks better on a panel running at the rate it
+does reach than on one waiting for a frame that never comes. **Panel follows the
+game**, in a game's **Graphics** options, asks the display to drop to what the
+game really reaches -- 50 Hz for a game at 48 fps, 45 Hz at the bottom, which is
+the lowest steady rate the handheld panel takes -- instead of capping the game.
+A game that holds 60 fps or better leaves the panel alone, and the frame rate
+limit is not applied while this is on.
+
+It needs SaltyNX with FPSLocker, and FPSLocker's own **display sync** turned on:
+SaltyNX only applies a rate when that flag is set, and the handheld and docked
+flags are separate. Without it the game runs exactly as it did, and the log says
+so once -- `the panel is still at 60 Hz though 50 Hz was asked for: turn on
+display sync in FPSLocker`. The switch is per game and off by default; LSFG-VK
+keeps its own pacing, so the two are never on together.
 
 ## Playing
 

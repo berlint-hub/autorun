@@ -90,6 +90,7 @@ static int s_omm_ready;                /* poller only */
 static int s_omm_available;            /* poller only: written by the thread, read after it ends */
 static int s_mode_docked;              /* poller only */
 static uint64_t s_mode_checked_ns;     /* poller only */
+static int s_logged_mode;              /* poller only: the log says once that omm is out */
 static SharedMemory s_shared;
 static Thread s_thread;
 static uint8_t s_thread_stack[0x4000] __attribute__((aligned(0x1000)));
@@ -380,10 +381,19 @@ static int console_is_docked(uint64_t now)
     if (s_omm_available && R_SUCCEEDED(ommGetOperationMode(&mode)))
         s_mode_docked = mode == OmmOperationMode_Console;
     else
+    {
         /* Without omm: the cached applet value, plus the one thing the panel
-         * rate cannot do in handheld, which is run above 60 Hz. */
+         * rate cannot do in handheld, which is run above 60 Hz. Worth one line
+         * in the log -- a dock in the middle of a game would go unnoticed. */
+        if (!s_logged_mode)
+        {
+            s_logged_mode = 1;
+            log_line("[SYNC] omm does not answer: the console's mode comes from the applet value, "
+                     "which does not follow a dock in the middle of a game");
+        }
         s_mode_docked = appletGetOperationMode() == AppletOperationMode_Console ||
                         s_service_rate > WINE_NX_DISPLAY_SYNC_MAX_RATE;
+    }
     return s_mode_docked;
 }
 
@@ -673,6 +683,7 @@ static void reset_session(void)
     s_follow_checked = 0;
     s_mode_checked_ns = 0;
     s_mode_docked = 0;
+    s_logged_mode = 0;
     s_prefer_legacy = 0;    /* the next game asks the fork's port again */
     s_logged_missing = 0;
     clear_samples();
@@ -684,22 +695,28 @@ void wine_nx_display_sync_configure(int enabled)
 
     if (!enabled)
     {
+        int quiet = 1;
+
         __atomic_store_n(&s_enabled, 0, __ATOMIC_RELEASE);
-        if (wait_out_of_pass())
+        if (!wait_out_of_pass())
         {
-            /* The panel goes back to its own rate, and FPSlocked back to
-             * whoever had it before -- in that order: putting the byte back
-             * first would leave nothing to say a rate had been asked for. */
-            reset_panel_rate();
-            if (__atomic_load_n(&s_shared_mapped, __ATOMIC_ACQUIRE)) restore_fields();
-            reset_session();
-        }
-        else
             /* It is in the middle of an IPC or a write. Putting the bytes back
              * from here could land before that write, and the block would keep
              * a rate nobody is following; the next session treats a value it
              * did not write as FPSLocker's, which is the safe side. */
+            quiet = 0;
             log_line("[SYNC] the rate thread is still busy; the panel rate it wrote stays");
+        }
+        /* The panel goes back to its own rate either way -- that needs no
+         * block and no thread -- and then FPSlocked goes back to whoever had
+         * it before. In that order: putting the byte back first would leave
+         * nothing to say a rate had been asked for. */
+        reset_panel_rate();
+        if (quiet)
+        {
+            if (__atomic_load_n(&s_shared_mapped, __ATOMIC_ACQUIRE)) restore_fields();
+            reset_session();
+        }
         if (was_on) log_line("[SYNC] panel rate following the game: off");
         return;
     }
@@ -814,20 +831,30 @@ void wine_nx_display_sync_shutdown(void)
     }
     /* The poller is gone, so this only fails when it did not end above. */
     if (!wait_out_of_pass()) quiet = 0;
-    if (s_omm_available)
+    /* The panel goes back to its own rate whatever the thread did: it needs no
+     * block and no thread, only a session of its own. */
+    reset_panel_rate();
+    if (!quiet)
+        /* It is still inside one of the calls taken away below -- an IPC on
+         * omm, the mapping, the block. Closing any of them under it is a data
+         * abort, and a program that is ending is not the moment to risk one:
+         * the session and the 4 KB stay, and the log says so. */
+        log_line("[SYNC] the rate thread is still running; its omm session and the shared block stay");
+    else
     {
-        /* The poller is gone by now, so nothing can be using the session. */
-        ommExit();
-        s_omm_available = 0;
-        s_omm_ready = 0;
-    }
-    if (quiet) reset_panel_rate();
-    if (__atomic_load_n(&s_shared_mapped, __ATOMIC_ACQUIRE))
-    {
-        if (quiet) restore_fields();
-        shmemClose(&s_shared);
-        memset(&s_shared, 0, sizeof(s_shared));
-        __atomic_store_n(&s_shared_mapped, 0, __ATOMIC_RELEASE);
+        if (s_omm_available)
+        {
+            ommExit();
+            s_omm_available = 0;
+            s_omm_ready = 0;
+        }
+        if (__atomic_load_n(&s_shared_mapped, __ATOMIC_ACQUIRE))
+        {
+            restore_fields();
+            shmemClose(&s_shared);
+            memset(&s_shared, 0, sizeof(s_shared));
+            __atomic_store_n(&s_shared_mapped, 0, __ATOMIC_RELEASE);
+        }
     }
     reset_session();
 }

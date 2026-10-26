@@ -264,7 +264,7 @@ Result waitSingle( Waiter waiter, u64 timeout )
 /* The runtime's log, replaced: what the bridge says, and how often. SaltySD's
  * own file is not written here; the count is what matters, since a line a second
  * is a log nobody can read. */
-static int log_lines, log_missing, log_rates, log_unfollowed;
+static int log_lines, log_missing, log_rates, log_unfollowed, log_mode;
 static char last_log[128];
 
 void wine_nx_runtime_trace( const char *msg )
@@ -274,6 +274,7 @@ void wine_nx_runtime_trace( const char *msg )
     if (strstr( msg, "no SaltySD endpoint" )) log_missing++;
     if (strstr( msg, "asked for" )) log_rates++;
     if (strstr( msg, "the panel is still at" )) log_unfollowed++;
+    if (strstr( msg, "omm does not answer" )) log_mode++;
 }
 
 /* ---- the test's own helpers ---------------------------------------------- */
@@ -296,7 +297,7 @@ static void reset_console( void )
      * program, and shutdown is what closes it. */
     assert( !threads_live() );
     thread_creates = 0;
-    log_lines = log_missing = log_rates = log_unfollowed = 0;
+    log_lines = log_missing = log_rates = log_unfollowed = log_mode = 0;
     last_log[0] = 0;
     reply_rate = 60;
     rate_reply_missing = 0;
@@ -764,6 +765,20 @@ static void check_mode_fallback( void )
     run_for( 48, 12000 );
     assert( target_value_docked() == 50 );
     assert( target_value() == 0 );
+    /* Said once, not once a pass: the fallback is worth knowing about, and a
+     * line four times a second is not. */
+    assert( log_mode == 1 );
+    run_for( 48, 6000 );
+    assert( log_mode == 1 );
+    wine_nx_display_sync_shutdown();
+    wine_nx_display_sync_configure( 0 );
+
+    /* With omm answering, nothing is said about it. */
+    reset_console();
+    put_magic();
+    wine_nx_display_sync_configure( 1 );
+    run_for( 48, 6000 );
+    assert( log_mode == 0 );
     wine_nx_display_sync_shutdown();
     wine_nx_display_sync_configure( 0 );
 
