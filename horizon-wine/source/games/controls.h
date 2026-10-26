@@ -109,10 +109,47 @@ static const struct game_control_binding harbinger_controls[] =
     GAME_CONTROL( GAME_CONTROL_RRIGHT, INPUT_MOUSE_MOVE_RIGHT ),
 };
 
+/* Vampire: The Masquerade - Redemption (and its Ages of Redemption builds):
+ * a mouse game. Left click walks, talks, attacks and picks things up; right
+ * click uses the selected Discipline or item; Shift-click is the secondary
+ * attack and the force run; Ctrl-click throws the whole coterie at a target.
+ * Tab switches the character, the panes hang on the d-pad, the quick
+ * Discipline slots sit on the left stick, and Pause pauses combat. The keys
+ * are the ones the manual and the 1.1 patch readme list. */
+static const struct game_control_binding vampire_controls[] =
+{
+    GAME_CONTROL( GAME_CONTROL_A, INPUT_MOUSE_LEFT ),
+    GAME_CONTROL( GAME_CONTROL_B, 0x1b ),                  /* Esc: menus, back */
+    GAME_CONTROL( GAME_CONTROL_X, 0x20 ),                  /* Space: stop action, hold to stand */
+    GAME_CONTROL( GAME_CONTROL_Y, 0x09 ),                  /* Tab: next coterie member */
+    GAME_CONTROL( GAME_CONTROL_L, 0x11, INPUT_MOUSE_LEFT ),  /* Ctrl-click: party attack */
+    GAME_CONTROL( GAME_CONTROL_R, 0x52 ),                  /* R: regroup the coterie */
+    GAME_CONTROL( GAME_CONTROL_ZL, INPUT_MOUSE_LEFT ),
+    GAME_CONTROL( GAME_CONTROL_ZR, 0x10, INPUT_MOUSE_LEFT ),  /* Shift-click: heavy attack, run */
+    GAME_CONTROL( GAME_CONTROL_PLUS, 0x13 ),               /* Pause: pause combat */
+    GAME_CONTROL( GAME_CONTROL_MINUS, 0x08 ),              /* Backspace: close the panes */
+    GAME_CONTROL( GAME_CONTROL_STICKL, 0x46 ),             /* F: Feed */
+    GAME_CONTROL( GAME_CONTROL_STICKR, INPUT_MOUSE_RIGHT ), /* use the selected Discipline */
+    GAME_CONTROL( GAME_CONTROL_UP, 0x4d ),                 /* M: map */
+    GAME_CONTROL( GAME_CONTROL_DOWN, 0x49 ),               /* I: inventory */
+    GAME_CONTROL( GAME_CONTROL_LEFT, 0x51 ),               /* Q: quest log */
+    GAME_CONTROL( GAME_CONTROL_RIGHT, 0x43 ),              /* C: character pane */
+    GAME_CONTROL( GAME_CONTROL_LUP, 0x31 ),                /* 1: quick Discipline 1 */
+    GAME_CONTROL( GAME_CONTROL_LRIGHT, 0x32 ),             /* 2: quick Discipline 2 */
+    GAME_CONTROL( GAME_CONTROL_LDOWN, 0x33 ),              /* 3: quick Discipline 3 */
+    GAME_CONTROL( GAME_CONTROL_LLEFT, 0x34 ),              /* 4: quick Discipline 4 */
+    GAME_CONTROL( GAME_CONTROL_RUP, INPUT_MOUSE_UP ),
+    GAME_CONTROL( GAME_CONTROL_RDOWN, INPUT_MOUSE_DOWN ),
+    GAME_CONTROL( GAME_CONTROL_RLEFT, INPUT_MOUSE_MOVE_LEFT ),
+    GAME_CONTROL( GAME_CONTROL_RRIGHT, INPUT_MOUSE_MOVE_RIGHT ),
+};
+
 static const char *const septerra_executables[] =
     { "septerra.exe", "sr-septerra.exe", NULL };
 static const char *const harbinger_executables[] =
     { "harbinger.exe", NULL };
+static const char *const vampire_executables[] =
+    { "vampire.exe", "vampire_aor.exe", "vampire_aor_portable.exe", NULL };
 
 static const struct game_controls game_controls_list[] =
 {
@@ -120,6 +157,8 @@ static const struct game_controls game_controls_list[] =
       septerra_controls, sizeof(septerra_controls) / sizeof(septerra_controls[0]) },
     { "Harbinger", harbinger_executables, INPUT_KEYBOARD_MOUSE, 150,
       harbinger_controls, sizeof(harbinger_controls) / sizeof(harbinger_controls[0]) },
+    { "Vampire: The Masquerade - Redemption", vampire_executables, INPUT_KEYBOARD_MOUSE, 150,
+      vampire_controls, sizeof(vampire_controls) / sizeof(vampire_controls[0]) },
 };
 
 /* The layout a program is recognised as, or NULL. The name matched is the
