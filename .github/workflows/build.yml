@@ -43,6 +43,15 @@ jobs:
             horizon-wine/tests/screen_fit.c -o screen_fit
           ./screen_fit
 
+      # Which panel rate a measured frame rate asks for: the policy behind
+      # SaltyNX's handheld 45-60 Hz display sync, which needs no console to test.
+      - name: Display sync rate policy
+        run: |
+          cc -std=gnu11 -Wall -Wextra -Werror -O1 -g \
+            -I horizon-wine/source \
+            horizon-wine/tests/display_sync.c -o display_sync
+          ./display_sync
+
       - name: Log flood fold
         run: |
           cc -std=gnu11 -Wall -Wextra -Werror -O1 -g \
