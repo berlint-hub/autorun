@@ -16,8 +16,9 @@
 #define TLS_SIZE 0x100u
 #define REQUEST_OFFSET 0x20u
 #define SHARED_SIZE 0x1000u
-#define BLOCK_OFFSET 0x80u          /* the magic need not be at the start */
-#define TARGET (BLOCK_OFFSET + 10u) /* FPSlocked within NxFpsSharedBlock */
+#define BLOCK_OFFSET 0x80u              /* the magic need not be at the start */
+#define TARGET (BLOCK_OFFSET + 10u)     /* FPSlocked, handheld */
+#define TARGET_DOCKED (BLOCK_OFFSET + 164u) /* FPSlockedDocked */
 
 /* ---- the fake console ---------------------------------------------------- */
 
@@ -33,6 +34,12 @@ static int nethfps_fails;     /* a SaltyNX without the second port */
 
 static int shared_mapped;
 static int shared_size_wrong;
+static AppletOperationMode operation_mode = AppletOperationMode_Handheld;
+static int operation_mode_fails;      /* omm cannot be asked: the applet fallback */
+static int omm_opened;
+/* A console with FPSLocker's display sync on moves the panel to whatever is
+ * written into the target; with it off the rate stays where it was. */
+static int panel_follows = 1;
 static unsigned reply_rate;
 static int rate_reply_missing;
 static Handle shared_handle;
@@ -115,6 +122,30 @@ u64 armGetSystemTick( void ) { return now_ticks; }
 u64 armGetSystemTickFreq( void ) { return 1000000000ull; }   /* a tick is a ns */
 void svcSleepThread( s64 ns ) { (void)ns; }
 Result svcCloseHandle( Handle handle ) { (void)handle; return 0; }
+AppletOperationMode appletGetOperationMode( void )
+{
+    return operation_mode;
+}
+
+Result ommInitialize( void )
+{
+    omm_opened++;
+    return 0;
+}
+
+void ommExit( void )
+{
+    assert( omm_opened );
+    omm_opened--;
+}
+
+Result ommGetOperationMode( OmmOperationMode *mode )
+{
+    if (operation_mode_fails) return 1;
+    *mode = operation_mode == AppletOperationMode_Console ? OmmOperationMode_Console : OmmOperationMode_Handheld;
+    return 0;
+}
+
 Result svcGetInfo( u64 *out, u32 id0, Handle handle, u64 id1 )
 {
     (void)handle; (void)id1;
@@ -149,20 +180,66 @@ Result shmemMap( SharedMemory *shared )
 void shmemClose( SharedMemory *shared ) { shared->addr = NULL; shared_mapped = 0; }
 void *shmemGetAddr( SharedMemory *shared ) { return shared->addr; }
 
+/* A Handle is 32 bits on the console; a pointer is not, so the fake keeps a
+ * table and hands out an index, the way the kernel would. */
+static Thread *created_threads[8];
+
+static int thread_slot( Thread *thread )
+{
+    int i;
+
+    for (i = 0; i < (int)(sizeof(created_threads) / sizeof(created_threads[0])); i++)
+        if (created_threads[i] == thread) return i;
+    return -1;
+}
+
 Result threadCreate( Thread *thread, void (*entry)( void * ), void *argument, void *stack,
                      size_t size, int priority, int cpuid )
 {
+    int slot = -1, i;
+
     (void)entry; (void)argument; (void)stack; (void)size; (void)priority; (void)cpuid;
+    for (i = 0; i < (int)(sizeof(created_threads) / sizeof(created_threads[0])); i++)
+        if (!created_threads[i]) { slot = i; break; }
+    assert( slot >= 0 );
+    created_threads[slot] = thread;
     thread->created = 1;
+    thread->finished = 0;
     return 0;
 }
 Result threadStart( Thread *thread ) { return thread->created ? 0 : 1; }
-void threadClose( Thread *thread ) { thread->created = 0; }
+void threadClose( Thread *thread )
+{
+    int slot = thread_slot( thread );
+
+    /* libnx unmaps the stack and closes the handle: doing that to a thread that
+     * is still running is the bug this test is here to catch. */
+    assert( thread->finished );
+    assert( slot >= 0 );
+    created_threads[slot] = NULL;
+    thread->created = 0;
+}
+Waiter waiterForThread( Thread *thread )
+{
+    int slot = thread_slot( thread );
+
+    assert( slot >= 0 );
+    return (Waiter){ (Handle)(slot + 1) };
+}
+Result waitSingle( Waiter waiter, u64 timeout )
+{
+    (void)timeout;
+    assert( waiter.handle >= 1 && waiter.handle <= 8 );
+    assert( created_threads[waiter.handle - 1] );
+    /* The loop has seen the quit by the time the wait is asked, as it has. */
+    created_threads[waiter.handle - 1]->finished = 1;
+    return 0;
+}
 
 /* The runtime's log, replaced: what the bridge says, and how often. SaltySD's
  * own file is not written here; the count is what matters, since a line a second
  * is a log nobody can read. */
-static int log_lines, log_missing, log_rates;
+static int log_lines, log_missing, log_rates, log_unfollowed;
 static char last_log[128];
 
 void wine_nx_runtime_trace( const char *msg )
@@ -170,7 +247,8 @@ void wine_nx_runtime_trace( const char *msg )
     log_lines++;
     snprintf( last_log, sizeof(last_log), "%s", msg );
     if (strstr( msg, "no SaltySD endpoint" )) log_missing++;
-    if (strstr( msg, "panel at" )) log_rates++;
+    if (strstr( msg, "asked for" )) log_rates++;
+    if (strstr( msg, "the panel is still at" )) log_unfollowed++;
 }
 
 /* ---- the test's own helpers ---------------------------------------------- */
@@ -185,7 +263,11 @@ static void reset_console( void )
     nethfps_fails = 0;
     shared_mapped = 0;
     shared_size_wrong = 0;
-    log_lines = log_missing = log_rates = 0;
+    operation_mode = AppletOperationMode_Handheld;
+    operation_mode_fails = 0;
+    panel_follows = 1;
+    assert( omm_opened == 0 );
+    log_lines = log_missing = log_rates = log_unfollowed = 0;
     last_log[0] = 0;
     reply_rate = 60;
     rate_reply_missing = 0;
@@ -202,6 +284,11 @@ static void put_magic( void )
 static unsigned target_value( void )
 {
     return shared_memory[TARGET];
+}
+
+static unsigned target_value_docked( void )
+{
+    return shared_memory[TARGET_DOCKED];
 }
 
 static void set_target( unsigned value )
@@ -234,6 +321,12 @@ static void run_for( unsigned fps, uint64_t ms )
             elapsed += interval_ns / 1000000ull;
         }
         wine_nx_display_sync_test_pass();
+        /* SaltyNX applies the wanted rate itself, about once a second: the fake
+         * console does the same, unless a test says its panel is stuck. */
+        if (panel_follows && operation_mode == AppletOperationMode_Handheld && shared_memory[TARGET])
+            reply_rate = shared_memory[TARGET];
+        if (panel_follows && operation_mode == AppletOperationMode_Console && shared_memory[TARGET_DOCKED])
+            reply_rate = shared_memory[TARGET_DOCKED];
     }
 }
 
@@ -278,7 +371,7 @@ static void check_no_endpoint( void )
     assert( log_missing == 1 );           /* but says so once, not once a second */
     assert( target_value() == 0 );
     settle();
-    assert( status() == 5 );
+    assert( status() == WINE_NX_DISPLAY_SYNC_NO_ENDPOINT );
     wine_nx_display_sync_report( &report );
     assert( report.service_rate == 0 && report.panel_rate == 0 );
 
@@ -333,12 +426,15 @@ static void check_slow_game( void )
     /* Not 45: a 48 fps game on a 45 Hz panel drops a frame every nine. */
     assert( first == 50 );
     wine_nx_display_sync_report( &report );
-    assert( report.panel_rate == 50 && report.service_rate == 60 );
+    /* service_rate is what the panel is really at, and the fake console has
+     * followed the write, as a real one with display sync on does. */
+    assert( report.panel_rate == 50 && report.service_rate == 50 );
     assert( report.measured_fps >= 47 && report.measured_fps <= 49 );
-    assert( report.status == 2 );
-    /* 60 -> 55 -> 50: two changes, two lines, and the last says where it got to. */
+    assert( report.status == WINE_NX_DISPLAY_SYNC_FOLLOWING );
+    /* 60 -> 55 -> 50, one step per two seconds, and the last line says both
+     * where the rate goes and what it is following. */
     assert( log_rates == 2 );
-    assert( strstr( last_log, "panel at 50 Hz" ) );
+    assert( strstr( last_log, "asked for 50 Hz (handheld), game at 48 fps" ) );
 
     /* A pause is not a measurement: three seconds without a frame leave the
      * panel where the last real one put it. */
@@ -351,7 +447,7 @@ static void check_slow_game( void )
     run_for( 48, 6000 );
     assert( target_value() == 45 );
     settle();
-    assert( status() == 3 );
+    assert( status() == WINE_NX_DISPLAY_SYNC_FPSLOCKER );
 
     /* Clearing it hands the field back to the bridge. */
     set_target( 0 );
@@ -379,6 +475,171 @@ static void check_very_slow_game( void )
     assert( target_value() == 45 );
     wine_nx_display_sync_shutdown();
     assert( target_value() == 0 );
+    wine_nx_display_sync_configure( 0 );
+}
+
+/* Docked, the panel runs faster than the table this policy knows, and SaltyNX
+ * reads the docked byte, not the handheld one. A game at 60 there is not asking
+ * for less, and asking for 60 would be a downgrade; a game that cannot hold 60
+ * is slowed down through FPSlockedDocked and leaves FPSlocked alone. */
+static void check_docked( void )
+{
+    reset_console();
+    put_magic();
+    operation_mode = AppletOperationMode_Console;
+    reply_rate = 120;
+    wine_nx_display_sync_configure( 1 );
+    run_for( 60, 12000 );
+    assert( target_value() == 0 && target_value_docked() == 0 );
+    assert( status() == WINE_NX_DISPLAY_SYNC_FOLLOWING );
+    wine_nx_display_sync_shutdown();
+    wine_nx_display_sync_configure( 0 );
+
+    reset_console();
+    put_magic();
+    operation_mode = AppletOperationMode_Console;
+    reply_rate = 120;
+    wine_nx_display_sync_configure( 1 );
+    run_for( 48, 30000 );
+    /* 120 -> 60 -> 55 -> 50: one step per two seconds, and no further. The
+     * handheld byte stays at zero the whole time. */
+    assert( target_value_docked() == 50 );
+    assert( target_value() == 0 );
+    wine_nx_display_sync_shutdown();
+    assert( target_value_docked() == 0 );
+    wine_nx_display_sync_configure( 0 );
+}
+
+/* Docking in the middle of a game: the byte of the mode being left goes back,
+ * and the rate carries on in the byte SaltyNX is now reading. */
+static void check_dock_undock( void )
+{
+    reset_console();
+    put_magic();
+    wine_nx_display_sync_configure( 1 );
+    run_for( 48, 12000 );
+    assert( target_value() == 50 && target_value_docked() == 0 );
+
+    operation_mode = AppletOperationMode_Console;
+    reply_rate = 120;
+    run_for( 48, 6000 );
+    assert( target_value() == 0 );            /* back to what it was handheld */
+    assert( target_value_docked() == 50 );
+
+    operation_mode = AppletOperationMode_Handheld;
+    reply_rate = 60;
+    run_for( 48, 6000 );
+    assert( target_value() == 50 );
+    assert( target_value_docked() == 0 );
+
+    wine_nx_display_sync_shutdown();
+    assert( target_value() == 0 && target_value_docked() == 0 );
+    wine_nx_display_sync_configure( 0 );
+}
+
+/* A game that comes back up to 60 fps gets its panel back: the rate the bridge
+ * asked for is handed back instead of staying on the byte for the session. */
+static void check_recovery( void )
+{
+    reset_console();
+    put_magic();
+    wine_nx_display_sync_configure( 1 );
+    run_for( 48, 12000 );
+    assert( target_value() == 50 );
+
+    /* 60 goes back into the byte, which is what SaltyNX applies: the old value
+     * would not raise the panel, since SaltyNX keeps the last rate it was
+     * given. FPSLocker's own reset writes the same number. */
+    run_for( 60, 6000 );
+    assert( target_value() == 60 );
+    settle();
+    assert( status() == WINE_NX_DISPLAY_SYNC_FOLLOWING );
+
+    /* And it comes back down again: the hand-back is not a one-way door. */
+    run_for( 48, 12000 );
+    assert( target_value() == 50 );
+    wine_nx_display_sync_shutdown();
+    assert( target_value() == 0 );
+    wine_nx_display_sync_configure( 0 );
+}
+
+/* Without omm the mode comes from libnx's cached applet value, and the panel
+ * rate is the tie-breaker: handheld tops out at 60 Hz. */
+static void check_mode_fallback( void )
+{
+    reset_console();
+    put_magic();
+    operation_mode_fails = 1;
+    operation_mode = AppletOperationMode_Console;
+    reply_rate = 120;
+    wine_nx_display_sync_configure( 1 );
+    run_for( 48, 12000 );
+    assert( target_value_docked() == 50 );
+    assert( target_value() == 0 );
+    wine_nx_display_sync_shutdown();
+    wine_nx_display_sync_configure( 0 );
+
+    /* The cached value says handheld, but a panel above 60 Hz is docked. */
+    reset_console();
+    put_magic();
+    operation_mode_fails = 1;
+    operation_mode = AppletOperationMode_Handheld;
+    reply_rate = 120;
+    wine_nx_display_sync_configure( 1 );
+    run_for( 48, 12000 );
+    assert( target_value_docked() == 50 );
+    assert( target_value() == 0 );
+    wine_nx_display_sync_shutdown();
+    wine_nx_display_sync_configure( 0 );
+}
+
+/* Asking for a rate the panel never moves to is the one failure the log has to
+ * name, because it is almost always FPSLocker's display sync being off. */
+static void check_panel_does_not_follow( void )
+{
+    reset_console();
+    put_magic();
+    reply_rate = 120;   /* docked, and it stays there however much is asked */
+    panel_follows = 0;
+    operation_mode = AppletOperationMode_Console;
+    wine_nx_display_sync_configure( 1 );
+    run_for( 48, 12000 );
+    assert( target_value_docked() == 50 );
+    /* Three seconds after the first request, and once only: a line a second is
+     * a log nobody reads. */
+    assert( log_unfollowed == 1 );
+    run_for( 48, 8000 );
+    assert( log_unfollowed == 1 );
+
+    /* A panel that does move says nothing. */
+    wine_nx_display_sync_shutdown();
+    wine_nx_display_sync_configure( 0 );
+    reset_console();
+    put_magic();
+    wine_nx_display_sync_configure( 1 );
+    run_for( 48, 12000 );
+    assert( target_value() != 0 );
+    assert( log_unfollowed == 0 );
+    wine_nx_display_sync_shutdown();
+    wine_nx_display_sync_configure( 0 );
+}
+
+/* Frames the present path should not count: a slide show and a hitch that has
+ * no business being read as a rate. */
+static void check_note_frame_filters( void )
+{
+    reset_console();
+    put_magic();
+    wine_nx_display_sync_configure( 1 );
+    advance( 1 );
+    wine_nx_display_sync_test_pass();
+    /* A three-second "frame" empties the window instead of joining it. */
+    wine_nx_display_sync_note_frame( 3000000000ull );
+    /* And a 400 fps one is not a frame of anything that is drawing. */
+    wine_nx_display_sync_note_frame( 2500000ull );
+    run_for( 48, 12000 );
+    assert( target_value() == 50 );   /* the real frames still decide */
+    wine_nx_display_sync_shutdown();
     wine_nx_display_sync_configure( 0 );
 }
 
@@ -425,7 +686,7 @@ static void check_unmapped_block( void )
     run_for( 48, 6000 );
     assert( target_value() == 0 );
     settle();
-    assert( status() == 4 );
+    assert( status() == WINE_NX_DISPLAY_SYNC_NO_BLOCK );
     wine_nx_display_sync_shutdown();
     wine_nx_display_sync_configure( 0 );
 }
@@ -441,7 +702,7 @@ static void check_off( void )
     run_for( 48, 4000 );
     settle();
     assert( port_count == 0 && target_value() == 0 );
-    assert( status() == 0 );
+    assert( status() == WINE_NX_DISPLAY_SYNC_NOTHING );
 
     wine_nx_display_sync_configure( 1 );
     assert( wine_nx_display_sync_active() );
@@ -457,7 +718,13 @@ int main( void )
     check_off();
     check_legacy_port();
     check_fast_game();
+    check_docked();
+    check_mode_fallback();
+    check_dock_undock();
+    check_panel_does_not_follow();
+    check_note_frame_filters();
     check_slow_game();
+    check_recovery();
     check_very_slow_game();
     check_no_rate_query();
     check_unmapped_block();

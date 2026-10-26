@@ -4267,7 +4267,18 @@ static int return_to_launcher( void )
     int i, still_lent = 0;
 
     /* Hand FPSlocked back before the game's processes are gone: the panel rate
-     * belongs to the game, and the launcher draws at the console's own. */
+     * belongs to the game, and the launcher draws at the console's own. What
+     * the bridge decided is written down first -- the one place a session's
+     * panel rate can be read back from afterwards. */
+    {
+        struct wine_nx_display_sync_report sync;
+
+        wine_nx_display_sync_report( &sync );
+        if (sync.status != WINE_NX_DISPLAY_SYNC_NOTHING)
+            log_line( "[SYNC] last step: %s; game %u fps, panel %u Hz, service %u Hz",
+                      wine_nx_display_sync_status_text( sync.status ), sync.measured_fps,
+                      sync.panel_rate, sync.service_rate );
+    }
     wine_nx_display_sync_shutdown();
 
     /* The widescreen hack belongs to the game: the launcher's own screen comes

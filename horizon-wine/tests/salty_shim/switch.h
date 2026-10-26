@@ -27,6 +27,17 @@ typedef uint32_t Handle;
 #define R_FAILED(res) ((res) != 0)
 
 typedef enum { InfoType_ResourceLimit = 9 } InfoType;
+/* libnx's two, and no more: the console reports one or the other. */
+typedef enum
+{
+    AppletOperationMode_Handheld = 0,
+    AppletOperationMode_Console = 1,
+} AppletOperationMode;
+typedef enum
+{
+    OmmOperationMode_Handheld = 0,
+    OmmOperationMode_Console = 1,
+} OmmOperationMode;
 /* libnx's names and values, so the bridge is compiled against what it meets. */
 typedef enum
 {
@@ -49,7 +60,13 @@ typedef struct
 typedef struct
 {
     int created;
+    int finished;   /* the test decides when the thread's loop has come back */
 } Thread;
+
+typedef struct
+{
+    Handle handle;
+} Waiter;
 
 Result svcGetInfo( u64 *out, u32 id0, Handle handle, u64 id1 );
 Result svcSetResourceLimitLimitValue( Handle resource, LimitableResource limit, u64 value );
@@ -66,7 +83,13 @@ void shmemClose( SharedMemory *shared );
 void *shmemGetAddr( SharedMemory *shared );
 Result threadCreate( Thread *thread, void (*entry)( void * ), void *argument, void *stack,
                      size_t size, int priority, int cpuid );
+AppletOperationMode appletGetOperationMode( void );
+Result ommInitialize( void );
+void ommExit( void );
+Result ommGetOperationMode( OmmOperationMode *mode );
 Result threadStart( Thread *thread );
 void threadClose( Thread *thread );
+Waiter waiterForThread( Thread *thread );
+Result waitSingle( Waiter waiter, u64 timeout );
 
 #endif

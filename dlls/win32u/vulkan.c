@@ -128,12 +128,18 @@ static uint64_t nx_now_ns( void )
 /* Set as the present call begins; read when it returns. */
 static uint64_t nx_present_started, nx_present_returned;
 
-static void nx_note_frame_work( void )
+/* A present that put no frame on the panel is not a frame: a swapchain that
+ * went out of date, or a call with nothing to present, would otherwise land a
+ * half-length interval in the window and read back as a rate the game does not
+ * reach. The timestamp is moved on in every case, so the next interval does not
+ * span the present that failed. */
+static void nx_note_frame_work( uint32_t swapchain_count, VkResult present_result )
 {
     uint64_t now = nx_now_ns();
 
     if (!wine_nx_display_sync_note_frame || !now) return;
-    if (nx_present_returned && nx_present_started > nx_present_returned)
+    if (nx_present_returned && present_result >= VK_SUCCESS && swapchain_count &&
+        nx_present_started > nx_present_returned)
         wine_nx_display_sync_note_frame( nx_present_started - nx_present_returned );
     nx_present_returned = now;
 }
@@ -4234,7 +4240,7 @@ static VkResult win32u_vkQueuePresentKHR( VkQueue client_queue, const VkPresentI
 #endif
     res = device->p_vkQueuePresentKHR( queue->host.queue, present_info );
 #if defined(__SWITCH__) && defined(WINE_NX_MESA_SWITCH)
-    nx_note_frame_work();
+    nx_note_frame_work( present_info->swapchainCount, res );
 #endif
     pthread_mutex_unlock( &present_lock );
 

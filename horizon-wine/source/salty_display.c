@@ -27,42 +27,75 @@ extern void wine_nx_runtime_trace(const char *msg) __attribute__((weak));
 #define SALTYSD_GET_SHARED_MEMORY_HANDLE 7u
 #define SALTYSD_GET_DISPLAY_REFRESH_RATE 10u
 #define SALTYSD_SHARED_MEMORY_SIZE 0x1000u
-/* NxFpsSharedBlock: the magic, then the fields this bridge touches. Several are
- * unaligned in the packed block, which is why they are copied through memcpy. */
+/* NxFpsSharedBlock (saltysd_core/source/NX-FPS-Common.hpp) is packed, so these
+ * offsets are exact; several of its fields are unaligned, which is why the ones
+ * that are not a byte go through memcpy. SaltyNX's own loop
+ * (saltysd_proc/source/main.c, updateRefreshRateForApp) is what applies the
+ * rate: FPSlocked in handheld, FPSlockedDocked docked. */
 #define NX_FPS_MAGIC 0x00465053u
-#define NX_FPS_TARGET_OFFSET 10u
-#define NX_FPS_SET_BUFFERS_OFFSET 56u
+#define NX_FPS_HANDHELD_OFFSET 10u
+#define NX_FPS_DOCKED_OFFSET 164u
+#define NX_FPS_SET_BUFFERS_OFFSET 56u   /* the last field the block scan needs */
 #define SESSION_COUNT_LIMIT 32u
 #define POLL_INTERVAL_NS 250000000ull      /* the policy runs four times a second */
 #define QUERY_INTERVAL_NS 1000000000ull    /* IPC: once a second at most */
 #define STALE_NS 1000000000ull             /* a second without a frame: hold tight */
+#define FOLLOW_GRACE_NS 3000000000ull      /* how long a panel may take to change mode */
+#define MODE_REFRESH_NS 1000000000ull      /* how often the console's mode is asked for */
 
-static volatile int s_enabled;
-static volatile int s_thread_running;
-static volatile int s_shutdown;
-static volatile int s_shared_mapped;
-static volatile int s_status;
-static volatile uint32_t s_service_rate;
-static volatile unsigned s_published_target;
-static volatile unsigned s_measured_fps;
-static volatile unsigned s_panel_rate;
-static volatile uint64_t s_next_query_ns;
-static volatile uint64_t s_next_poll_ns;
-static volatile uint64_t s_last_frame_ns;
-static uint8_t s_saved_target;
-static int s_saved_valid;
-static int s_fpslocker_owned;
-static unsigned s_candidate_rate;
-static uint64_t s_candidate_since_ns;
-static uint8_t s_last_written;
+/* Two threads touch this file's state: the rate thread and whichever thread
+ * presents. Every field one of them writes and the other reads is accessed
+ * through __atomic_*, and nothing here is plain `volatile` -- mixing the two
+ * says less than either on its own. The fields only one thread touches are
+ * named where they are declared. */
+static int s_enabled;            /* configure() <-> poller */
+static int s_thread_created;     /* configure()/shutdown(), both on the caller's thread */
+static int s_shutdown;           /* configure()/shutdown() <-> poller */
+static int s_in_publish;         /* poller sets it, configure()/shutdown() wait on it */
+static int s_shared_mapped;      /* poller maps, configure()/shutdown() read */
+static int s_status;             /* poller writes, the runtime reads as the game ends */
+static uint32_t s_service_rate;  /* poller */
+static unsigned s_published_target, s_measured_fps, s_panel_rate;   /* poller writes, report() reads */
+static uint64_t s_next_query_ns, s_next_poll_ns;                    /* poller only */
+static uint64_t s_last_frame_ns; /* present thread writes, poller reads */
+/* One of the two bytes the wanted rate goes into, and what the bridge knows
+ * about it: what was there before it wrote, what it wrote, and whether the
+ * player's own FPSLocker target has taken it since. */
+struct nxfps_field
+{
+    size_t offset;
+    uint8_t saved;
+    uint8_t written;
+    int saved_valid;
+    int owned;
+};
+
+static struct nxfps_field s_handheld = { NX_FPS_HANDHELD_OFFSET, 0, 0, 0, 0 };
+static struct nxfps_field s_docked = { NX_FPS_DOCKED_OFFSET, 0, 0, 0, 0 };
+static unsigned s_candidate_rate;      /* poller only */
+static uint64_t s_candidate_since_ns;  /* poller only */
+/* What was last asked for, when, and whether the panel was seen to move to it:
+ * the one way the log can say that FPSLocker's own display sync is off, which
+ * is the single most likely reason for a rate that is asked for and ignored. */
+static unsigned s_requested_rate;      /* poller only */
+static uint64_t s_requested_at_ns;     /* poller only */
+static int s_follow_checked;           /* poller only */
+/* Whether the console is docked, and what was needed to find that out. Queried
+ * at most once a second: omm is an IPC and this is a poll loop. */
+static int s_omm_ready;                /* poller only */
+static int s_omm_available;            /* poller only: written by the thread, read after it ends */
+static int s_mode_docked;              /* poller only */
+static uint64_t s_mode_checked_ns;     /* poller only */
 static SharedMemory s_shared;
 static Thread s_thread;
 static uint8_t s_thread_stack[0x4000] __attribute__((aligned(0x1000)));
 
-/* A frame's own work, in nanoseconds, as the present path reported it. */
-static volatile uint64_t s_intervals[WINE_NX_DISPLAY_SYNC_SAMPLES];
-static volatile uint32_t s_interval_count;
-static volatile uint32_t s_interval_next;
+/* A frame's own work, in nanoseconds, as the present path reported it. Written
+ * by whichever thread presents and read by the poller, so every access goes
+ * through the atomics; relaxed is enough, the values carry no ordering. */
+static uint64_t s_intervals[WINE_NX_DISPLAY_SYNC_SAMPLES];
+static uint32_t s_interval_count;
+static uint32_t s_interval_next;
 
 static uint64_t now_ns(void)
 {
@@ -185,7 +218,7 @@ static int map_shared(Handle session)
 {
     Handle handle = INVALID_HANDLE;
 
-    if (s_shared_mapped) return 1;
+    if (__atomic_load_n(&s_shared_mapped, __ATOMIC_ACQUIRE)) return 1;
     /* 32 bytes, not 16: SaltyNX's parser reads a raw body and a shorter one is
      * taken for an unsupported command. */
     if (!send_query(session, SALTYSD_GET_SHARED_MEMORY_HANDLE, 32, NULL, 2, &handle)) return 0;
@@ -196,7 +229,7 @@ static int map_shared(Handle session)
         memset(&s_shared, 0, sizeof(s_shared));
         return 0;
     }
-    s_shared_mapped = 1;
+    __atomic_store_n(&s_shared_mapped, 1, __ATOMIC_RELEASE);
     return 1;
 }
 
@@ -205,7 +238,7 @@ static volatile uint8_t *find_target_field(void)
     uint8_t *base;
     size_t offset;
 
-    if (!s_shared_mapped) return NULL;
+    if (!__atomic_load_n(&s_shared_mapped, __ATOMIC_ACQUIRE)) return NULL;
     base = (uint8_t *)shmemGetAddr(&s_shared);
     if (!base) return NULL;
     for (offset = 0; offset + NX_FPS_SET_BUFFERS_OFFSET + 1 <= SALTYSD_SHARED_MEMORY_SIZE; offset += 4)
@@ -238,21 +271,40 @@ static void query_service(void)
             log_line("[SYNC] no SaltySD endpoint (SaltyNX with the NethFPS port, or the "
                      "legacy name): the panel is left alone");
         }
-        s_status = 5;
-        s_service_rate = 0;
+        __atomic_store_n(&s_status, WINE_NX_DISPLAY_SYNC_NO_ENDPOINT, __ATOMIC_RELAXED);
+        __atomic_store_n(&s_service_rate, 0, __ATOMIC_RELAXED);
         return;
     }
     /* An endpoint that answers is an endpoint, even one too old to say what the
-     * panel is doing: the status is about the decision, not the query. */
-    if (s_status == 5) s_status = 0;
+     * panel is doing: the status is about the decision, not the query. Only the
+     * "no endpoint" verdict is cleared here -- what the last step decided about
+     * the block stays until the next step decides again. */
+    if (__atomic_load_n(&s_status, __ATOMIC_RELAXED) == WINE_NX_DISPLAY_SYNC_NO_ENDPOINT)
+        __atomic_store_n(&s_status, WINE_NX_DISPLAY_SYNC_NOTHING, __ATOMIC_RELAXED);
     /* The rate query is for the log and for the first guess; a build of SaltyNX
      * without it can still serve the shared block, and the policy starts from
      * the measured rate alone then. */
     if (send_query(session, SALTYSD_GET_DISPLAY_REFRESH_RATE, 32, response, 3, NULL) &&
         response[2] >= 20 && response[2] <= 240)
+    {
         /* The rate sits three words in, as NetherSX2 reads it. */
-        s_service_rate = (uint32_t)response[2];
-    if (!s_shared_mapped) map_shared(session);
+        __atomic_store_n(&s_service_rate, (uint32_t)response[2], __ATOMIC_RELAXED);
+        if (s_requested_rate && !s_follow_checked && now > s_requested_at_ns + FOLLOW_GRACE_NS &&
+            (uint32_t)response[2] != s_requested_rate)
+        {
+            /* SaltyNX applies the rate itself (saltysd_proc's
+             * updateRefreshRateForApp), but only with FPSLocker's display sync
+             * on. Three seconds is well past a mode change. */
+            char text[160];
+
+            s_follow_checked = 1;
+            snprintf(text, sizeof(text),
+                     "[SYNC] the panel is still at %u Hz though %u Hz was asked for: turn on "
+                     "display sync in FPSLocker", (unsigned)response[2], s_requested_rate);
+            log_line(text);
+        }
+    }
+    if (!__atomic_load_n(&s_shared_mapped, __ATOMIC_ACQUIRE)) map_shared(session);
     svcCloseHandle(session);
 }
 
@@ -260,9 +312,10 @@ static void clear_samples(void)
 {
     uint32_t i;
 
-    for (i = 0; i < WINE_NX_DISPLAY_SYNC_SAMPLES; i++) s_intervals[i] = 0;
-    s_interval_count = 0;
-    s_interval_next = 0;
+    for (i = 0; i < WINE_NX_DISPLAY_SYNC_SAMPLES; i++)
+        __atomic_store_n(&s_intervals[i], 0, __ATOMIC_RELAXED);
+    __atomic_store_n(&s_interval_count, 0, __ATOMIC_RELAXED);
+    __atomic_store_n(&s_interval_next, 0, __ATOMIC_RELAXED);
 }
 
 /* The rate the last window of frames says the game reaches. The window is read
@@ -272,57 +325,176 @@ static void clear_samples(void)
 static unsigned measure(unsigned *average_fps)
 {
     uint64_t samples[WINE_NX_DISPLAY_SYNC_SAMPLES];
-    uint32_t count = s_interval_count, i;
+    uint32_t count = __atomic_load_n(&s_interval_count, __ATOMIC_RELAXED);
+    uint32_t next = __atomic_load_n(&s_interval_next, __ATOMIC_RELAXED);
+    uint32_t i;
     struct wine_nx_display_sync_estimate estimate;
 
     if (average_fps) *average_fps = 0;
     if (count > WINE_NX_DISPLAY_SYNC_SAMPLES) count = WINE_NX_DISPLAY_SYNC_SAMPLES;
     /* The window is a ring: read it in the order it was written. */
     for (i = 0; i < count; i++)
-        samples[i] = s_intervals[(s_interval_next + WINE_NX_DISPLAY_SYNC_SAMPLES - count + i) %
-                                 WINE_NX_DISPLAY_SYNC_SAMPLES];
+        samples[i] = __atomic_load_n(&s_intervals[(next + WINE_NX_DISPLAY_SYNC_SAMPLES - count + i) %
+                                                  WINE_NX_DISPLAY_SYNC_SAMPLES], __ATOMIC_RELAXED);
     estimate = wine_nx_display_sync_estimate(samples, count, 1000000000ull,
                                              WINE_NX_DISPLAY_SYNC_MIN_SAMPLES);
     if (average_fps) *average_fps = estimate.average_fps;
-    s_measured_fps = estimate.upper_fps;
+    __atomic_store_n(&s_measured_fps, estimate.upper_fps, __ATOMIC_RELAXED);
     return estimate.upper_fps;
 }
 
-/* 1 when the target may be written. FPSLocker itself writes a non-zero value
- * when the player chooses a rate, and that choice wins: this bridge only fills
- * a field nobody is using, and stops as soon as someone else takes it. */
-static int target_is_ours(volatile uint8_t *target)
+/* The block's byte for the mode the console is in. Docked uses its own field:
+ * SaltyNX reads FPSlockedDocked there, and a rate written into the handheld
+ * byte would be silently ignored. */
+static int console_is_docked(uint64_t now)
 {
-    uint8_t current = __atomic_load_n(target + NX_FPS_TARGET_OFFSET, __ATOMIC_ACQUIRE);
+    OmmOperationMode mode;
 
-    if (!current || current == s_last_written)
+    if (s_mode_checked_ns && now >= s_mode_checked_ns && now < s_mode_checked_ns + MODE_REFRESH_NS)
+        return s_mode_docked;
+    s_mode_checked_ns = now ? now : 1;
+    if (!s_omm_ready)
     {
-        s_fpslocker_owned = 0;
+        /* omm answers for the console as it is now. libnx's cached applet value
+         * only follows an applet message, and this program's loop is Wine's, so
+         * it would miss a dock in the middle of a game. */
+        s_omm_available = R_SUCCEEDED(ommInitialize());
+        s_omm_ready = 1;
+    }
+    if (s_omm_available && R_SUCCEEDED(ommGetOperationMode(&mode)))
+        s_mode_docked = mode == OmmOperationMode_Console;
+    else
+        /* Without omm: the cached applet value, plus the one thing the panel
+         * rate cannot do in handheld, which is run above 60 Hz. */
+        s_mode_docked = appletGetOperationMode() == AppletOperationMode_Console ||
+                        s_service_rate > WINE_NX_DISPLAY_SYNC_MAX_RATE;
+    return s_mode_docked;
+}
+
+static uint8_t field_read(volatile uint8_t *block, const struct nxfps_field *field)
+{
+    return __atomic_load_n(block + field->offset, __ATOMIC_ACQUIRE);
+}
+
+/* 1 when the byte may be written. FPSLocker writes a non-zero target of its own
+ * when the player chooses a rate, and that choice wins: the bridge only fills a
+ * byte nobody is using, and stops as soon as someone else takes it. Zero is
+ * FPSLocker's documented "auto", which hands the byte back. */
+static int field_is_ours(volatile uint8_t *block, struct nxfps_field *field)
+{
+    uint8_t current = field_read(block, field);
+
+    if (!current || current == field->written)
+    {
+        field->owned = 0;
         return 1;
     }
-    s_fpslocker_owned = 1;
-    s_status = 3;
+    field->owned = 1;
     return 0;
+}
+
+/* Put value in the byte unless someone changed it in between, and remember what
+ * was there first so it can be put back. */
+static int field_write(volatile uint8_t *block, struct nxfps_field *field, uint8_t value)
+{
+    uint8_t expected = field_read(block, field), before = expected;
+
+    if (!__atomic_compare_exchange_n(block + field->offset, &expected, value, false,
+                                     __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE))
+    {
+        /* Someone wrote it between the read and the write: theirs. Nothing of
+         * the bridge's is in the byte, so there is nothing to remember either. */
+        field->owned = expected != 0;
+        return 0;
+    }
+    /* What was there before the first write of this session, and only that: the
+     * value the byte is put back to when the game's rate changes again. */
+    if (!field->saved_valid)
+    {
+        field->saved = before;
+        field->saved_valid = 1;
+    }
+    field->written = value;
+    return 1;
+}
+
+/* Hand the byte back, but only if it still says what the bridge put there. */
+static void field_restore(volatile uint8_t *block, struct nxfps_field *field)
+{
+    uint8_t expected = field->written;
+
+    if (!field->saved_valid || field->owned || !field->written) return;
+    __atomic_compare_exchange_n(block + field->offset, &expected, field->saved, false,
+                                __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE);
+    field->written = 0;
+    field->saved_valid = 0;
+}
+
+static void fields_reset(void)
+{
+    s_handheld.saved = s_handheld.written = 0;
+    s_handheld.saved_valid = s_handheld.owned = 0;
+    s_docked.saved = s_docked.written = 0;
+    s_docked.saved_valid = s_docked.owned = 0;
+}
+
+/* Hand both bytes back: called when the bridge is turned off, and as the program
+ * ends. The one of the two the console is not using is restored too, so a
+ * console docked in the middle of a game is not left with a rate. */
+static void restore_fields(void)
+{
+    volatile uint8_t *block;
+
+    block = find_target_field();
+    if (!block) return;
+    field_restore(block, &s_handheld);
+    field_restore(block, &s_docked);
+}
+
+/* The game no longer needs the rate it was given: the byte goes back to 60,
+ * which is the rate SaltyNX applies (and what FPSLocker's own reset writes).
+ * Restoring the old value would not raise the panel -- SaltyNX keeps the last
+ * rate it was given -- so this is a write, not a hand-back; the old value is
+ * still what the session ends on. */
+static void release_rate(volatile uint8_t *block, struct nxfps_field *field, unsigned rate)
+{
+    if (field->written && field->written < WINE_NX_DISPLAY_SYNC_MAX_RATE && field_is_ours(block, field) &&
+        field_write(block, field, (uint8_t)WINE_NX_DISPLAY_SYNC_MAX_RATE))
+        __atomic_store_n(&s_published_target, WINE_NX_DISPLAY_SYNC_MAX_RATE, __ATOMIC_RELAXED);
+    __atomic_store_n(&s_panel_rate, rate, __ATOMIC_RELAXED);
+    __atomic_store_n(&s_status, WINE_NX_DISPLAY_SYNC_FOLLOWING, __ATOMIC_RELAXED);
+    s_requested_rate = 0;
+    s_follow_checked = 0;
+    s_candidate_since_ns = 0;
 }
 
 static void publish(uint64_t now)
 {
-    volatile uint8_t *block, *target;
-    unsigned wanted, average = 0, measured;
-    uint64_t stale_before = now > STALE_NS ? now - STALE_NS : 0;
+    volatile uint8_t *block;
+    struct nxfps_field *field, *other;
+    unsigned wanted, average = 0, measured, service_rate, published;
+    uint64_t stale_before = now > STALE_NS ? now - STALE_NS : 0, last_frame;
     uint8_t current;
+    int docked;
 
     /* No endpoint, nothing to go through: the rate query already said so, and a
      * "no block" would only hide it. */
-    if (s_status == 5) return;
+    if (__atomic_load_n(&s_status, __ATOMIC_RELAXED) == WINE_NX_DISPLAY_SYNC_NO_ENDPOINT) return;
     block = find_target_field();
     if (!block)
     {
-        s_status = 4;
+        __atomic_store_n(&s_status, WINE_NX_DISPLAY_SYNC_NO_BLOCK, __ATOMIC_RELAXED);
         return;
     }
-    target = block + NX_FPS_TARGET_OFFSET;
-    if (!s_last_frame_ns || s_last_frame_ns < stale_before)
+    docked = console_is_docked(now);
+    field = docked ? &s_docked : &s_handheld;
+    other = docked ? &s_handheld : &s_docked;
+    /* Dock or undock mid-game: the byte of the other mode is not being read
+     * any more, so it goes back to what it was. */
+    if (other->written) field_restore(block, other);
+
+    last_frame = __atomic_load_n(&s_last_frame_ns, __ATOMIC_RELAXED);
+    if (!last_frame || last_frame < stale_before)
     {
         /* No frame for a second: a load screen or a paused game is not a
          * measurement, and the panel stays where it is. */
@@ -332,67 +504,70 @@ static void publish(uint64_t now)
     measured = measure(&average);
     if (!measured)
     {
-        s_status = 1;
+        __atomic_store_n(&s_status, WINE_NX_DISPLAY_SYNC_MEASURING, __ATOMIC_RELAXED);
         return;
     }
-    wanted = wine_nx_display_sync_next_rate(s_published_target ? s_published_target : s_service_rate,
-                                             measured);
-    if (!wanted)
+    service_rate = __atomic_load_n(&s_service_rate, __ATOMIC_RELAXED);
+    published = __atomic_load_n(&s_published_target, __ATOMIC_RELAXED);
+    wanted = wine_nx_display_sync_next_rate(published ? published : service_rate, measured);
+    /* 60 is where the panel already is, and a docked one may be faster still
+     * (up to 120 Hz): a game that reaches 60 is not asking for anything less,
+     * and writing 60 would be a downgrade. This is also the way back -- a game
+     * that was slow and has caught up is put back on 60 instead of being left
+     * on the low rate for the rest of the session. The test is on the
+     * measurement, not on wanted: right after that, the last rate the service
+     * reported is still low, and stepping up from it would put the panel down
+     * again. */
+    if (wine_nx_display_sync_legal_rate(measured) >= WINE_NX_DISPLAY_SYNC_MAX_RATE)
     {
-        s_status = 2;
+        release_rate(block, field, service_rate ? service_rate : WINE_NX_DISPLAY_SYNC_MAX_RATE);
         return;
     }
-    if (!s_last_written && s_service_rate && wanted == s_service_rate)
+    if (!field->written && service_rate && wanted == service_rate)
     {
-        /* The panel is already where the game is, and the field has not been
+        /* The panel is already where the game is, and the byte has not been
          * touched: leave it alone so whatever FPSLocker has stays. A game at
          * 60 fps or better never moves the panel. */
-        s_panel_rate = s_service_rate;
-        s_status = 2;
+        __atomic_store_n(&s_panel_rate, service_rate, __ATOMIC_RELAXED);
+        __atomic_store_n(&s_status, WINE_NX_DISPLAY_SYNC_FOLLOWING, __ATOMIC_RELAXED);
         return;
     }
-    if (!target_is_ours(block)) return;
-    current = __atomic_load_n(target, __ATOMIC_ACQUIRE);
-    /* The field already says what it should, and it is ours: nothing to do. A
-     * field someone cleared is not that -- the rate asked for is re-asserted,
+    if (!field_is_ours(block, field))
+    {
+        __atomic_store_n(&s_status, WINE_NX_DISPLAY_SYNC_FPSLOCKER, __ATOMIC_RELAXED);
+        return;
+    }
+    current = field_read(block, field);
+    /* The byte already says what it should, and it is ours: nothing to do. A
+     * byte someone cleared is not that -- the rate asked for is re-asserted,
      * after the same wait, so a player who clears FPSLocker's target gets the
      * panel back on the game. */
-    if (wanted == s_last_written && current == s_last_written)
+    if (wanted == field->written && current == field->written)
     {
-        s_status = 2;
+        __atomic_store_n(&s_status, WINE_NX_DISPLAY_SYNC_FOLLOWING, __ATOMIC_RELAXED);
         return;
     }
     if (!wine_nx_display_sync_stable(wanted, &s_candidate_rate, &s_candidate_since_ns, now,
                                      (uint64_t)WINE_NX_DISPLAY_SYNC_STABLE_MS * 1000000ull))
         return;
-    if (!s_saved_valid)
-    {
-        s_saved_target = current;
-        s_saved_valid = 1;
-    }
 
+    if (!field_write(block, field, (uint8_t)wanted))
     {
-        uint8_t expected = current;
-        uint8_t value = (uint8_t)wanted;
-
-        if (!__atomic_compare_exchange_n(target, &expected, value, false, __ATOMIC_ACQ_REL,
-                                         __ATOMIC_ACQUIRE))
-        {
-            /* Someone wrote it between the read and the write: theirs. */
-            s_fpslocker_owned = 1;
-            s_status = 3;
-            return;
-        }
+        __atomic_store_n(&s_status, WINE_NX_DISPLAY_SYNC_FPSLOCKER, __ATOMIC_RELAXED);
+        return;
     }
-    s_last_written = (uint8_t)wanted;
-    s_published_target = wanted;
-    s_panel_rate = wanted;
+    __atomic_store_n(&s_published_target, wanted, __ATOMIC_RELAXED);
+    __atomic_store_n(&s_panel_rate, wanted, __ATOMIC_RELAXED);
+    s_requested_rate = wanted;
+    s_requested_at_ns = now;
+    s_follow_checked = 0;
     s_candidate_since_ns = 0;
-    s_status = 2;
+    __atomic_store_n(&s_status, WINE_NX_DISPLAY_SYNC_FOLLOWING, __ATOMIC_RELAXED);
     {
         char text[96];
 
-        snprintf(text, sizeof(text), "[SYNC] panel at %u Hz, game at %u fps", wanted, measured);
+        snprintf(text, sizeof(text), "[SYNC] asked for %u Hz (%s), game at %u fps", wanted,
+                 field == &s_docked ? "docked" : "handheld", measured);
         log_line(text);
     }
 }
@@ -408,7 +583,12 @@ static void service_pass(void)
     if (now >= s_next_poll_ns)
     {
         s_next_poll_ns = now + POLL_INTERVAL_NS;
+        /* Turning the bridge off restores FPSlocked from the other thread; the
+         * flag is what it waits for, so a write made here cannot land after
+         * the restore. */
+        __atomic_store_n(&s_in_publish, 1, __ATOMIC_RELEASE);
         publish(now);
+        __atomic_store_n(&s_in_publish, 0, __ATOMIC_RELEASE);
     }
 }
 
@@ -425,20 +605,32 @@ static void poller(void *argument)
         service_pass();
         svcSleepThread(POLL_INTERVAL_NS / 4);
     }
-    s_thread_running = 0;
+}
+
+/* Wait, but not forever, for the poller to step out of publish(). Called from
+ * the thread that is turning the bridge off, never from the poller. */
+static void wait_out_of_publish(void)
+{
+    int waits;
+
+    for (waits = 0; waits < 200 && __atomic_load_n(&s_in_publish, __ATOMIC_ACQUIRE); waits++)
+        svcSleepThread(1000000);
 }
 
 /* Everything one game session leaves behind: the value written, the value it
  * replaced, the measurement window, and what the last step decided. */
 static void reset_session(void)
 {
-    s_last_written = 0;
-    s_saved_valid = 0;
-    s_fpslocker_owned = 0;
-    s_published_target = 0;
-    s_panel_rate = 0;
-    s_measured_fps = 0;
-    s_status = 0;           /* off is nothing yet, not what the last session said */
+    fields_reset();
+    __atomic_store_n(&s_published_target, 0, __ATOMIC_RELAXED);
+    __atomic_store_n(&s_panel_rate, 0, __ATOMIC_RELAXED);
+    __atomic_store_n(&s_measured_fps, 0, __ATOMIC_RELAXED);
+    __atomic_store_n(&s_status, WINE_NX_DISPLAY_SYNC_NOTHING, __ATOMIC_RELAXED);   /* off is nothing yet, not what the last session said */
+    s_requested_rate = 0;
+    s_requested_at_ns = 0;
+    s_follow_checked = 0;
+    s_mode_checked_ns = 0;
+    s_mode_docked = 0;
     s_prefer_legacy = 0;    /* the next game asks the fork's port again */
     s_logged_missing = 0;
     clear_samples();
@@ -446,24 +638,16 @@ static void reset_session(void)
 
 void wine_nx_display_sync_configure(int enabled)
 {
+    int was_on = __atomic_load_n(&s_enabled, __ATOMIC_ACQUIRE);
+
     if (!enabled)
     {
         __atomic_store_n(&s_enabled, 0, __ATOMIC_RELEASE);
+        wait_out_of_publish();
         /* Hand FPSlocked back to whoever had it before. */
-        if (s_shared_mapped && s_saved_valid && !s_fpslocker_owned && s_last_written)
-        {
-            volatile uint8_t *block = find_target_field();
-
-            if (block)
-            {
-                uint8_t expected = s_last_written;
-
-                __atomic_compare_exchange_n(block + NX_FPS_TARGET_OFFSET, &expected, s_saved_target,
-                                            false, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE);
-            }
-        }
+        if (__atomic_load_n(&s_shared_mapped, __ATOMIC_ACQUIRE)) restore_fields();
         reset_session();
-        if (s_thread_running) log_line("[SYNC] panel rate following the game: off");
+        if (was_on) log_line("[SYNC] panel rate following the game: off");
         return;
     }
     if (__atomic_load_n(&s_enabled, __ATOMIC_ACQUIRE)) return;
@@ -471,9 +655,11 @@ void wine_nx_display_sync_configure(int enabled)
     clear_samples();
     s_next_query_ns = 0;
     s_next_poll_ns = 0;
-    if (!s_thread_running)
+    if (!s_thread_created)
     {
-        /* Below the game's threads and on any core, like the log reader. */
+        /* Below the game's threads and on any core, like the log reader. A
+         * failed create leaves nothing behind (libnx unwinds its own mapping),
+         * a failed start leaves a mapped thread that has to be closed. */
         if (R_FAILED(threadCreate(&s_thread, poller, NULL, s_thread_stack, sizeof(s_thread_stack),
                                   0x3b, -2)))
         {
@@ -486,7 +672,7 @@ void wine_nx_display_sync_configure(int enabled)
             log_line("[SYNC] could not start the display rate thread");
             return;
         }
-        s_thread_running = 1;
+        s_thread_created = 1;
     }
     __atomic_store_n(&s_enabled, 1, __ATOMIC_RELEASE);
     log_line("[SYNC] panel rate following the game: on");
@@ -496,10 +682,10 @@ void wine_nx_display_sync_note_frame(uint64_t busy_ns)
 {
     uint64_t now;
 
-    if (!s_enabled) return;
+    if (!__atomic_load_n(&s_enabled, __ATOMIC_ACQUIRE)) return;
     now = now_ns();
     if (!now) return;
-    s_last_frame_ns = now;
+    __atomic_store_n(&s_last_frame_ns, now, __ATOMIC_RELAXED);
     /* Below 240 fps or above 10 fps is not a frame of a game that is drawing:
      * a load screen is neither, and a stale timestamp after a pause is a hole
      * rather than a 3-second frame. */
@@ -522,43 +708,60 @@ int wine_nx_display_sync_active(void)
     return __atomic_load_n(&s_enabled, __ATOMIC_ACQUIRE);
 }
 
+const char *wine_nx_display_sync_status_text(int status)
+{
+    switch (status)
+    {
+    case WINE_NX_DISPLAY_SYNC_NOTHING: return "nothing asked yet";
+    case WINE_NX_DISPLAY_SYNC_MEASURING: return "measuring";
+    case WINE_NX_DISPLAY_SYNC_FOLLOWING: return "the panel follows the game";
+    case WINE_NX_DISPLAY_SYNC_FPSLOCKER: return "FPSLocker is setting the rate";
+    case WINE_NX_DISPLAY_SYNC_NO_BLOCK: return "no FPSLocker block in the shared memory";
+    case WINE_NX_DISPLAY_SYNC_NO_ENDPOINT: return "no SaltySD endpoint";
+    default: return "unknown";
+    }
+}
+
 void wine_nx_display_sync_report(struct wine_nx_display_sync_report *report)
 {
     if (!report) return;
-    report->measured_fps = s_measured_fps;
-    report->panel_rate = s_panel_rate;
-    report->service_rate = s_service_rate;
-    report->status = s_status;
+    report->measured_fps = __atomic_load_n(&s_measured_fps, __ATOMIC_RELAXED);
+    report->panel_rate = __atomic_load_n(&s_panel_rate, __ATOMIC_RELAXED);
+    report->service_rate = __atomic_load_n(&s_service_rate, __ATOMIC_RELAXED);
+    report->status = __atomic_load_n(&s_status, __ATOMIC_RELAXED);
 }
 
 /* Called once as the program ends: the thread goes, the block is closed and
  * FPSlocked is left as it was found. */
 void wine_nx_display_sync_shutdown(void)
 {
-    int waits;
-
     __atomic_store_n(&s_shutdown, 1, __ATOMIC_RELEASE);
     __atomic_store_n(&s_enabled, 0, __ATOMIC_RELEASE);
-    /* A thread that will not stop must not hold the exit: it is given a fifth
-     * of a second, and the block is closed under it if it does not come back. */
-    for (waits = 0; s_thread_running && waits < 200; waits++) svcSleepThread(1000000);
-    if (s_shared_mapped)
+    if (s_thread_created)
     {
-        if (s_saved_valid && !s_fpslocker_owned && s_last_written)
-        {
-            volatile uint8_t *block = find_target_field();
-
-            if (block)
-            {
-                uint8_t expected = s_last_written;
-
-                __atomic_compare_exchange_n(block + NX_FPS_TARGET_OFFSET, &expected, s_saved_target,
-                                            false, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE);
-            }
-        }
+        /* Closed only once it really has exited: threadClose takes the stack
+         * mirror and the handle away, and a thread that is still running on
+         * them is a crash. Its loop notices the quit within a step. */
+        if (R_SUCCEEDED(waitSingle(waiterForThread(&s_thread), 3000000000ULL)))
+            threadClose(&s_thread);
+        else
+            log_line("[SYNC] the rate thread did not end; its stack stays lent out");
+        s_thread_created = 0;
+    }
+    wait_out_of_publish();
+    if (s_omm_available)
+    {
+        /* The poller is gone by now, so nothing can be using the session. */
+        ommExit();
+        s_omm_available = 0;
+        s_omm_ready = 0;
+    }
+    if (__atomic_load_n(&s_shared_mapped, __ATOMIC_ACQUIRE))
+    {
+        restore_fields();
         shmemClose(&s_shared);
         memset(&s_shared, 0, sizeof(s_shared));
-        s_shared_mapped = 0;
+        __atomic_store_n(&s_shared_mapped, 0, __ATOMIC_RELEASE);
     }
     reset_session();
 }
@@ -582,5 +785,6 @@ void wine_nx_display_sync_report(struct wine_nx_display_sync_report *report)
 {
     if (report) memset(report, 0, sizeof(*report));
 }
+const char *wine_nx_display_sync_status_text(int status) { (void)status; return "not on the console"; }
 
 #endif
