@@ -208,10 +208,6 @@ struct launcher_settings
     int lsfg_flow;
     int upscaling;
     int upscaling_sharpness;
-    /* Whether the program's own keys apply over the shared ones: -1 they do
-     * when it has a file of them, which is what a card written before this
-     * setting existed means; 0 Autorun's keys alone, the file kept for when it
-     * is turned on again. */
 };
 
 enum {

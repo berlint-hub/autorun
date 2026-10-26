@@ -2934,11 +2934,15 @@ static int program_menu_run( struct launcher *l, struct program *p, char *target
 
             if (action == UI_ACTION_RESET)
             {
-                /* What a game that has never been configured runs with. */
-                launcher_preset_defaults( &p->settings );
+                /* Reset on this row is the bundle a game nobody configured
+                 * runs with, and only what a preset owns: the renderer, the
+                 * upscaling, the frame generation and the game's own title are
+                 * not this row's to clear, and "Reset settings" is the row that
+                 * puts those back. Asked for, both would be the same thing. */
+                launcher_preset_apply( &p->settings, LAUNCHER_PRESET_BALANCED, translators );
                 save_program_settings( l, p );
-                save_library( l );
-                ui_toast( ui, "Settings reset", 1500 );
+                snprintf( line, sizeof(line), "%s preset applied", launcher_preset_label( LAUNCHER_PRESET_BALANCED ) );
+                ui_toast( ui, line, 1800 );
                 break;
             }
             if (action != UI_ACTION_CHOOSE) break;

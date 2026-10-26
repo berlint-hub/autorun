@@ -159,7 +159,7 @@ its executable, named after it:
 
 | File | Content |
 |---|---|
-| `NAME.wine-nx.txt` | Title, hidden from the library, verbose traces, profiler, `windows` (compositor or framebuffer), `d3d=dxvk`, address space, own controls |
+| `NAME.wine-nx.txt` | Title, hidden from the library, verbose traces, profiler, `windows` (compositor or framebuffer), the CPU translator and its fast paths, `d3d` and which DXVK or VKD3D-Proton is used, the HUD, the frame limit and vsync, frame generation, upscaling and dgVoodoo |
 | `NAME.args.txt` | Its command-line arguments |
 | `NAME.keys.txt` | Its own controls, over `config/keys.txt` |
 | `NAME.box64.txt` | Box64 code generation options, one `BOX64_DYNAREC_*=value` per line |

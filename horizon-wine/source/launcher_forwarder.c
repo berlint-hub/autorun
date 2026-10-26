@@ -182,9 +182,13 @@ void launcher_forwarder_run( struct ui *ui, const struct wine_nx_launcher_option
             ui_sound( ui, LAUNCHER_SOUND_ACCEPT );
             if (selected == 1 || selected == 2)
             {
+                /* The prompt edits the field it was given, each its own size:
+                 * the author's buffer is not the name's. */
                 char *value = selected == 2 ? author : name;
+                size_t value_size = selected == 2 ? sizeof(author) : sizeof(name);
+
                 if (launcher_platform_prompt( selected == 2 ? "Author" : "Name", value, edited, sizeof(edited) ))
-                    snprintf( value, sizeof(name), "%s", edited );
+                    snprintf( value, value_size, "%s", edited );
             }
             else if (!selected)
             {

@@ -460,7 +460,10 @@ void ui_rounded_texture( struct ui *ui, SDL_Texture *texture, const SDL_Rect *sr
 
     if (!texture || rect.w <= 0 || rect.h <= 0) return;
     if (radius * 2 > rect.w) radius = rect.w / 2;
-    if (radius * 2 > rect.h) radius = rect.h / 2;
+    /* A box no taller than its two corners is all corner, as a pill is. One
+     * row is left in the middle of it: the loop below walks the rows and would
+     * never move down from a middle band of none. */
+    if (radius * 2 >= rect.h) radius = (rect.h - 1) / 2;
     SDL_RenderGetClipRect( ui->renderer, &clip );
     SDL_SetTextureColorMod( texture, mod.r, mod.g, mod.b );
     SDL_SetTextureAlphaMod( texture, mod.a );

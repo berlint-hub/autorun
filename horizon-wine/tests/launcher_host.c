@@ -362,10 +362,35 @@ static SDL_Keycode key_code( const char *name )
     exit( 2 );
 }
 
+/* A rounded texture over a box no taller than its two corners is the pill every
+ * screen means by a round end. Its rows still have to move down: a box whose
+ * middle band was empty would leave the drawing loop standing where it was. */
+static void check_rounded_texture( SDL_Renderer *renderer )
+{
+    struct ui ui = { .renderer = renderer };
+    SDL_Surface *pixels = SDL_CreateRGBSurfaceWithFormat( 0, 2, 2, 32, SDL_PIXELFORMAT_RGBA32 );
+    SDL_Texture *texture;
+    /* Above the screen: the check is that the rows move down, not what they
+     * paint, so nothing of it can reach a frame the script takes a picture of. */
+    SDL_Rect pill = { -200, -200, 44, 44 };
+
+    assert( pixels );
+    SDL_FillRect( pixels, NULL, SDL_MapRGBA( pixels->format, 255, 255, 255, 255 ) );
+    assert( (texture = SDL_CreateTextureFromSurface( renderer, pixels )) );
+    SDL_FreeSurface( pixels );
+    ui_rounded_texture( &ui, texture, NULL, pill, 22, (SDL_Color){ 255, 255, 255, 128 } );
+    pill.h = 45;
+    ui_rounded_texture( &ui, texture, NULL, pill, 22, (SDL_Color){ 255, 255, 255, 128 } );
+    pill.w = pill.h = 12;
+    ui_rounded_texture( &ui, texture, NULL, pill, 22, (SDL_Color){ 255, 255, 255, 128 } );
+    SDL_DestroyTexture( texture );
+}
+
 /* Each frame runs the script until a step needs a later frame. */
 static void on_frame( SDL_Renderer *renderer )
 {
     frames++;
+    if (frames == 1) check_rounded_texture( renderer );
     if (wait_frames > 0)
     {
         wait_frames--;
