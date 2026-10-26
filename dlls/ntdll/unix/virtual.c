@@ -958,17 +958,8 @@ static const struct
     const char  *name;
     const void  *funcs;
     NTSTATUS   (*init)(void);
-    /* The name is a stem without its extension, and the module also arrives
-     * under a variant name: "<stem>.dll" and "<stem>-<variant>.dll" both pair. */
-    BOOL        variants;
 } wine_nx_static_unix_libs[] =
 {
-#ifdef WINE_NX_FEX
-    /* FEX asks for its unixlib by the canonical stem as well as by the file
-     * name, and a variant build is libwow64fex-opt.dll (fex-variant.txt). */
-    { "libarm64ecfex", wine_nx_fex_unix_funcs, NULL, TRUE },
-    { "libwow64fex", wine_nx_fex_unix_funcs, NULL, TRUE },
-#endif
 #ifdef WINE_NX_BOX64_INTERPRETER
     { "winebox64.dll", wine_nx_winebox64_unix_funcs },
 #endif
@@ -993,6 +984,23 @@ static const struct
     { "winevulkan.dll", wine_nx_winevulkan_unix_funcs },
 #endif
 };
+
+#ifdef WINE_NX_FEX
+/* FEX's CPU modules are matched by their stem, without the extension: FEX asks
+ * for its unixlib by that stem alone (FEXUnixLib::Init, before it falls back to
+ * its own module base), and a variant build sits beside the stock one as
+ * libwow64fex-<variant>.dll (fex-variant.txt, a game's CPU translator). The
+ * stem, "<stem>.dll" and "<stem>-<variant>.dll" all pair. */
+static const struct
+{
+    const char  *stem;
+    const void  *funcs;
+} wine_nx_variant_unix_libs[] =
+{
+    { "libarm64ecfex", wine_nx_fex_unix_funcs },
+    { "libwow64fex", wine_nx_fex_unix_funcs },
+};
+#endif
 
 /* Tables for 32-bit DLLs under WoW64 (see ws2_32_unix_stub.c). Those modules
  * are in the 32-bit loader list only, so they are matched by the DLL name in
@@ -1154,17 +1162,8 @@ static BOOL wine_nx_unix_name_equal( const UNICODE_STRING *name, const char *exp
     return TRUE;
 }
 
-/* The table entry's name, or the same module under its variant name. */
-static BOOL wine_nx_unix_name_matches( const UNICODE_STRING *name, const char *expected, BOOL variants )
-{
-    if (!variants) return wine_nx_unix_name_equal( name, expected );
-    if (!name || !name->Buffer) return FALSE;
-    return wine_nx_unixlib_name_matches( name->Buffer, name->Length / sizeof(WCHAR), expected, TRUE );
-}
-
-/* A module that asks for a Horizon unixlib and gets none does not say so: FEX
- * carries on with no unixlib behind it and the process dies later with a status
- * that names nothing. Name the module instead. */
+/* The Horizon CRT reports only STATUS_DLL_INIT_FAILED if neither FEX unixlib
+ * lookup method succeeds. Name the missing mapping here. */
 static void wine_nx_report_unpaired_unix_lib( const UNICODE_STRING *name )
 {
     char text[WINE_NX_UNIXLIB_NAME_MAX];
@@ -1179,6 +1178,7 @@ static NTSTATUS wine_nx_load_static_unix_lib( const UNICODE_STRING *name, BOOL w
 {
     unsigned int i;
 
+    if (!name || !name->Buffer || name->Length % sizeof(WCHAR)) return STATUS_DLL_NOT_FOUND;
     if (wow)
     {
         for (i = 0; i < ARRAY_SIZE(wine_nx_static_wow64_unix_libs); i++)
@@ -1194,13 +1194,22 @@ static NTSTATUS wine_nx_load_static_unix_lib( const UNICODE_STRING *name, BOOL w
         for (i = 0; i < ARRAY_SIZE(wine_nx_static_unix_libs); i++)
         {
             NTSTATUS status;
-            if (!wine_nx_unix_name_matches( name, wine_nx_static_unix_libs[i].name,
-                                           wine_nx_static_unix_libs[i].variants )) continue;
+            if (!wine_nx_unix_name_equal( name, wine_nx_static_unix_libs[i].name )) continue;
             if (wine_nx_static_unix_libs[i].init && (status = wine_nx_static_unix_libs[i].init())) return status;
             res[0] = (UINT_PTR)&wine_nx_static_unix_libs[i];
             res[1] = (UINT_PTR)wine_nx_static_unix_libs[i].funcs;
             return STATUS_SUCCESS;
         }
+#ifdef WINE_NX_FEX
+        for (i = 0; i < ARRAY_SIZE(wine_nx_variant_unix_libs); i++)
+        {
+            if (!wine_nx_unixlib_name_matches( name->Buffer, name->Length / sizeof(WCHAR),
+                                               wine_nx_variant_unix_libs[i].stem, TRUE )) continue;
+            res[0] = (UINT_PTR)&wine_nx_variant_unix_libs[i];
+            res[1] = (UINT_PTR)wine_nx_variant_unix_libs[i].funcs;
+            return STATUS_SUCCESS;
+        }
+#endif
     }
     wine_nx_report_unpaired_unix_lib( name );
     return STATUS_DLL_NOT_FOUND;
@@ -1214,6 +1223,10 @@ static NTSTATUS wine_nx_unload_static_unix_lib( unixlib_module_t module )
         if (module == (UINT_PTR)&wine_nx_static_unix_libs[i]) return STATUS_SUCCESS;
     for (i = 0; i < ARRAY_SIZE(wine_nx_static_wow64_unix_libs); i++)
         if (module == (UINT_PTR)&wine_nx_static_wow64_unix_libs[i]) return STATUS_SUCCESS;
+#ifdef WINE_NX_FEX
+    for (i = 0; i < ARRAY_SIZE(wine_nx_variant_unix_libs); i++)
+        if (module == (UINT_PTR)&wine_nx_variant_unix_libs[i]) return STATUS_SUCCESS;
+#endif
     return STATUS_INVALID_HANDLE;
 }
 

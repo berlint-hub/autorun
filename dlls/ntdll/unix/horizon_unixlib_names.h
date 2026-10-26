@@ -2,27 +2,25 @@
  * Which module a static unixlib belongs to.
  *
  * Horizon has no dlopen, so ntdll serves its own unixlibs from a table
- * (wine_nx_static_unix_libs in virtual.c) and pairs a module with its entry by
- * name. FEX's CPU modules reach their unixlib twice: by the file name the
- * loader gave them (MemoryWineUnixFuncs), and by their own canonical stem,
+ * (virtual.c) and pairs a module with its entry by name. FEX's CPU modules
+ * reach their unixlib twice: by the file name the loader gave them
+ * (MemoryWineUnixFuncs), and by their own canonical stem,
  * "libwow64fex" with no extension (MemoryWineLoadUnixLibByName, which is what
  * FEXUnixLib::Init asks for first).
  *
  * A variant build sits beside the stock one as libwow64fex-<variant>.dll and
  * libarm64ecfex-<variant>.dll (fex-variant.txt, or a game's CPU translator).
- * Both spellings have to find the same entry. Before this, they did not: the
- * table held "libwow64fex.dll" alone, so a variant module started, failed to
- * reach its unixlib, and the process died in Wow64LdrpInitialize with
- * STATUS_DLL_INIT_FAILED and not one guest instruction executed.
+ * Both spellings have to find the same entry. The original table held only
+ * "libwow64fex.dll", so both lookup methods missed for a variant. The Horizon
+ * CRT treats failure to acquire the unixlib as STATUS_DLL_INIT_FAILED before
+ * it reads the config or executes any guest instructions.
  */
 #ifndef WINE_NX_HORIZON_UNIXLIB_NAMES_H
 #define WINE_NX_HORIZON_UNIXLIB_NAMES_H
 
 #include <stddef.h>
 
-/* Long enough for the names the runtime builds: "<stem>-<variant>.dll" with a
- * variant of 40 characters (runtime_fex_cpu_module's names[80] holds the
- * whole thing). */
+/* Diagnostic buffer matching runtime_fex_cpu_module's names[80]. */
 #define WINE_NX_UNIXLIB_NAME_MAX 80
 
 static inline int wine_nx_unixlib_char_equal( unsigned short ch, char expected )
@@ -52,8 +50,8 @@ static inline int wine_nx_unixlib_is_dll_extension( const unsigned short *rest, 
 
 /* A variant suffix: the canonical stem on its own, "<stem>.dll", "<stem>-x" or
  * "<stem>-x.dll", where x is what the runtime calls a variant (letters, digits,
- * '-' and '_', see runtime_fex_cpu_module). Nothing else, so a different module
- * that merely begins with the same letters does not pair. */
+ * '-' and '_'). Nothing else, so a different module that merely begins with
+ * the same letters does not pair. */
 static inline int wine_nx_unixlib_variant_suffix_ok( const unsigned short *rest, size_t length )
 {
     size_t i, name = length;
@@ -74,9 +72,9 @@ static inline int wine_nx_unixlib_variant_suffix_ok( const unsigned short *rest,
     return 1;
 }
 
-/* Does the module name pair with this table entry? `stem` is the canonical name
- * without its extension, and `variants` is set for the entries that are also
- * shipped under a variant name. Lengths are in characters, as
+/* Does the module name pair with this table entry? `stem` is the expected name,
+ * without its extension if `variants` is set. Variant entries are also shipped
+ * under a suffixed name. Lengths are in characters, as
  * UNICODE_STRING.Length / sizeof(WCHAR). */
 static inline int wine_nx_unixlib_name_matches( const unsigned short *buffer, size_t length,
                                                 const char *stem, int variants )
@@ -90,7 +88,7 @@ static inline int wine_nx_unixlib_name_matches( const unsigned short *buffer, si
     return wine_nx_unixlib_variant_suffix_ok( buffer + count, length - count );
 }
 
-/* The FEX CPU modules, by stem, whatever their variant. */
+/* Names in FEX's namespace, even malformed suffixes, for diagnostics only. */
 static inline int wine_nx_unixlib_name_is_fex( const unsigned short *buffer, size_t length )
 {
     return wine_nx_unixlib_has_prefix( buffer, length, "libwow64fex" ) ||
