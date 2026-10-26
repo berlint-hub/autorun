@@ -159,6 +159,20 @@ Result threadCreate( Thread *thread, void (*entry)( void * ), void *argument, vo
 Result threadStart( Thread *thread ) { return thread->created ? 0 : 1; }
 void threadClose( Thread *thread ) { thread->created = 0; }
 
+/* The runtime's log, replaced: what the bridge says, and how often. SaltySD's
+ * own file is not written here; the count is what matters, since a line a second
+ * is a log nobody can read. */
+static int log_lines, log_missing, log_rates;
+static char last_log[128];
+
+void wine_nx_runtime_trace( const char *msg )
+{
+    log_lines++;
+    snprintf( last_log, sizeof(last_log), "%s", msg );
+    if (strstr( msg, "no SaltySD endpoint" )) log_missing++;
+    if (strstr( msg, "panel at" )) log_rates++;
+}
+
 /* ---- the test's own helpers ---------------------------------------------- */
 
 static void reset_console( void )
@@ -171,6 +185,8 @@ static void reset_console( void )
     nethfps_fails = 0;
     shared_mapped = 0;
     shared_size_wrong = 0;
+    log_lines = log_missing = log_rates = 0;
+    last_log[0] = 0;
     reply_rate = 60;
     rate_reply_missing = 0;
     shared_handle = 0x200;
@@ -259,6 +275,7 @@ static void check_no_endpoint( void )
     assert( !strcmp( ports[0], "NethFPS" ) && !strcmp( ports[1], "SaltySD" ) );
     run_for( 48, 4000 );
     assert( port_count > 3 );             /* it keeps asking, and gives up each time */
+    assert( log_missing == 1 );           /* but says so once, not once a second */
     assert( target_value() == 0 );
     settle();
     assert( status() == 5 );
@@ -319,6 +336,9 @@ static void check_slow_game( void )
     assert( report.panel_rate == 50 && report.service_rate == 60 );
     assert( report.measured_fps >= 47 && report.measured_fps <= 49 );
     assert( report.status == 2 );
+    /* 60 -> 55 -> 50: two changes, two lines, and the last says where it got to. */
+    assert( log_rates == 2 );
+    assert( strstr( last_log, "panel at 50 Hz" ) );
 
     /* A pause is not a measurement: three seconds without a frame leave the
      * panel where the last real one put it. */

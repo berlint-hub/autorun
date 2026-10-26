@@ -7,6 +7,7 @@
  * memory the service hands over.
  */
 #include <stdbool.h>
+#include <stdio.h>
 #include <string.h>
 
 #include "salty_display.h"
@@ -158,6 +159,9 @@ static int send_query(Handle session, uint32_t command, uint32_t request_bytes,
  * NethFPS, and asking for it again every second costs a failed connect each
  * time; once the legacy name works it is tried first. */
 static int s_prefer_legacy;
+/* The log is the only place the console can say what happened, so the first
+ * "no endpoint" and every change of rate are written once, not per second. */
+static int s_logged_missing;
 
 static Result connect_port(Handle *session)
 {
@@ -228,6 +232,12 @@ static void query_service(void)
     result = connect_port(&session);
     if (R_FAILED(result))
     {
+        if (!s_logged_missing)
+        {
+            s_logged_missing = 1;
+            log_line("[SYNC] no SaltySD endpoint (SaltyNX with the NethFPS port, or the "
+                     "legacy name): the panel is left alone");
+        }
         s_status = 5;
         s_service_rate = 0;
         return;
@@ -379,6 +389,12 @@ static void publish(uint64_t now)
     s_panel_rate = wanted;
     s_candidate_since_ns = 0;
     s_status = 2;
+    {
+        char text[96];
+
+        snprintf(text, sizeof(text), "[SYNC] panel at %u Hz, game at %u fps", wanted, measured);
+        log_line(text);
+    }
 }
 
 static void service_pass(void)
@@ -422,8 +438,9 @@ static void reset_session(void)
     s_published_target = 0;
     s_panel_rate = 0;
     s_measured_fps = 0;
-    s_status = 0;          /* off is nothing yet, not what the last session said */
-    s_prefer_legacy = 0;   /* the next game asks the fork's port again */
+    s_status = 0;           /* off is nothing yet, not what the last session said */
+    s_prefer_legacy = 0;    /* the next game asks the fork's port again */
+    s_logged_missing = 0;
     clear_samples();
 }
 
