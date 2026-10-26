@@ -88,7 +88,11 @@ static void test_settings( const char *dir )
     assert( launcher_settings_write( &kv, &settings ) );
     launcher_settings_read( &kv, &back );
     assert( !back.fex );
+    /* FEX is written down when it is picked by hand: an empty key means the
+     * library's own choice, fex-variant.txt's, which is -1. */
     settings.fex = 1;
+    assert( launcher_settings_write( &kv, &settings ) && strstr( kv.text, "cpu=fex" ) );
+    settings.fex = -1;
     assert( launcher_settings_write( &kv, &settings ) && !strstr( kv.text, "cpu=" ) );
     load_text( &kv, "cpu=unknown\n" );
     launcher_settings_read( &kv, &settings );
@@ -250,7 +254,8 @@ static void test_settings( const char *dir )
     snprintf( path, sizeof(path), "%s/game.wine-nx.txt", dir );
     load_text( &kv, "# written by hand\n" );
     memset( &settings, 0, sizeof(settings) );
-    settings.fex = settings.four_cores = 1;
+    settings.fex = -1;
+    settings.four_cores = 1;
     settings.vsync = settings.lsfg_performance = settings.lsfg_flow = 1;
     strcpy( settings.title, "Need for Speed" );
     settings.hidden = 1;
@@ -268,7 +273,8 @@ static void test_settings( const char *dir )
 
     /* Back to the global settings: only the comment stays; without it the file goes. */
     memset( &settings, 0, sizeof(settings) );
-    settings.fex = settings.four_cores = 1;
+    settings.fex = -1;
+    settings.four_cores = 1;
     settings.d3d = LAUNCHER_D3D_DXVK;
     settings.verbose = settings.profile = settings.framebuffer = -1;
     settings.vsync = settings.lsfg_performance = settings.lsfg_flow = 1;
