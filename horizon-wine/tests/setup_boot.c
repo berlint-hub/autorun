@@ -420,6 +420,73 @@ static void test_hoc_rejection(void)
     remove_fixture(f.root);
 }
 
+/* A hoc.kip that is not a HOC loader -- another tool's KIP, or a download that
+ * stopped half way -- holds no settings to keep. Refusing to replace it left
+ * the step that had just offered "the bundled HOC defaults" unable to install
+ * anything at all, with nothing the screen could do about it. */
+static void test_unreadable_hoc(void)
+{
+    struct fixture f;
+    struct setup_boot_hoc_info info;
+    unsigned char other_kip[1024], half_written[1024];
+
+    memset(other_kip, 0, sizeof(other_kip));
+    memcpy(other_kip, "KIP1sysmodule", 14);
+    other_kip[16] = 1;
+    other_kip[23] = 1;                       /* a KIP, with no configuration in it */
+    memset(half_written, 'x', sizeof(half_written));
+
+    fixture_init(&f);
+    replace_file(f.root, HOC_KIP, other_kip, sizeof(other_kip));
+    assert(!setup_boot_hoc_probe(f.root, &f.manifest, &info));
+    assert(!*info.path && !info.compatible);  /* so the step offers the defaults */
+    f.options.loader = SETUP_BOOT_HOC;
+    f.options.preserve_hoc = 0;
+    assert(install(&f) == SETUP_BOOT_OK);
+    check_file(f.root, HOC_KIP, f.hoc, sizeof(f.hoc));
+    check_file(f.root, HOC_PREVIOUS, other_kip, sizeof(other_kip));
+    assert(!setup_boot_needs_update(f.root, &f.manifest, NULL));
+    remove_fixture(f.root);
+
+    fixture_init(&f);
+    replace_file(f.root, HOC_KIP, half_written, sizeof(half_written));
+    assert(!setup_boot_hoc_probe(f.root, &f.manifest, &info));
+    f.options.loader = SETUP_BOOT_HOC;
+    f.options.preserve_hoc = 0;
+    assert(install(&f) == SETUP_BOOT_OK);
+    check_file(f.root, HOC_KIP, f.hoc, sizeof(f.hoc));
+    check_file(f.root, HOC_PREVIOUS, half_written, sizeof(half_written));
+    remove_fixture(f.root);
+}
+
+/* The install stopped between moving hoc.kip aside and putting the new one in
+ * its place. What was moved aside goes back, and it need not be a HOC loader:
+ * before this, a half-written file there blocked every later install. */
+static void test_hoc_recovery_of_anything(void)
+{
+    struct fixture f;
+    unsigned char other_kip[1024];
+    char detail[256], absolute[1024];
+
+    memset(other_kip, 0, sizeof(other_kip));
+    memcpy(other_kip, "KIP1sysmodule", 14);
+    other_kip[16] = 1;
+    other_kip[23] = 1;
+    fixture_init(&f);
+    create_file(f.root, HOC_PREVIOUS, other_kip, sizeof(other_kip));
+    assert(path_join(absolute, f.root, HOC_KIP));
+    assert(!unlink(absolute));
+    assert(setup_boot_recover(f.root, detail, sizeof(detail)) == SETUP_BOOT_OK);
+    check_file(f.root, HOC_KIP, other_kip, sizeof(other_kip));
+    check_absent(f.root, HOC_PREVIOUS);
+    /* And the install that follows still works. */
+    f.options.loader = SETUP_BOOT_HOC;
+    assert(install(&f) == SETUP_BOOT_OK);
+    check_file(f.root, HOC_KIP, f.hoc, sizeof(f.hoc));
+    check_file(f.root, HOC_PREVIOUS, other_kip, sizeof(other_kip));
+    remove_fixture(f.root);
+}
+
 static void test_shared_hoc_package(void)
 {
     struct fixture f;
@@ -924,6 +991,8 @@ int main(void)
     test_update(1);
     test_update_detection();
     test_hoc_rejection();
+    test_unreadable_hoc();
+    test_hoc_recovery_of_anything();
     test_shared_hoc_package();
     test_hoc_probe();
     test_existing_kip(0);

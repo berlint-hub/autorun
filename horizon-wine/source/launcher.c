@@ -3457,7 +3457,7 @@ enum settings_row
 
 static void save_look( struct launcher *l )
 {
-    char path[512];
+    char path[512], order[16];
 
     launcher_kv_set( &l->look, "theme", NULL );
     /* What the library shows is worked out from the screen now, and the
@@ -3467,6 +3467,9 @@ static void save_look( struct launcher *l )
     launcher_kv_set( &l->look, "rows", NULL );
     launcher_kv_set( &l->look, "show-hidden", l->show_hidden ? "1" : "0" );
     launcher_kv_set( &l->look, "hide-missing", l->hide_missing ? "1" : NULL );
+    launcher_kv_set( &l->look, "favorites-only", l->favorites_only ? "1" : NULL );
+    if (l->sort_order) snprintf( order, sizeof(order), "%d", l->sort_order );
+    launcher_kv_set( &l->look, "sort-order", l->sort_order ? order : NULL );
 #ifdef WINE_NX_SWAP_POC
     launcher_kv_set( &l->look, "swap-poc-mb", NULL );
     launcher_kv_set( &l->look, "swap-in-game", NULL );
@@ -3474,6 +3477,24 @@ static void save_look( struct launcher *l )
     launcher_kv_set( &l->look, "browse", l->browse_dir );
     runtime_file( l, "launcher.txt", path, sizeof(path) );
     launcher_kv_save( &l->look, path );
+}
+
+/* The look read again: at startup and after a backup put one back. */
+static void load_look( struct launcher *l )
+{
+    char path[512];
+
+    runtime_file( l, "launcher.txt", path, sizeof(path) );
+    launcher_kv_load( &l->look, path );
+    l->show_hidden = launcher_kv_get_int( &l->look, "show-hidden", 0 ) == 1;
+    l->hide_missing = launcher_kv_get_int( &l->look, "hide-missing", 0 ) == 1;
+    l->favorites_only = launcher_kv_get_int( &l->look, "favorites-only", 0 ) == 1;
+    /* The order names one of four sorts by number; a file written by another
+     * build, or edited by hand, can name one that is not there. */
+    l->sort_order = launcher_kv_get_int( &l->look, "sort-order", 0 );
+    if (l->sort_order < 0 || l->sort_order > 3) l->sort_order = 0;
+    if (!launcher_kv_get( &l->look, "browse", l->browse_dir, sizeof(l->browse_dir) ) || !l->browse_dir[0])
+        snprintf( l->browse_dir, sizeof(l->browse_dir), "%s", LAUNCHER_DRIVE_C );
 }
 
 static const struct { const char *name, *by; } credits[] =
@@ -3722,15 +3743,9 @@ static void reload_defaults( struct launcher *l )
  * after a backup was put back over them. */
 static void reload_settings( struct launcher *l )
 {
-    char path[512];
     int i;
 
-    runtime_file( l, "launcher.txt", path, sizeof(path) );
-    launcher_kv_load( &l->look, path );
-    l->show_hidden = launcher_kv_get_int( &l->look, "show-hidden", 0 ) == 1;
-    l->hide_missing = launcher_kv_get_int( &l->look, "hide-missing", 0 ) == 1;
-    if (!launcher_kv_get( &l->look, "browse", l->browse_dir, sizeof(l->browse_dir) ) || !l->browse_dir[0])
-        snprintf( l->browse_dir, sizeof(l->browse_dir), "%s", LAUNCHER_DRIVE_C );
+    load_look( l );
     reload_defaults( l );
     for (i = 0; i < l->program_count; i++) load_program_settings( l, &l->programs[i] );
     rebuild_visible( l, -1 );
@@ -4184,10 +4199,14 @@ static void library_menu( struct launcher *l )
             break;
         case 1:
             l->favorites_only = action == UI_ACTION_RESET ? 0 : !l->favorites_only;
+            /* Filter and sort are part of the look, and the look is kept: a
+             * library sorted by most played comes back sorted by most played. */
+            save_look( l );
             break;
         case 2:
             if (action == UI_ACTION_RESET) l->sort_order = 0;
             else l->sort_order = (l->sort_order + (action == UI_ACTION_LEFT ? 3 : 1)) % 4;
+            save_look( l );
             break;
         case 3:
             if (action == UI_ACTION_CHOOSE) settings_menu( l );
@@ -4968,18 +4987,12 @@ int wine_nx_launcher_run( struct wine_nx_launcher_options *options, char *target
     struct launcher *l = &launcher;
     const void *font = NULL;
     size_t font_size = 0;
-    char path[512];
     int ret, i, added, missing;
     Uint32 started;
 
     memset( l, 0, sizeof(*l) );
     l->options = options;
-    runtime_file( l, "launcher.txt", path, sizeof(path) );
-    launcher_kv_load( &l->look, path );
-    l->show_hidden = launcher_kv_get_int( &l->look, "show-hidden", 0 ) == 1;
-    l->hide_missing = launcher_kv_get_int( &l->look, "hide-missing", 0 ) == 1;
-    if (!launcher_kv_get( &l->look, "browse", l->browse_dir, sizeof(l->browse_dir) ) || !l->browse_dir[0])
-        snprintf( l->browse_dir, sizeof(l->browse_dir), "%s", LAUNCHER_DRIVE_C );
+    load_look( l );
 
     started = SDL_GetTicks();
     /* The steps of coming up, on the card before each is taken: the launcher

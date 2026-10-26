@@ -650,16 +650,18 @@ done:
 static int recover_hoc(const char *root)
 {
     struct buffer current = {0}, previous = {0};
-    size_t offset;
-    uint32_t revision, version;
     int r = read_file(root, HOC_KIP, PAYLOAD_LIMIT, &current);
     if (r == 1) { free(current.data); return 1; }
     if (r < 0) return 0;
     r = read_file(root, HOC_PREVIOUS, PAYLOAD_LIMIT, &previous);
     if (!r) return 1;
     if (r < 0) return 0;
-    r = hoc_config(&previous, &offset, &revision, &version) &&
-        move_file(root, HOC_PREVIOUS, HOC_KIP);
+    /* Whatever was moved aside goes back: it is what hoc.kip held before the
+     * install began, and the write that did not finish never replaced it.
+     * Asking it to parse as a HOC loader as well left a half-written download
+     * -- or another tool's KIP -- blocking every later install with nothing
+     * the setup screen could do about it. */
+    r = move_file(root, HOC_PREVIOUS, HOC_KIP);
     free(previous.data);
     return r;
 }
@@ -667,15 +669,19 @@ static int recover_hoc(const char *root)
 static int replace_hoc(const char *root, const struct buffer *loader)
 {
     struct buffer current = {0}, check = {0};
-    size_t offset;
-    uint32_t revision, version;
     unsigned char hash[32];
     int r = read_file(root, HOC_KIP, PAYLOAD_LIMIT, &current), ok = 0;
     if (!r) return immutable_file(root, HOC_KIP, loader) == 1;
     if (r < 0) return 0;
     digest(loader->data, loader->size, hash);
     if (current.size == loader->size && same_hash(&current, hash)) { ok = 1; goto done; }
-    if (!hoc_config(&current, &offset, &revision, &version)) goto done;
+    /* Whatever is at hoc.kip is replaced. A HOC loader's settings have been
+     * copied into the new one already when they were asked for; a file that is
+     * not a HOC loader at all -- another tool's KIP, or a download that
+     * stopped half way -- holds no settings, and refusing to go on left the
+     * step that offered "the bundled HOC defaults" unable to install anything.
+     * It goes to HOC_PREVIOUS like everything else, so a write that fails puts
+     * it back. */
     if (!remove_file(root, HOC_STAGED) || !remove_file(root, HOC_PREVIOUS) ||
         !write_new(root, HOC_STAGED, loader->data, loader->size)) goto done;
     if (!move_file(root, HOC_KIP, HOC_PREVIOUS))
