@@ -41,14 +41,18 @@
 
 #include <stdint.h>
 
-/* 1 asks the panel to follow the game; 0 hands the target bytes back to whoever
- * had them. Safe to call before anything is mapped, and with no SaltySD there at
- * all -- then it only remembers the request and logs once. */
+/* 1 asks the panel to follow the game; 0 puts the panel back on 60 and hands the
+ * target bytes back to whoever had them. Safe to call before anything is
+ * mapped, and with no SaltySD there at all -- then it only remembers the request
+ * and logs once. */
 void wine_nx_display_sync_configure(int enabled);
 
 /* One frame's own work: the time between the last present returning and this
  * frame reaching its present, with no wait for the display in it. Called from
- * the present path, so it allocates nothing, locks nothing and never blocks. */
+ * the present path, so it allocates nothing, locks nothing and never blocks.
+ * Today that is the Vulkan path only (dlls/win32u/vulkan.c): a game drawing
+ * through OpenGL reports nothing, and the bridge stays at "measuring" instead of
+ * asking for a rate it has not seen. */
 void wine_nx_display_sync_note_frame(uint64_t busy_ns);
 
 /* 1 while the panel is being asked to follow the game. */
@@ -80,11 +84,12 @@ void wine_nx_display_sync_report(struct wine_nx_display_sync_report *report);
 /* The status as a sentence for the runtime log. Never NULL. */
 const char *wine_nx_display_sync_status_text(int status);
 
-/* The program is ending: the thread is waited for and closed, the shared block
- * is closed and both target bytes are left as they were found. A game that
- * crashes leaves its last rate in the block; the next session then finds a value
- * it did not write and leaves it to FPSLocker, which is the safe side of that
- * (and FPSLocker's own .dat reload usually overwrites it anyway). */
+/* The program is ending: the thread is waited for and closed, the panel is put
+ * back on 60, the shared block is closed and both target bytes are left as they
+ * were found. A game that crashes leaves its last rate in the block; the next
+ * session then finds a value it did not write and leaves it to FPSLocker, which
+ * is the safe side of that (and FPSLocker's own .dat reload usually overwrites
+ * it anyway). */
 void wine_nx_display_sync_shutdown(void);
 
 #ifdef WINE_NX_SALTY_TEST

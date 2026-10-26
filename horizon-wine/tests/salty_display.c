@@ -43,6 +43,10 @@ static int panel_follows = 1;
 static unsigned reply_rate;
 static int rate_reply_missing;
 static Handle shared_handle;
+/* What the bridge asked the panel to go back to, and how often: the command
+ * FPSLocker's own reset sends, used when the bytes are handed back. */
+static int rate_requests;
+static unsigned rate_request_value;
 
 static void *tls_data_pointer( uint8_t *cursor )
 {
@@ -86,11 +90,12 @@ static void reply_shared_handle( void )
 Result svcSendSyncRequest( Handle session )
 {
     const uint64_t *request = (const uint64_t *)(tls + REQUEST_OFFSET);
-    uint64_t command;
+    uint64_t command, value;
 
     assert( session != INVALID_HANDLE );
     assert( request[0] == 0x49434653u );   /* SFCI_MAGIC */
     command = request[1];
+    value = request[2];
     /* The reply replaces the request in the TLS, header and all. */
     memset( tls, 0, sizeof(tls) );
     switch (command)
@@ -101,6 +106,15 @@ Result svcSendSyncRequest( Handle session )
         return 0;
     case 7:
         reply_shared_handle();
+        return 0;
+    case 11:
+        /* SetDisplayRefreshRate: applied on the spot, no display sync needed --
+         * and refused by a console whose panel cannot be moved, which is the
+         * one the "does not follow" check models. */
+        rate_requests++;
+        rate_request_value = (unsigned)value;
+        if (!panel_follows) return 1;
+        reply_rate = (unsigned)value;
         return 0;
     default:
         return 1;
@@ -183,6 +197,16 @@ void *shmemGetAddr( SharedMemory *shared ) { return shared->addr; }
 /* A Handle is 32 bits on the console; a pointer is not, so the fake keeps a
  * table and hands out an index, the way the kernel would. */
 static Thread *created_threads[8];
+static int thread_creates;
+
+static int threads_live( void )
+{
+    int i, live = 0;
+
+    for (i = 0; i < (int)(sizeof(created_threads) / sizeof(created_threads[0])); i++)
+        if (created_threads[i]) live++;
+    return live;
+}
 
 static int thread_slot( Thread *thread )
 {
@@ -202,6 +226,7 @@ Result threadCreate( Thread *thread, void (*entry)( void * ), void *argument, vo
     for (i = 0; i < (int)(sizeof(created_threads) / sizeof(created_threads[0])); i++)
         if (!created_threads[i]) { slot = i; break; }
     assert( slot >= 0 );
+    thread_creates++;
     created_threads[slot] = thread;
     thread->created = 1;
     thread->finished = 0;
@@ -267,18 +292,30 @@ static void reset_console( void )
     operation_mode_fails = 0;
     panel_follows = 1;
     assert( omm_opened == 0 );
+    /* Every check closes what it opened: the thread is created once per
+     * program, and shutdown is what closes it. */
+    assert( !threads_live() );
+    thread_creates = 0;
     log_lines = log_missing = log_rates = log_unfollowed = 0;
     last_log[0] = 0;
     reply_rate = 60;
     rate_reply_missing = 0;
     shared_handle = 0x200;
+    rate_requests = 0;
+    rate_request_value = 0;
+}
+
+static void put_magic_at( size_t offset )
+{
+    uint32_t magic = 0x00465053u;   /* NX_FPS_MAGIC */
+
+    assert( offset + sizeof(magic) <= sizeof(shared_memory) );
+    memcpy( shared_memory + offset, &magic, sizeof(magic) );
 }
 
 static void put_magic( void )
 {
-    uint32_t magic = 0x00465053u;   /* NX_FPS_MAGIC */
-
-    memcpy( shared_memory + BLOCK_OFFSET, &magic, sizeof(magic) );
+    put_magic_at( BLOCK_OFFSET );
 }
 
 static unsigned target_value( void )
@@ -349,6 +386,157 @@ static int status( void )
 }
 
 /* ---- the checks ---------------------------------------------------------- */
+
+/* Asking twice is one thread, and turning the feature off and on again reuses
+ * it: the stack is mapped once for the life of the program, and shutdown is the
+ * one place it is taken away. */
+static void check_double_start( void )
+{
+    struct wine_nx_display_sync_report report;
+
+    reset_console();
+    put_magic();
+    wine_nx_display_sync_configure( 1 );
+    wine_nx_display_sync_configure( 1 );
+    assert( thread_creates == 1 );
+    run_for( 48, 12000 );
+    assert( target_value() == 50 );
+
+    /* Off puts the byte back at once; on again does not map a second thread. */
+    wine_nx_display_sync_configure( 0 );
+    assert( target_value() == 0 );
+    wine_nx_display_sync_report( &report );
+    assert( report.status == WINE_NX_DISPLAY_SYNC_NOTHING );
+    wine_nx_display_sync_configure( 1 );
+    assert( thread_creates == 1 );
+    run_for( 48, 12000 );
+    assert( target_value() == 50 );
+
+    wine_nx_display_sync_shutdown();
+    assert( target_value() == 0 );
+    wine_nx_display_sync_configure( 0 );
+}
+
+/* Shutdown on a bridge that was never turned on: nothing has been mapped, no
+ * thread exists, and nothing may be written. */
+static void check_shutdown_without_start( void )
+{
+    reset_console();
+    put_magic();
+    wine_nx_display_sync_shutdown();
+    assert( !shared_mapped && !threads_live() );
+    assert( target_value() == 0 && target_value_docked() == 0 );
+    wine_nx_display_sync_configure( 0 );
+}
+
+/* The shared memory is there but the FPSLocker block is not yet: the bridge
+ * says so and waits for the magic instead of writing at a guessed address. */
+static void check_late_block( void )
+{
+    reset_console();
+    wine_nx_display_sync_configure( 1 );
+    run_for( 48, 6000 );
+    assert( shared_mapped );
+    assert( target_value() == 0 );
+    settle();
+    assert( status() == WINE_NX_DISPLAY_SYNC_NO_BLOCK );
+
+    put_magic();   /* the plugin loads a moment later */
+    run_for( 48, 12000 );
+    assert( target_value() == 50 );
+    wine_nx_display_sync_shutdown();
+    wine_nx_display_sync_configure( 0 );
+}
+
+/* A magic too close to the end of the shared memory is not a block: the whole
+ * 310-byte structure has to fit, or the fields this bridge writes would land
+ * outside the mapping. Nothing is written, and the scan says so. */
+static void check_short_block_is_not_a_block( void )
+{
+    reset_console();
+    put_magic_at( sizeof(shared_memory) - 100u );   /* 210 bytes short */
+    wine_nx_display_sync_configure( 1 );
+    run_for( 48, 6000 );
+    settle();
+    assert( status() == WINE_NX_DISPLAY_SYNC_NO_BLOCK );
+    /* Nothing was written anywhere in the block, and nothing past the end. */
+    {
+        size_t i;
+        unsigned written = 0;
+
+        for (i = 0; i < sizeof(shared_memory); i++) if (shared_memory[i]) written++;
+        /* The magic itself ("FPS" and a NUL byte) and nothing else. */
+        assert( written == 3 );
+    }
+    wine_nx_display_sync_shutdown();
+    wine_nx_display_sync_configure( 0 );
+}
+
+/* SaltyNX starts after the game: no endpoint at first, and it joins in when it
+ * appears without a restart. */
+static void check_late_endpoint( void )
+{
+    reset_console();
+    put_magic();
+    all_ports_fail = 1;
+    wine_nx_display_sync_configure( 1 );
+    run_for( 48, 4000 );
+    settle();
+    assert( status() == WINE_NX_DISPLAY_SYNC_NO_ENDPOINT );
+    assert( target_value() == 0 );
+
+    all_ports_fail = 0;
+    run_for( 48, 12000 );
+    assert( shared_mapped );
+    assert( target_value() == 50 );
+    wine_nx_display_sync_shutdown();
+    assert( target_value() == 0 );
+    wine_nx_display_sync_configure( 0 );
+}
+
+/* Handing the bytes back also puts the panel back on 60, with the command
+ * FPSLocker's own reset sends: SaltyNX keeps the last rate it was given, so
+ * clearing the byte alone would leave a slow game's rate on the panel. */
+static void check_panel_reset( void )
+{
+    reset_console();
+    put_magic();
+    wine_nx_display_sync_configure( 1 );
+    run_for( 48, 12000 );
+    assert( target_value() == 50 );
+    assert( rate_requests == 0 );           /* nothing is asked while it follows */
+    wine_nx_display_sync_configure( 0 );
+    assert( target_value() == 0 );
+    assert( rate_requests == 1 && rate_request_value == 60 );
+    assert( reply_rate == 60 );             /* and the panel is really back on 60 */
+    /* Nothing was written any more, so closing the session asks for nothing. */
+    wine_nx_display_sync_shutdown();
+    assert( rate_requests == 1 );
+
+    /* A game that never needed a rate leaves the panel alone entirely. */
+    reset_console();
+    put_magic();
+    wine_nx_display_sync_configure( 1 );
+    run_for( 60, 12000 );
+    assert( target_value() == 0 && rate_requests == 0 );
+    wine_nx_display_sync_shutdown();
+    wine_nx_display_sync_configure( 0 );
+    assert( rate_requests == 0 );
+
+    /* Docked, the rate that was applied is put back to 60 as well -- the number
+     * SaltyNX's own cleanup uses when the app ends. */
+    reset_console();
+    put_magic();
+    operation_mode = AppletOperationMode_Console;
+    reply_rate = 120;
+    wine_nx_display_sync_configure( 1 );
+    run_for( 48, 12000 );
+    assert( target_value_docked() == 50 );
+    wine_nx_display_sync_shutdown();
+    assert( target_value_docked() == 0 );
+    assert( rate_requests == 1 && rate_request_value == 60 );
+    wine_nx_display_sync_configure( 0 );
+}
 
 /* No SaltySD on the console at all: nothing is written, nothing crashes, and
  * the report says so. */
@@ -710,12 +898,19 @@ static void check_off( void )
     assert( !wine_nx_display_sync_active() );
     run_for( 48, 4000 );
     assert( target_value() == 0 );
+    wine_nx_display_sync_shutdown();
 }
 
 int main( void )
 {
     check_no_endpoint();
     check_off();
+    check_panel_reset();
+    check_double_start();
+    check_shutdown_without_start();
+    check_late_block();
+    check_short_block_is_not_a_block();
+    check_late_endpoint();
     check_legacy_port();
     check_fast_game();
     check_docked();
