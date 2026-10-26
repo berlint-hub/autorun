@@ -299,14 +299,14 @@ static void test_settings( const char *dir )
     assert( !strcmp( path, "sdmc:/Games/Test/Game.wine-nx.txt" ) );
 }
 
-/* A game that runs the same as another takes its settings, but not its name or
- * whether it is hidden. */
+/* A game that runs the same as another takes how the other runs, but keeps its
+ * own name and whether it is hidden. */
 static void test_copy(void)
 {
     struct launcher_settings from, to;
 
     memset( &from, 0, sizeof(from) );
-    memset( &to, 0xff, sizeof(to) );
+    memset( &to, 0, sizeof(to) );
     snprintf( from.title, sizeof(from.title), "SPEED2" );
     from.hidden = 1;
     from.fex = 2;
@@ -316,13 +316,21 @@ static void test_copy(void)
     from.upscaling = 1;
     from.lsfg_enabled = 1;
     snprintf( from.dxvk_version, sizeof(from.dxvk_version), "2.4.1" );
+    snprintf( to.title, sizeof(to.title), "Mine" );
+    to.hidden = 0;
+    to.fex = 0;
 
     launcher_settings_copy( &to, &from );
-    assert( !to.title[0] && !to.hidden );
+    assert( !strcmp( to.title, "Mine" ) && to.hidden == 0 );   /* the game's own */
     assert( to.fex == 2 && to.d3d == LAUNCHER_D3D_DXVK_VKD3D && to.frame_limit == 3 && !to.vsync );
     assert( to.upscaling == 1 && to.lsfg_enabled == 1 && !strcmp( to.dxvk_version, "2.4.1" ) );
     /* The game it came from is left as it was. */
     assert( !strcmp( from.title, "SPEED2" ) && from.hidden == 1 );
+
+    /* A game that has no title of its own keeps having none. */
+    to.title[0] = 0;
+    launcher_settings_copy( &to, &from );
+    assert( !to.title[0] );
 }
 
 int main(void)
