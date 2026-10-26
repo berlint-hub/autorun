@@ -46,12 +46,21 @@ The FEX tree owns its build. Whoever changes it publishes the modules as the
 
 The `FEX variant` workflow (`.github/workflows/fex-variant.yml`) takes that
 release first, checks it against its checksums, and uploads it as the SD
-overlay artifact: unpack `switch/` over the SD card and the variant is live,
-`fex-variant.txt` and all. While no release is published, it builds the same
-modules from the same sources itself; the moment one appears, the download
-takes over without any change here. The compile fixes the FEX-2610 port needs
-(`tegra-x1-fixes.patch`) belong in the FEX branch itself; until they are
-merged there, both build paths apply them on top.
+overlay artifact; while no release is published, it builds the same modules
+from the same sources itself and publishes them as this repository's own
+`fex-opt` release, the publisher of last resort. The moment the FEX tree's
+release appears, the download takes over without any change here. The compile
+fixes the FEX-2610 port needs (`tegra-x1-fixes.patch`) belong in the FEX
+branch itself; until they are merged there, both build paths apply them on
+top.
+
+The main build takes the modules the same way (the `Fetch the tuned FEX` step
+of `build.yml`, into `package-autorun.py --extra`): whichever `fex-opt`
+release exists is checked and staged with `fex-variant.txt` set to `opt`, so
+the SD archive runs the tuned variant out of the box and returns to the
+pinned ones when that file is deleted. `verify-package.py` knows the two
+variant module names as the one thing in the package not from the DLL
+repository.
 
 ## A/B on the Switch
 

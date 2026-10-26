@@ -50,8 +50,13 @@ assert (dlls / "horizon-dlls/manifest.json").is_file(), f"{dlls} is not the DLL 
 for folder in ("drive_c/windows/system32", "drive_c/windows/syswow64", "drive_c/dxvk", "drive_c/dxvk64",
                "drive_c/vkd3d64"):
     if (stage / folder).is_dir():
+        # One exception: the tuned FEX variants, which are the FEX tree's own
+        # build and are fetched from its fex-opt release (horizon-wine/fex/
+        # variants-build.md). They have no DLL repository release of their own.
+        variant = re.compile(r"lib(arm64ec|wow64)fex-.+\.dll$")
         own = [p.name for p in (stage / folder).iterdir()
-               if p.suffix.lower() in (".dll", ".drv", ".acm", ".ax", ".ocx", ".sys", ".cpl", ".tlb")]
+               if p.suffix.lower() in (".dll", ".drv", ".acm", ".ax", ".ocx", ".sys", ".cpl", ".tlb")
+               and not variant.match(p.name)]
         assert not own, f"{folder} in the package holds modules the DLL repository provides: {own[:8]}"
 
 wow64 = card("drive_c/windows/system32/wow64.dll")

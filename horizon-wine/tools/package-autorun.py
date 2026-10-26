@@ -53,6 +53,8 @@ parser.add_argument('--amd64', type=Path,
 parser.add_argument('--x86', action='store_true', help='ship the x86-only runtime instead of the AMD64 one')
 parser.add_argument('--dlls', type=Path, default=root / 'horizon-dlls/switch/wine',
                     help="the DLL repository's card tree, to check the package against")
+parser.add_argument('--extra', type=Path,
+                    help='a switch/wine overlay to stage last: the tuned FEX modules a build fetched')
 parser.add_argument('--fixes', type=Path, default=root / 'game-fixes/switch/wine/game-fixes/index.json',
                     help="the game fixes repository's index, shipped so a card offline knows of them")
 args = parser.parse_args()
@@ -351,6 +353,14 @@ if args.x86:
 else:
     assert args.amd64.is_file(), f'{args.amd64} is missing; run build-amd64-components.sh, or pass --x86'
     print(f'AMD64 runtime build {merge_amd64(args.amd64, stage_root)} merged')
+# The tuned FEX modules a build fetched (build.sh, from the fex-opt release),
+# staged last beside the DLL repository's own: the variant file that came with
+# them turns them on. horizon-wine/fex/variants-build.md is why this exists.
+if args.extra:
+    assert args.extra.is_dir(), f'{args.extra} is missing'
+    shutil.copytree(args.extra, stage, dirs_exist_ok=True)
+    print(f'{args.extra} overlaid')
+
 subprocess.run([sys.executable, str(tools / 'verify-package.py'), str(stage), '--dlls', str(args.dlls)],
                check=True)
 

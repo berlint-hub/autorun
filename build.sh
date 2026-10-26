@@ -100,8 +100,15 @@ if [ "$dlls" = 1 ]; then
 fi
 
 step "Packaging"
-if [ "$x86" = 1 ]; then
-    python3 "$hw/tools/package-autorun.py" --x86
+# The tuned FEX modules a fetch left in fex/opt-modules (the fex-opt release)
+# are staged with the package; without them the pinned modules stand alone.
+if [ -d "$hw/fex/opt-modules/switch/wine" ]; then
+    set -- --extra "$hw/fex/opt-modules/switch/wine"
 else
-    python3 "$hw/tools/package-autorun.py"
+    set --
+fi
+if [ "$x86" = 1 ]; then
+    python3 "$hw/tools/package-autorun.py" --x86 "$@"
+else
+    python3 "$hw/tools/package-autorun.py" "$@"
 fi

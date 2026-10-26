@@ -117,6 +117,29 @@ jobs:
           key: toolchains-${{ hashFiles('horizon-wine/switch-dev.txt', 'horizon-wine/build-boot-bundle.sh', 'horizon-wine/mesosphere/**') }}
           restore-keys: toolchains-
 
+      # The tuned FEX modules, from whichever fex-opt release exists: the FEX
+      # tree's own first, this repository's fallback build second. They are
+      # staged into the package with the variant file that turns them on; a
+      # build reached without a release ships the pinned modules alone.
+      - name: Fetch the tuned FEX
+        shell: bash
+        run: |
+          mkdir -p horizon-wine/fex/opt-modules
+          for owner in berlint-hub/FEX berlint-hub/autorun; do
+            if curl -fsSL --retry 2 -o "$RUNNER_TEMP/fex-opt-modules.zip" \
+                 "https://github.com/$owner/releases/download/fex-opt/fex-opt-modules.zip" \
+               && curl -fsSL --retry 2 -o "$RUNNER_TEMP/SHA256SUMS" \
+                 "https://github.com/$owner/releases/download/fex-opt/SHA256SUMS"; then
+              (cd "$RUNNER_TEMP" && sha256sum -c SHA256SUMS)
+              python3 -c "import zipfile; zipfile.ZipFile(r'$RUNNER_TEMP/fex-opt-modules.zip').extractall('horizon-wine/fex/opt-modules')"
+              printf 'opt\n' > horizon-wine/fex/opt-modules/switch/wine/fex-variant.txt
+              echo "Tuned FEX taken from $owner:" \
+                "$(ls horizon-wine/fex/opt-modules/switch/wine/drive_c/windows/system32)" \
+                >> "$GITHUB_STEP_SUMMARY"
+              break
+            fi
+          done
+
       # build.sh tees to build.log so a failure can say why in annotations,
       # which the job's checks carry even when the log archive is out of reach.
       - name: Build
