@@ -19,7 +19,7 @@ on:
       - ".github/workflows/fex-variant.yml"
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   fex-opt:
@@ -156,3 +156,19 @@ jobs:
           name: fex-opt
           path: overlay/
           if-no-files-found: error
+
+      # The contract the builds pull: the same modules as fex-opt-modules.zip
+      # (laid out switch/wine/) and their checksums, in the fex-opt release.
+      # This is the fallback publisher; the FEX tree's own release takes
+      # precedence over it wherever it is looked for.
+      - name: Publish the fex-opt release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          (cd overlay && zip -qr ../fex-opt-modules.zip switch)
+          sha256sum fex-opt-modules.zip > SHA256SUMS
+          gh release create fex-opt fex-opt-modules.zip SHA256SUMS \
+            --title "Tuned Horizon FEX modules (fallback build)" \
+            --notes "libwow64fex-opt.dll and libarm64ecfex-opt.dll for Autorun's A/B switch (sdmc:/switch/wine/fex-variant.txt = opt). Built here while the FEX tree publishes none; berlint-hub/FEX's fex-opt release takes precedence." \
+            --latest=false 2>/dev/null || \
+            gh release upload fex-opt fex-opt-modules.zip SHA256SUMS --clobber
