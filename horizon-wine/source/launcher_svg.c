@@ -286,8 +286,8 @@ int svg_path_mask( const char *d, float view_x, float view_y, float view_w, floa
     unsigned short *coverage = NULL;
     int sy, ok = 0;
 
+    if (!mask || !d || width <= 0 || height <= 0 || view_w <= 0 || view_h <= 0) return 0;
     memset( mask, 0, (size_t)width * height );
-    if (width <= 0 || height <= 0 || view_w <= 0 || view_h <= 0) return 0;
     path.scale = SAMPLES * (width / view_w < height / view_h ? width / view_w : height / view_h);
     path.offset_x = (width * SAMPLES - view_w * path.scale) / 2 - view_x * path.scale;
     path.offset_y = (height * SAMPLES - view_h * path.scale) / 2 - view_y * path.scale;

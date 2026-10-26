@@ -1493,12 +1493,15 @@ int game_fixes_finish( const char *root, const char *program, unsigned int exit_
     fclose( file );
     if (ok && strcasecmp( setup, program )) return 0;    /* another program ran first */
     remove( path );
-    if (launcher_args_path( setup, args, sizeof(args) )) remove( args );
+    /* setup is only known when every line was read: a half-written file (the
+     * power went while applying) leaves it unread, and its arguments are then
+     * not this module's to remove. */
     if (!ok)
     {
         snprintf( line, size, "[FIXES] running.txt could not be read; removed" );
         return 1;
     }
+    if (launcher_args_path( setup, args, sizeof(args) )) remove( args );
     snprintf( value, sizeof(value), "%s %u %x", id, version, exit_code );
     ok = record( root, game, "game-fix", value, NULL );
     snprintf( line, size, "[FIXES] %s %u for %s %s (exit code 0x%x)%s", id, version, base_name( game ),

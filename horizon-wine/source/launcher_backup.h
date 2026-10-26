@@ -57,7 +57,8 @@ int launcher_backup_list( const char *runtime_dir, struct launcher_backup *backu
 int launcher_backup_count( const char *runtime_dir );
 
 /* Puts every file of the backup back where it came from, and counts them.
- * Returns 1, or 0 with `error` set to the file that could not be put back. */
+ * Returns 1, or 0 with `error` set to the file that could not be put back; the
+ * files before that one stay put back, and `restored` counts them. */
 int launcher_backup_restore( const char *runtime_dir, const char *name,
                              unsigned int *restored, char *error, size_t error_size );
 

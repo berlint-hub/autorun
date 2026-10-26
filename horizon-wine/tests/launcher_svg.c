@@ -76,6 +76,15 @@ int main( int argc, char **argv )
     assert( !svg_path_mask( "M10 10 A 5 5 0 2 0 20 20", 0, 0, 30, 30, 30, 30, mask ) );
     for (x = 0; x < 900; x++) assert( !mask[x] );
 
+    /* Nothing to draw into is refused before the mask is touched: a size of
+     * zero or less must not reach the memset the rasteriser starts with. */
+    assert( !svg_path_mask( "M0 0h4v4h-4z", 0, 0, 8, 8, 0, 8, mask ) );
+    assert( !svg_path_mask( "M0 0h4v4h-4z", 0, 0, 8, 8, 8, 0, mask ) );
+    assert( !svg_path_mask( "M0 0h4v4h-4z", 0, 0, 8, 8, -1, 8, mask ) );
+    assert( !svg_path_mask( "M0 0h4v4h-4z", 0, 0, 0, 8, 8, 8, mask ) );
+    assert( !svg_path_mask( "M0 0h4v4h-4z", 0, 0, 8, 8, 8, 8, NULL ) );
+    assert( !svg_path_mask( NULL, 0, 0, 8, 8, 8, 8, mask ) );
+
     /* The embedded icons fill something at the sizes the launcher draws. */
     assert( area( icon_gamepad_modern.d, 576, 30 ) > 100 && area( icon_grid.d, 512, 30 ) > 100 );
     if (argc > 1)

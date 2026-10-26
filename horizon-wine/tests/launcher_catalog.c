@@ -241,6 +241,45 @@ static void check_order_beyond_the_counter(void)
     unlink( path );
 }
 
+/* A value with a % and only one digit after it is not one this file writes: the
+ * loader says so rather than decoding the digit and stepping over whatever
+ * followed it, which read past the value's end. */
+static void check_half_an_escape(void)
+{
+    static const char *const half[] =
+    {
+        "title=a%4\n",
+        "title=a%4z\n",
+        "title=a%4 z\n",
+    };
+    char path[] = "/tmp/wine-nx-catalog-escape-XXXXXX";
+    struct launcher_catalog catalog;
+    FILE *file;
+    int fd = mkstemp( path );
+    size_t i;
+
+    assert( fd >= 0 );
+    close( fd );
+    for (i = 0; i < sizeof(half) / sizeof(half[0]); i++)
+    {
+        file = fopen( path, "w" );
+        assert( file );
+        assert( fprintf( file, "version=%d\nnext-id=3\n\n[game 1]\npath=sdmc:/games/a.exe\n%s",
+                         LAUNCHER_CATALOG_VERSION, half[i] ) > 0 );
+        assert( !fclose( file ) );
+        assert( launcher_catalog_load( &catalog, path ) == LAUNCHER_CATALOG_INVALID );
+    }
+    /* Two digits, and the same escape written with the other case, are read. */
+    file = fopen( path, "w" );
+    assert( file );
+    assert( fprintf( file, "version=%d\nnext-id=3\n\n[game 1]\npath=sdmc:/games/a.exe\ntitle=a%%4A\n",
+                     LAUNCHER_CATALOG_VERSION ) > 0 );
+    assert( !fclose( file ) );
+    assert( launcher_catalog_load( &catalog, path ) == LAUNCHER_CATALOG_OK );
+    assert( catalog.count == 1 && !strcmp( catalog.entries[0].title, "aJ" ) );
+    unlink( path );
+}
+
 int main(void)
 {
     struct launcher_catalog written, read;
@@ -300,6 +339,7 @@ int main(void)
     check_play_time();
     check_older_catalog();
     check_order_beyond_the_counter();
+    check_half_an_escape();
     puts( "launcher catalog: entries, art, ordering, play time, legacy import and address space passed" );
     return 0;
 }

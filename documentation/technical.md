@@ -198,7 +198,12 @@ it is about to replace first, so a restore can be undone by restoring that
 copy. The launcher then re-reads the look, the runtime defaults
 (`config/settings.json`) and every game's settings without a restart; the
 library, the artwork and the play time are not part of a copy and are never
-written by one.
+written by one. A restore that stops at a file (a full card, or a path a
+manifest may not name) leaves the files before it back and says how many; the
+launcher reads its settings again then too, so what it shows is what the card
+holds. A manifest line longer than a path is no line this launcher wrote: the
+backup is not listed and not restored rather than being put back with a file
+missing from it.
 
 ## Logs
 

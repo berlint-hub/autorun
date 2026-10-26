@@ -333,6 +333,14 @@ static void check_restore_refusals(void)
     read_text( "outside.txt", text, sizeof(text) );
     assert( !strcmp( text, "kept\n" ) );   /* the file it pointed at is untouched */
 
+    /* A file the manifest may put back, and then one it may not: the first
+     * stays back, and the caller is told so it can read the settings again. */
+    write_text( "runtime/backups/2026-12-04-1000/manifest.txt",
+                "0000\truntime/launcher.txt\n0001\t../escaped.txt\n" );
+    assert( !launcher_backup_restore( "runtime", "2026-12-04-1000", &restored, error, sizeof(error) ) );
+    assert( strstr( error, "may put back" ) );
+    assert( restored == 1 );
+
     write_text( "runtime/backups/2026-12-04-1000/manifest.txt", "" );
     assert( !launcher_backup_restore( "runtime", "2026-12-04-1000", &restored, error, sizeof(error) ) );
     assert( strstr( error, "no files" ) );

@@ -249,6 +249,12 @@ int main( int argc, char **argv )
     CHECK( (text = slurp( DRIVE_C "/WarCraft III/war3.wine-nx.txt", NULL )) && strstr( text, path ) );
     free( text );
 
+    /* running.txt left half written by a power cut: it goes, and the line says
+     * so; nothing is guessed at from lines that could not be read. */
+    put( ROOT "/" GAME_FIXES_RUNNING, "" );
+    CHECK( game_fixes_finish( ROOT, setup, 0, line, sizeof(line) ) && strstr( line, "could not be read" ) );
+    CHECK( access( ROOT "/" GAME_FIXES_RUNNING, F_OK ) != 0 );
+
     /* A setup that reports a failed step is offered again. */
     CHECK( game_fixes_apply( ROOT, war3, fix, setup, sizeof(setup), why, sizeof(why) ) == 1 );
     CHECK( game_fixes_finish( ROOT, setup, 1, line, sizeof(line) ) && strstr( line, "had a step fail" ) );

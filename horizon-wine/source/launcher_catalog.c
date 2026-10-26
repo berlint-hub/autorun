@@ -17,6 +17,14 @@ static void trim( char *text )
     *end = 0;
 }
 
+static int hex_value( unsigned char c )
+{
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+    return -1;
+}
+
 static int copy_value( char *out, size_t size, const char *value )
 {
     size_t i = 0;
@@ -25,9 +33,12 @@ static int copy_value( char *out, size_t size, const char *value )
         unsigned char c = *value++;
         if (c == '%')
         {
-            unsigned int v;
-            if (sscanf( value, "%2x", &v ) != 1) return 0;
-            c = v;
+            /* Both digits write_value puts after a % are here or the line is not
+             * one it wrote: reading a single digit and stepping two bytes over
+             * it would walk past the value's end and decode the line before. */
+            int high = hex_value( (unsigned char)value[0] ), low;
+            if (high < 0 || (low = hex_value( (unsigned char)value[1] )) < 0) return 0;
+            c = (unsigned char)(high * 16 + low);
             value += 2;
         }
         if (!c || c == '\r' || c == '\n' || i + 1 >= size) return 0;

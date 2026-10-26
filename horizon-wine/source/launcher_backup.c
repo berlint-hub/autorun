@@ -583,6 +583,9 @@ int launcher_backup_restore( const char *runtime_dir, const char *name,
     state.error_size = error_size;
     if (!read_manifest( manifest, put_file_back, &state, &files ))
     {
+        /* What was put back before the failure stays where it is: the caller
+         * needs the count to read the settings again. */
+        if (restored) *restored = state.restored;
         if (!error || !error_size) return 0;
         if (!error[0]) set_error( error, error_size, "Could not read the backup %s", name );
         return 0;

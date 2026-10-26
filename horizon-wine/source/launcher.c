@@ -3769,7 +3769,18 @@ static void restore_settings( struct launcher *l, struct ui_list *list )
     }
     if (!launcher_backup_restore( l->options->runtime_dir, backups[chosen].name, &restored, error, sizeof(error) ))
     {
-        ui_message( &l->ui, "Restore settings", error );
+        /* Files before the one that failed are back on the card already: what
+         * the launcher holds is read again, or the next save writes the old
+         * values over them. */
+        if (restored)
+        {
+            reload_settings( l );
+            snprintf( text, sizeof(text), "%s\n\n%u %s put back before it stopped; the rest of the settings "
+                                          "are as they were.", error, restored,
+                      restored == 1 ? "file was" : "files were" );
+            ui_message( &l->ui, "Restore settings", text );
+        }
+        else ui_message( &l->ui, "Restore settings", error );
         return;
     }
     /* The copy that was just read goes with the oldest of the rotation. */
