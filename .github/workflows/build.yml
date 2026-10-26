@@ -21,7 +21,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            libsdl2-dev libsdl2-ttf-dev libpng-dev fonts-dejavu-core
+            libsdl2-dev libsdl2-ttf-dev libpng-dev fonts-dejavu-core libssl-dev
 
       # The FEX modules are not built here: this checks that the workflows only
       # take the FEX work's release, and that the docs still say who builds and
@@ -67,6 +67,11 @@ jobs:
             horizon-wine/tests/launcher_backup.c horizon-wine/source/launcher_backup.c \
             -o launcher_backup
           ./launcher_backup
+
+      # The boot setup: the Hekate entry it writes, the loader it replaces, and
+      # what it puts back when a power cut stops it half way.
+      - name: Boot setup and recovery
+        run: python3 horizon-wine/tests/check_setup_boot.py
 
       - name: DirectInput input (raw payload and low-level hooks)
         run: |
