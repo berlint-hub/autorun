@@ -64,10 +64,12 @@ repository.
 
 ## A/B on the Switch
 
-`sdmc:/switch/wine/fex-variant.txt` holds the variant suffix (`opt`) or is
-absent/empty for stock. The runtime loads the variant's WoW64/ARM64EC CPU
-module when the file names a suffix and that module is present; if the module
-is missing it falls back to the stock one. The start log's `[CPU]` line says
+The per-game choice is in Game Settings → Emulation → **CPU translator**:
+Box64, FEX (the stock modules), or FEX optimized (the `-opt` ones). A game
+without its own choice follows `sdmc:/switch/wine/fex-variant.txt`: a suffix
+(`opt`) or absent/empty for stock. The runtime loads the variant's
+WoW64/ARM64EC CPU module when one is named and present; if the module is
+missing it falls back to the stock one. The start log's `[CPU]` line says
 which one runs:
 
 ```
@@ -75,4 +77,5 @@ which one runs:
 [CPU] FEX (libwow64fex.dll)         <- stock
 ```
 
-Delete the file (or write `stock`) to go back; no reinstalling is needed.
+Pick a translator per game, or delete the file to return the unpinned ones
+to the stock modules; no reinstalling is needed.

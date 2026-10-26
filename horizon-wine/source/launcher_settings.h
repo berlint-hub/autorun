@@ -185,7 +185,7 @@ struct launcher_settings
     int verbose;      /* verbose traces */
     int profile;      /* the sampling profiler */
     int fast_sync;
-    int fex;
+    int fex;      /* 0: Box64, 1: FEX, 2: FEX optimized, -1: fex-variant.txt decides */
     int four_cores;
     int lazy_file_views;  /* views of files read from the card on demand */
     int framebuffer;  /* 1: windows go to the framebuffer, 0: through the compositor */
@@ -470,7 +470,10 @@ static inline void launcher_settings_read( const struct launcher_kv *kv, struct 
     settings->verbose = launcher_setting_state( kv, "verbose" );
     settings->profile = launcher_setting_state( kv, "profile" );
     settings->fast_sync = launcher_kv_get( kv, "sync", value, sizeof(value) ) && !strcasecmp( value, "horizon" );
-    settings->fex = !launcher_kv_get( kv, "cpu", value, sizeof(value) ) || strcasecmp( value, "box64" );
+    if (!launcher_kv_get( kv, "cpu", value, sizeof(value) )) settings->fex = -1;
+    else if (!strcasecmp( value, "box64" )) settings->fex = 0;
+    else if (!strcasecmp( value, "fex-opt" )) settings->fex = 2;
+    else settings->fex = 1;
     settings->four_cores = launcher_setting_state( kv, "four-cores" ) != 0;
     settings->lazy_file_views = launcher_setting_state( kv, "lazy-file-views" ) == 1;
     settings->framebuffer = -1;
@@ -582,7 +585,9 @@ static inline int launcher_settings_write( struct launcher_kv *kv, const struct 
            launcher_kv_set( kv, "verbose", states[settings->verbose + 1] ) &&
            launcher_kv_set( kv, "profile", states[settings->profile + 1] ) &&
            launcher_kv_set( kv, "sync", settings->fast_sync ? "horizon" : NULL ) &&
-           launcher_kv_set( kv, "cpu", settings->fex ? NULL : "box64" ) &&
+           launcher_kv_set( kv, "cpu", settings->fex < 0 ? NULL :
+                                       settings->fex == 0 ? "box64" :
+                                       settings->fex == 2 ? "fex-opt" : "fex" ) &&
            launcher_kv_set( kv, "four-cores", settings->four_cores ? NULL : "0" ) &&
            launcher_kv_set( kv, "lazy-file-views", settings->lazy_file_views ? "1" : NULL ) &&
            launcher_kv_set( kv, "windows", settings->framebuffer < 0 ? NULL :

@@ -589,6 +589,9 @@ int wine_nx_runtime_verbose;
 static enum launcher_d3d_renderer runtime_d3d;
 static enum dxvk_source runtime_dxvk_source;
 static int runtime_fex;
+/* The program's CPU translator choice: "opt", "" for the stock modules, or
+ * NULL when it has none and fex-variant.txt decides. */
+static const char *runtime_fex_variant;
 static int runtime_four_cores;
 static int runtime_dxvk_hud;
 static char runtime_vkd3d_version[32];
@@ -3181,18 +3184,27 @@ static const char *runtime_fex_cpu_module( int amd64 )
     if (!read)
     {
         read = 1;
-        if ((file = fopen( WINE_ROOT "/fex-variant.txt", "r" )))
+        if (runtime_fex_variant)
         {
-            if (fgets( line, sizeof(line), file ))
-                for (i = 0; line[i] && line[i] != '\n' && line[i] != '\r' && at + 1 < sizeof(variant); i++)
-                {
-                    if (!at && (line[i] == ' ' || line[i] == '\t' || line[i] == '-')) continue;
-                    variant[at++] = line[i];
-                }
-            fclose( file );
+            /* The program's own choice in Game Settings pins the modules. */
+            snprintf( variant, sizeof(variant), "%s", runtime_fex_variant );
+            if (variant[0]) log_line( "[CPU] the program's settings name the \"%s\" modules", variant );
         }
-        variant[at] = 0;
-        if (variant[0]) log_line( "[CPU] fex-variant.txt names the \"%s\" modules", variant );
+        else
+        {
+            if ((file = fopen( WINE_ROOT "/fex-variant.txt", "r" )))
+            {
+                if (fgets( line, sizeof(line), file ))
+                    for (i = 0; line[i] && line[i] != '\n' && line[i] != '\r' && at + 1 < sizeof(variant); i++)
+                    {
+                        if (!at && (line[i] == ' ' || line[i] == '\t' || line[i] == '-')) continue;
+                        variant[at++] = line[i];
+                    }
+                fclose( file );
+            }
+            variant[at] = 0;
+            if (variant[0]) log_line( "[CPU] fex-variant.txt names the \"%s\" modules", variant );
+        }
     }
     if (variant[0])
     {
@@ -4952,7 +4964,8 @@ int main( int argc, char **argv )
             horizon_fast_sync_enabled = settings.fast_sync;
             wine_nx_lazy_file_views = settings.lazy_file_views;
 #ifdef WINE_NX_FEX
-            runtime_fex = settings.fex;
+            runtime_fex = settings.fex != 0;
+            runtime_fex_variant = settings.fex == 2 ? "opt" : settings.fex == 1 ? "" : NULL;
 #endif
             runtime_four_cores = settings.four_cores;
             if (settings.verbose >= 0) wine_nx_runtime_verbose = settings.verbose;

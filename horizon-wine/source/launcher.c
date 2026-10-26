@@ -358,6 +358,23 @@ static void runtime_file( const struct launcher *l, const char *name, char *out,
     snprintf( out, size, "%s/%s", l->options->runtime_dir, name );
 }
 
+/* The CPU translator a program without its own choice runs. fex-variant.txt at
+ * the runtime root names the tuned FEX modules when it has any content, and
+ * says which of the two FEX entries its games fall back to. */
+static int cpu_default_index( const struct launcher *l )
+{
+    char path[520], line[64] = {0};
+    FILE *file;
+
+    runtime_file( l, "fex-variant.txt", path, sizeof(path) );
+    if ((file = fopen( path, "r" )))
+    {
+        if (!fgets( line, sizeof(line), file )) line[0] = 0;
+        fclose( file );
+    }
+    return line[0] && line[0] != '\n' && line[0] != '\r' ? 2 : 1;
+}
+
 /* Nonzero when the line reached the card, which the handoff in start_program
  * has to know before it gives the console away. */
 static int write_line( const char *path, const char *text )
@@ -444,7 +461,9 @@ static void load_program_settings( struct launcher *l, struct program *p )
     p->own_files = 0;
     memset( &p->settings, 0, sizeof(p->settings) );
     p->settings.verbose = p->settings.profile = p->settings.framebuffer = -1;
-    p->settings.fex = p->settings.four_cores = 1;
+    p->settings.four_cores = 1;
+    /* -1: no CPU translator choice of its own; fex-variant.txt decides. */
+    p->settings.fex = -1;
     if (launcher_program_settings_path( l->options->runtime_dir, p->path, path, sizeof(path) ) &&
         launcher_kv_load( &kv, path ))
     {
@@ -2471,10 +2490,15 @@ static int program_menu_run( struct launcher *l, struct program *p, char *target
 #ifdef WINE_NX_FEX
         if (x86 || x64)
         {
-            ADD_ROW( ROW_CPU, SECTION_EMULATION, "CPU translator", "Translator used to run this program." );
+            static const char *const cpu_names[] = { "Box64", "FEX", "FEX optimized" };
+            int cpu = p->settings.fex < 0 ? cpu_default_index( l ) : p->settings.fex;
+
+            ADD_ROW( ROW_CPU, SECTION_EMULATION, "CPU translator",
+                     "Translator used to run this program: Box64, the stock FEX modules, or the "
+                     "tuned FEX build. Left alone, fex-variant.txt decides." );
             row->kind = UI_ROW_DROPDOWN;
-            row->choices = 2;
-            snprintf( row->value, sizeof(row->value), "%s", p->settings.fex ? "FEX" : "Box64" );
+            row->choices = 3;
+            snprintf( row->value, sizeof(row->value), "%s", cpu_names[cpu] );
         }
 #endif
         ADD_ROW( ROW_FOUR_CORES, SECTION_EMULATION, "4-core support",
@@ -2905,24 +2929,34 @@ static int program_menu_run( struct launcher *l, struct program *p, char *target
 #ifdef WINE_NX_FEX
         case ROW_CPU:
         {
-            struct ui_row items[2] = {0};
+            struct ui_row items[3] = {0};
             int selected;
 
-            if (action == UI_ACTION_RESET) selected = 1;
+            if (action == UI_ACTION_RESET) selected = -1;
             else if (action == UI_ACTION_CHOOSE)
             {
                 snprintf( items[0].label, sizeof(items[0].label), "Box64" );
                 snprintf( items[1].label, sizeof(items[1].label), "FEX" );
-                selected = ui_settings_dropdown( ui, &list, items, 2, p->settings.fex );
+                snprintf( items[2].label, sizeof(items[2].label), "FEX optimized" );
+                selected = ui_settings_dropdown( ui, &list, items, 3,
+                                                 p->settings.fex < 0 ? cpu_default_index( l ) : p->settings.fex );
                 if (selected < 0) break;
             }
             else break;
-            runtime_file( l, x64 ? "drive_c/windows/system32/libarm64ecfex.dll" :
-                                  "drive_c/windows/system32/libwow64fex.dll", path, sizeof(path) );
-            if (selected && !file_exists( path ))
+            if (selected > 0)
             {
-                ui_message( ui, "FEX", "Install the FEX runtime package first." );
-                break;
+                const char *module = x64 ? (selected == 2 ? "drive_c/windows/system32/libarm64ecfex-opt.dll" :
+                                                           "drive_c/windows/system32/libarm64ecfex.dll") :
+                                           (selected == 2 ? "drive_c/windows/system32/libwow64fex-opt.dll" :
+                                                           "drive_c/windows/system32/libwow64fex.dll");
+                runtime_file( l, module, path, sizeof(path) );
+                if (!file_exists( path ))
+                {
+                    ui_message( ui, selected == 2 ? "FEX optimized" : "FEX",
+                                selected == 2 ? "Install the tuned FEX modules first." :
+                                                "Install the FEX runtime package first." );
+                    break;
+                }
             }
             p->settings.fex = selected;
             save_program_settings( l, p );

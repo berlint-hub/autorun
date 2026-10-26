@@ -143,10 +143,11 @@ jobs:
           Vylepšený FEX (Tegra X1) pro A/B porovnání s původním.
 
           Rozbal překryv switch/ na SD kartu (na stejné místo jako archiv
-          autorun). Po rozbalení běží vylepšený FEX; v logu ho poznáš podle
+          autorun). Překladač se vybírá v Game Settings → Emulation → CPU
+          translator: Box64, FEX (původní), FEX optimized (vylepšený).
+          fex-variant.txt je výchozí pro hry bez vlastního výběru (obsah
+          "opt" = vylepšený). V logu poznáš, co běží:
               [CPU] FEX (libwow64fex-opt.dll)
-          Návrat k původnímu: smaž switch/wine/fex-variant.txt (nebo do něj
-          napiš "stock").
           EOF
           ls -la "$stage/drive_c/windows/system32"
 
