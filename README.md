@@ -163,6 +163,9 @@ The touchscreen works everywhere too.
 - pick the CPU translator (Box64, FEX, or the Switch-tuned FEX), and give it
   its own controls.
 
+A window smaller than the desktop — an FMV movie player, say — stretches over
+the whole screen the same way, with no side bars.
+
 **Settings (−)**: show hidden games, the controls every game uses by default,
 a [SteamGridDB](https://www.steamgriddb.com) API key for artwork, returning to
 Autorun when a game ends, updates, the Windows DLLs, and the credits.

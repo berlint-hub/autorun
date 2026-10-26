@@ -436,11 +436,62 @@ static void *presenter_thread( void *arg )
             drawn[i] = layer;
             count++;
         }
-        /* The desktop may be larger than the panel; each frame fits it on,
-         * centred, and the input maps through the same transform. */
-        int desktop_w, desktop_h;
+        /* The desktop may be larger than the panel; the fit maps the
+         * picture the program is showing onto the whole panel and input maps
+         * through the same transform.  The picture is the largest window on
+         * the desktop (the topmost of the largest), not the desktop: a game
+         * or an FMV movie that runs in a window of its own -- a 640x480
+         * player on a 1280x720 desktop, GDI movies especially -- stretches
+         * over the panel the way a surface that holds the screen does,
+         * instead of showing as a box in the middle.  No window visible: the
+         * desktop itself is the picture, as before. */
+        int desktop_w, desktop_h, pic_w, pic_h, pic_x, pic_y, win_w, win_h;
+        struct wine_nx_layer *picture = NULL;
+        long long picture_area = 0;
+
         wine_nx_desktop_size( &desktop_w, &desktop_h );
-        wine_nx_present_fit( desktop_w, desktop_h, 0, 0, NULL, NULL, NULL, NULL );
+        for (i = 0; i < count; i++)
+        {
+            long long area;
+
+            layer = drawn[i];
+            win_w = layer->visible_width < layer->width ? layer->visible_width : layer->width;
+            win_h = layer->visible_height < layer->height ? layer->visible_height : layer->height;
+            /* Bottom first, so the topmost of the largest windows wins. */
+            if ((area = (long long)win_w * win_h) >= picture_area)
+            {
+                picture = layer;
+                picture_area = area;
+            }
+        }
+        if (picture)
+        {
+            pic_x = picture->x;
+            pic_y = picture->y;
+            pic_w = picture->visible_width < picture->width ? picture->visible_width : picture->width;
+            pic_h = picture->visible_height < picture->height ? picture->visible_height : picture->height;
+        }
+        else
+        {
+            pic_x = pic_y = 0;
+            pic_w = desktop_w;
+            pic_h = desktop_h;
+        }
+        wine_nx_present_fit( pic_w, pic_h, pic_x, pic_y, NULL, NULL, NULL, NULL );
+        {
+            /* The window geometry, whenever it changes: what a screenshot
+               taken with Minus+R at the same moment lines up with. */
+            static int logged_w, logged_h, logged_x, logged_y;
+
+            if (pic_w != logged_w || pic_h != logged_h || pic_x != logged_x || pic_y != logged_y)
+            {
+                comp_log( "[NXWIN] the picture is %dx%d at %d,%d", pic_w, pic_h, pic_x, pic_y );
+                logged_w = pic_w;
+                logged_h = pic_h;
+                logged_x = pic_x;
+                logged_y = pic_y;
+            }
+        }
         for (i = 0; i < count; i++)
         {
             int x0, y0, x1, y1;
