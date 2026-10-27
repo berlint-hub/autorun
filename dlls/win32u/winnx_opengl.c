@@ -20,6 +20,7 @@
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <pthread.h>
 
 #include "ntstatus.h"
@@ -167,6 +168,81 @@ static void nx_log( const char *format, ... )
     vsnprintf( buffer, sizeof(buffer), format, args );
     va_end( args );
     wine_nx_runtime_trace( buffer );
+}
+
+/* What the program's own context turned out to be, said once, at its first
+ * swap: the GL and GLSL versions it was given, whether that is a core or a
+ * compatibility profile, and how long the extension list it reads is. All four
+ * are what a game of the 2000s quietly depends on: GLSL 1.20 shaders do not
+ * compile in a core profile at all, and the extension list is what such a game
+ * copies into a buffer of its era's size -- the launcher's year switch is what
+ * shortens that list, and this line is how a change to it is seen. */
+static void nx_note_program_gl( void )
+{
+    const char *version, *shading, *extensions;
+    GLint profile = -1, count = 0;
+    static int noted;
+
+    if (InterlockedExchange( &noted, 1 ) || !funcs->p_glGetString) return;
+    version = (const char *)funcs->p_glGetString( GL_VERSION );
+    shading = (const char *)funcs->p_glGetString( GL_SHADING_LANGUAGE_VERSION );
+    extensions = (const char *)funcs->p_glGetString( GL_EXTENSIONS );
+    if (funcs->p_glGetIntegerv) funcs->p_glGetIntegerv( GL_CONTEXT_PROFILE_MASK, &profile );
+    if (!extensions)
+    {
+        /* A core profile has no list to read: the extensions are numbered. */
+        if (funcs->p_glGetIntegerv) funcs->p_glGetIntegerv( GL_NUM_EXTENSIONS, &count );
+        nx_log( "[NXGL] the program's OpenGL: %s (GLSL %s, %s profile), %d extensions by index",
+                version ? version : "?", shading ? shading : "?",
+                profile == GL_CONTEXT_CORE_PROFILE_BIT ? "a core" : "a compatibility", (int)count );
+        return;
+    }
+    nx_log( "[NXGL] the program's OpenGL: %s (GLSL %s, %s profile), its extension list is %u bytes",
+            version ? version : "?", shading ? shading : "?",
+            profile == GL_CONTEXT_CORE_PROFILE_BIT ? "a core" : "a compatibility",
+            (unsigned int)strlen( extensions ) );
+}
+
+/* The shape of the context the program asked for, before the driver answers:
+ * a legacy program asks for a compatibility profile and no version, and what
+ * it gets back is the driver's own default. */
+static void nx_note_context_request( int format, const EGLint *attribs, const EGLint *end )
+{
+    const char *profile = "the driver's default profile";
+    int major = 0, minor = 0;
+
+    for (; attribs != end; attribs += 2)
+    {
+        switch (attribs[0])
+        {
+        case EGL_CONTEXT_OPENGL_PROFILE_MASK_KHR:
+            if (attribs[1] & EGL_CONTEXT_OPENGL_COMPATIBILITY_PROFILE_BIT_KHR) profile = "a compatibility profile";
+            else if (attribs[1] & EGL_CONTEXT_OPENGL_CORE_PROFILE_BIT_KHR) profile = "a core profile";
+            break;
+        case EGL_CONTEXT_MAJOR_VERSION_KHR:
+            major = attribs[1];
+            break;
+        case EGL_CONTEXT_MINOR_VERSION_KHR:
+            minor = attribs[1];
+            break;
+        }
+    }
+    if (major) nx_log( "[NXGL] the program asks for OpenGL %d.%d, %s (format %d)", major, minor, profile, format );
+    else nx_log( "[NXGL] the program asks for %s (format %d)", profile, format );
+}
+
+/* Drops one attribute from a context attribute list, the terminator included.
+ * FALSE if the list does not have it. */
+static BOOL nx_drop_context_attribute( EGLint *attribs, EGLint **end, EGLint name )
+{
+    EGLint *dst;
+
+    for (dst = attribs; dst != *end && dst[0] != name; dst += 2) continue;
+    if (dst == *end) return FALSE;
+    memmove( dst, dst + 2, (size_t)( *end - dst - 1 ) * sizeof(*dst) );
+    *end -= 2;
+    **end = EGL_NONE;
+    return TRUE;
 }
 
 /* The EGL config of a pixel format, as win32u's egldrv chooses it for pbuffers. */
@@ -388,6 +464,7 @@ static BOOL nx_drawable_swap( struct opengl_drawable *base )
     unsigned long long start;
     BOOL ret;
 
+    nx_note_program_gl();
     if (!impl_from_opengl_drawable( base )->screen)
         return funcs->p_eglSwapBuffers( egl->display, base->surface );
     if (&wine_nx_vulkan_owns_screen && wine_nx_vulkan_owns_screen())
@@ -601,13 +678,41 @@ static struct opengl_context *nx_context_create( int format, struct opengl_conte
         dst[1] = attribs[1];
     }
     *end = EGL_NONE;
+    nx_note_context_request( format, egl_attribs, end );
 
     if (!(context = calloc( 1, sizeof(*context) ))) return NULL;
     funcs->p_eglBindAPI( EGL_OPENGL_API );
     context->host_context = funcs->p_eglCreateContext( egl->display, nx_config_for_format( format ),
                                                         share ? share->host_context : NULL,
                                                         end != egl_attribs ? egl_attribs : NULL );
-    if ((error = funcs->p_eglGetError()) != EGL_SUCCESS || !context->host_context)
+    error = funcs->p_eglGetError();
+
+    /* A driver built around the core profile can refuse the compatibility one
+     * that wglCreateContext asks for, and then a game of the 2000s has no
+     * context at all and paints nothing. Letting the profile go -- and, if the
+     * version is refused too, that as well -- leaves the driver its own
+     * default, which is the plain context such a program was written against. */
+    if (error != EGL_SUCCESS || !context->host_context)
+    {
+        static const EGLint droppable[] = { EGL_CONTEXT_OPENGL_PROFILE_MASK_KHR, EGL_CONTEXT_MAJOR_VERSION_KHR };
+        unsigned int i;
+
+        for (i = 0; i < ARRAY_SIZE(droppable) && (error != EGL_SUCCESS || !context->host_context); i++)
+        {
+            if (!nx_drop_context_attribute( egl_attribs, &end, droppable[i] )) continue;
+            if (droppable[i] == EGL_CONTEXT_MAJOR_VERSION_KHR)
+            {
+                nx_drop_context_attribute( egl_attribs, &end, EGL_CONTEXT_MINOR_VERSION_KHR );
+                nx_drop_context_attribute( egl_attribs, &end, EGL_CONTEXT_FLAGS_KHR );
+            }
+            nx_log( "[NXGL] the driver refused a context with %#x, retrying without it", droppable[i] );
+            context->host_context = funcs->p_eglCreateContext( egl->display, nx_config_for_format( format ),
+                                                                share ? share->host_context : NULL,
+                                                                end != egl_attribs ? egl_attribs : NULL );
+            error = funcs->p_eglGetError();
+        }
+    }
+    if (error != EGL_SUCCESS || !context->host_context)
     {
         ERR( "context creation failed for format %d, share %p, error %#x\n", format, share, error );
         free( context );

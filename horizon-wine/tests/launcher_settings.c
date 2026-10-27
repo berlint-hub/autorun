@@ -125,21 +125,40 @@ static void test_settings( const char *dir )
     launcher_settings_read( &kv, &settings );
     assert( !settings.fex_disk_cache );
     /* Mesa's two OpenGL switches: off unless a program turns them on, and a
-     * key written as 0 or "off" is off. */
+     * key written as 0 or "off" is off. The year is a choice, and the switch
+     * it grew out of (gl-2003) still reads as its own. */
     load_text( &kv, "" );
     launcher_settings_read( &kv, &settings );
-    assert( !settings.gl_thread && !settings.gl_2003 );
-    load_text( &kv, "gl-thread=1\ngl-2003=on\n" );
+    assert( !settings.gl_thread && !settings.gl_year );
+    load_text( &kv, "gl-thread=1\ngl-year=2009\n" );
     launcher_settings_read( &kv, &settings );
-    assert( settings.gl_thread && settings.gl_2003 );
+    assert( settings.gl_thread && settings.gl_year == 3 );
+    assert( launcher_gl_years[settings.gl_year] == 2009 );
     assert( launcher_settings_write( &kv, &settings ) && strstr( kv.text, "gl-thread=1" ) &&
-            strstr( kv.text, "gl-2003=1" ) );
+            strstr( kv.text, "gl-year=2009" ) );
     launcher_settings_read( &kv, &back );
-    assert( back.gl_thread && back.gl_2003 );
-    settings.gl_thread = 0;
-    settings.gl_2003 = 0;
-    assert( launcher_settings_write( &kv, &settings ) && !strstr( kv.text, "gl-thread=" ) &&
+    assert( back.gl_thread && back.gl_year == 3 );
+    /* The switch of the build before this one, which knew one year. */
+    load_text( &kv, "gl-2003=on\n" );
+    launcher_settings_read( &kv, &settings );
+    assert( settings.gl_year == 1 && launcher_gl_years[settings.gl_year] == 2003 );
+    /* Written back, it is the year key: the old one is gone. */
+    assert( launcher_settings_write( &kv, &settings ) && strstr( kv.text, "gl-year=2003" ) &&
             !strstr( kv.text, "gl-2003=" ) );
+    /* A year no driver is offered is off, as is a number that is not one. */
+    load_text( &kv, "gl-year=2015\n" );
+    launcher_settings_read( &kv, &settings );
+    assert( !settings.gl_year );
+    load_text( &kv, "gl-year=later\n" );
+    launcher_settings_read( &kv, &settings );
+    assert( !settings.gl_year );
+    load_text( &kv, "gl-year=2006\n" );
+    launcher_settings_read( &kv, &settings );
+    assert( settings.gl_year == 2 && launcher_gl_years[settings.gl_year] == 2006 );
+    settings.gl_thread = 0;
+    settings.gl_year = 0;
+    assert( launcher_settings_write( &kv, &settings ) && !strstr( kv.text, "gl-thread=" ) &&
+            !strstr( kv.text, "gl-year=" ) );
     load_text( &kv, "resolution=1920x1080\n" );
     launcher_settings_read( &kv, &settings );
     assert( settings.resolution == 1 );

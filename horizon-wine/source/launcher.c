@@ -1836,7 +1836,7 @@ enum program_row
     ROW_WINDOWS, ROW_SCALING, ROW_RESOLUTION, ROW_D3D9, ROW_VKD3D_VERSION, ROW_DXVK_VERSION, ROW_DXVK_OPTIONS, ROW_DXVK_HUD, ROW_FRAME_LIMIT, ROW_FRAME_LIMIT_SYNC, ROW_VSYNC,
     ROW_VOODOO,
     ROW_LSFG, ROW_LSFG_DLL, ROW_LSFG_PERFORMANCE, ROW_LSFG_FLOW,
-    ROW_UPSCALING, ROW_UPSCALING_SHARPNESS, ROW_GL_THREAD, ROW_GL_2003,
+    ROW_UPSCALING, ROW_UPSCALING_SHARPNESS, ROW_GL_THREAD, ROW_GL_YEAR,
     ROW_INPUT, ROW_INPUT_END = ROW_INPUT + INPUT_ROW_COUNT - 1, ROW_BOX64, ROW_FEX, ROW_SYNC, ROW_CPU, ROW_FEX_CACHE, ROW_FOUR_CORES, ROW_LAZY_FILE_VIEWS,
     ROW_HIDE, ROW_LIBRARY, ROW_GAME_FIX, PROGRAM_ROWS
 };
@@ -2848,13 +2848,15 @@ static int program_menu_run( struct launcher *l, struct program *p, char *target
         row->on = p->settings.gl_thread;
         snprintf( row->value, sizeof(row->value), "%s", p->settings.gl_thread ? "Enabled" : "Disabled" );
 
-        ADD_ROW( ROW_GL_2003, SECTION_GRAPHICS, "Older OpenGL games",
-                 "Shows games only the OpenGL extensions a 2003 driver had. For games from before "
-                 "2004 that refuse to start or draw wrongly because they probe extensions they were "
-                 "never written for. Leave it off for anything newer." );
-        row->kind = UI_ROW_SWITCH;
-        row->on = p->settings.gl_2003;
-        snprintf( row->value, sizeof(row->value), "%s", p->settings.gl_2003 ? "Enabled" : "Disabled" );
+        ADD_ROW( ROW_GL_YEAR, SECTION_GRAPHICS, "Older OpenGL games",
+                 "Shows the game only the extensions a driver of that year had. Games from around "
+                 "then read the extension list into a buffer of its own era, and a modern driver's "
+                 "list is several times longer than any card reported back then -- the game then "
+                 "reads past its buffer or looks for features it does not expect. Pick the year the "
+                 "game is from; older is safer, newer is more capable. Off for anything modern." );
+        row->kind = UI_ROW_DROPDOWN;
+        row->choices = LAUNCHER_GL_YEAR_COUNT;
+        snprintf( row->value, sizeof(row->value), "%s", launcher_gl_year_labels[p->settings.gl_year] );
 
 #ifdef WINE_NX_LSFG
         runtime_file( l, "lsfg/Lossless.dll", path, sizeof(path) );
@@ -3323,10 +3325,31 @@ static int program_menu_run( struct launcher *l, struct program *p, char *target
             save_program_settings( l, p );
             break;
 
-        case ROW_GL_2003:
-            p->settings.gl_2003 = action == UI_ACTION_RESET ? 0 : !p->settings.gl_2003;
+        case ROW_GL_YEAR:
+        {
+            struct ui_row items[LAUNCHER_GL_YEAR_COUNT] = {0};
+
+            if (action == UI_ACTION_RESET) p->settings.gl_year = 0;
+            else if (action == UI_ACTION_CHOOSE)
+            {
+                int selected, i;
+
+                for (i = 0; i < LAUNCHER_GL_YEAR_COUNT; i++)
+                    snprintf( items[i].label, sizeof(items[i].label), "%s", launcher_gl_year_labels[i] );
+                selected = ui_settings_dropdown( ui, &list, items, LAUNCHER_GL_YEAR_COUNT, p->settings.gl_year );
+                if (selected < 0) break;
+                p->settings.gl_year = selected;
+            }
+            else
+            {
+                int step = action == UI_ACTION_LEFT ? -1 : 1;
+
+                if (action != UI_ACTION_LEFT && action != UI_ACTION_RIGHT) break;
+                p->settings.gl_year = (p->settings.gl_year + step + LAUNCHER_GL_YEAR_COUNT) % LAUNCHER_GL_YEAR_COUNT;
+            }
             save_program_settings( l, p );
             break;
+        }
 
         case ROW_SYNC:
         {

@@ -82,10 +82,27 @@ runtime; the full package now ships the Mesa 26 one.
   `mesa_glthread=true` (a DRI option, so lower case, and set before the first
   context) marshals GL commands on a worker thread, which is what the Android
   wrappers ship on by default and what takes the driver's bookkeeping off the
-  game's thread; `MESA_EXTENSION_MAX_YEAR=2003` keeps Mesa from advertising
-  extensions a driver of that year did not have, for games that probe them and
-  refuse to start. Both are off unless a program asks for them, since the first
-  costs a little on titles that do not need it and the second breaks newer ones.
+  game's thread. The other is the **Older OpenGL games** row, which picks a year
+  for `MESA_EXTENSION_MAX_YEAR` (2003, 2006 or 2009, off by default): Mesa then
+  reports only the extensions defined by that year, and the newer ones leave
+  the string. That string is the problem Mesa documents the variable for — a
+  game of that era copies `GL_EXTENSIONS` into a fixed-size buffer without
+  truncating it, and a modern driver's list overruns it, which is a crash or a
+  black screen that a faster or older-looking driver "fixes". On Windows the
+  same workaround is an NVIDIA profile's *Extension Limit*. A modern title must
+  stay off it: the extensions it needs are exactly the ones being hidden.
+- **A context the driver may have to be asked for twice.** Wine's own `wglCreateContext`
+  asks for a compatibility profile, and a driver built around the core profile
+  can refuse that outright, leaving a game of the 2000s with no context and a
+  black screen. `nx_context_create` therefore retries without the profile and,
+  if need be, without the version, so the program gets the driver's own default
+  context instead of nothing, and says so
+  (`[NXGL] the driver refused a context with…`). What it asked for and what it
+  got are both in the log — `[NXGL] the program asks for…` at creation, and at
+  the first swap `[NXGL] the program's OpenGL: <version> (GLSL <version>, a
+  core|compatibility profile), its extension list is N bytes`, which is the
+  pair of facts that decide whether a game's `#version 120` shaders can
+  compile at all and whether its extension buffer is overrun.
 - **Caches on the card.** Mesa's on-disk shader cache is given a directory of
   its own, `sdmc:/switch/wine/cache`, and a 512 MB cap through
   `MESA_SHADER_CACHE_*` (and the `MESA_GLSL_*` names Mesa 20.1 reads), so a

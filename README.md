@@ -182,8 +182,10 @@ played**.
   **Integer** or **Stretch 4:3**) and filtered inside that rectangle (FSR 1.0,
   bilinear or nearest), and **Frame Generation**;
 - for OpenGL games, hand the driver's work to a **worker thread** when a game
-  stutters, and show **older OpenGL games** only the extensions a 2003 driver
-  had, for titles that refuse to start on a modern one;
+  stutters, and tell **older OpenGL games** the driver is from their own year —
+  2003, 2006 or 2009 — which shortens the extension list such a game copies
+  into a buffer of its era's size, the reason many titles from Vista's decade
+  crash on a modern driver;
 - pick the CPU translator (Box64, FEX, or the Switch-tuned FEX), and give it
   its own controls, including whether its translated code is kept on the card
   between runs;

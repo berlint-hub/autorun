@@ -191,7 +191,7 @@ struct launcher_settings
     int lazy_file_views;  /* views of files read from the card on demand */
     int fex_disk_cache;   /* translated code kept on the card between runs */
     int gl_thread;        /* OpenGL commands handed to a worker thread */
-    int gl_2003;          /* only the OpenGL extensions a 2003 driver had */
+    int gl_year;          /* index into launcher_gl_years: the driver's year for the extension list */
     int framebuffer;  /* 1: windows go to the framebuffer, 0: through the compositor */
     int scaling;      /* how the picture is placed on the panel: launcher_scaling_values */
     enum launcher_d3d_renderer d3d;
@@ -230,6 +230,12 @@ enum {
 static const int launcher_frame_limits[] = { 0, 30, 40, 45, 60, 75, 90, 120 };
 static const char *const launcher_frame_limit_labels[] =
     { "Off", "30", "40", "45", "60", "75", "90", "120" };
+/* The driver's year for the OpenGL extension list (Mesa's
+ * MESA_EXTENSION_MAX_YEAR): a game is told about the extensions a driver of
+ * that year had, and no newer one. Off is 0; the rest is the year itself. */
+static const int launcher_gl_years[] = { 0, 2003, 2006, 2009 };
+static const char *const launcher_gl_year_labels[] = { "Off", "2003", "2006", "2009" };
+enum { LAUNCHER_GL_YEAR_COUNT = 4 };
 static const char *const launcher_hud_labels[] = { "Disabled", "FPS", "Compact", "Full" };
 static const char *const launcher_hud_values[] =
     { "0", "fps", "api,fps,frametimes", "version,api,devinfo,fps,memory,frametimes,compiler" };
@@ -492,7 +498,14 @@ static inline void launcher_settings_read( const struct launcher_kv *kv, struct 
     settings->lazy_file_views = launcher_setting_state( kv, "lazy-file-views" ) == 1;
     settings->fex_disk_cache = launcher_setting_state( kv, "fex-cache" ) == 1;
     settings->gl_thread = launcher_setting_state( kv, "gl-thread" ) == 1;
-    settings->gl_2003 = launcher_setting_state( kv, "gl-2003" ) == 1;
+    settings->gl_year = 0;
+    if (launcher_kv_get( kv, "gl-year", value, sizeof(value) ))
+    {
+        for (int i = 1; i < LAUNCHER_GL_YEAR_COUNT; i++)
+            if (atoi( value ) == launcher_gl_years[i]) settings->gl_year = i;
+    }
+    /* The switch this grew out of said 2003 and nothing else. */
+    else if (launcher_setting_state( kv, "gl-2003" ) == 1) settings->gl_year = 1;
     settings->framebuffer = -1;
     /* Aspect ratio is what the old two-way Aspect setting meant for anything
      * drawn through Vulkan; "stretch" was its widescreen hack. The key changed
@@ -639,7 +652,9 @@ static inline int launcher_settings_write( struct launcher_kv *kv, const struct 
            launcher_kv_set( kv, "lazy-file-views", settings->lazy_file_views ? "1" : NULL ) &&
            launcher_kv_set( kv, "fex-cache", settings->fex_disk_cache ? "1" : NULL ) &&
            launcher_kv_set( kv, "gl-thread", settings->gl_thread ? "1" : NULL ) &&
-           launcher_kv_set( kv, "gl-2003", settings->gl_2003 ? "1" : NULL ) &&
+           launcher_kv_set( kv, "gl-year", settings->gl_year ?
+                                              launcher_gl_year_labels[settings->gl_year] : NULL ) &&
+           launcher_kv_set( kv, "gl-2003", NULL ) &&
            launcher_kv_set( kv, "windows", settings->framebuffer < 0 ? NULL :
                                            settings->framebuffer ? "framebuffer" : "compositor" ) &&
            launcher_kv_set( kv, "aspect", NULL ) &&

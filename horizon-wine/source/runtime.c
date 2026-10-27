@@ -604,9 +604,9 @@ static int runtime_fex;
  * (fex-cache=1), so a second start does not translate it again. */
 static int runtime_fex_disk_cache;
 /* Mesa's two switches for OpenGL: commands marshalled on a worker thread, and
- * only the extensions a 2003 driver had. */
+ * only the extensions a driver of the game's own year had. */
 static int runtime_gl_thread;
-static int runtime_gl_2003;
+static int runtime_gl_year;
 /* The program's CPU translator choice: "opt", "" for the stock modules, or
  * NULL when it has none and fex-variant.txt decides. */
 static const char *runtime_fex_variant;
@@ -5082,7 +5082,7 @@ int main( int argc, char **argv )
             runtime_four_cores = settings.four_cores;
             runtime_fex_disk_cache = settings.fex_disk_cache;
             runtime_gl_thread = settings.gl_thread;
-            runtime_gl_2003 = settings.gl_2003;
+            runtime_gl_year = settings.gl_year ? launcher_gl_years[settings.gl_year] : 0;
             if (settings.verbose >= 0) wine_nx_runtime_verbose = settings.verbose;
             if (settings.profile >= 0) runtime_profile = settings.profile;
             if (settings.framebuffer >= 0) wine_nx_compositor_mode = !settings.framebuffer;
@@ -5459,10 +5459,17 @@ int main( int argc, char **argv )
         setenv( "mesa_glthread", "true", 1 );
         log_line( "[MESA] OpenGL commands are marshalled on a worker thread" );
     }
-    if (runtime_gl_2003)
+    if (runtime_gl_year)
     {
-        setenv( "MESA_EXTENSION_MAX_YEAR", "2003", 1 );
-        log_line( "[MESA] OpenGL reports only the extensions a 2003 driver had" );
+        char year[16];
+
+        /* Mesa filters the string it hands out, not what it can do: a game
+         * that probes the list sees the year it was written for. Old games
+         * read that list into a buffer of their era's size, and every
+         * extension past it is the game's own memory. */
+        snprintf( year, sizeof(year), "%d", runtime_gl_year );
+        setenv( "MESA_EXTENSION_MAX_YEAR", year, 1 );
+        log_line( "[MESA] OpenGL reports only the extensions a %s driver had", year );
     }
 
     wine_nx_runtime_environment_init();
