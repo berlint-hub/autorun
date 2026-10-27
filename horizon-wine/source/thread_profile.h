@@ -216,6 +216,58 @@ static inline unsigned int nx_prof_x86_frames( uint32_t esp, uint32_t ebp, uint6
     return n;
 }
 
+/* The nearest named export at or below an RVA of a 32-bit PE image, from the
+ * image's own export table: a stalled thread inside a Wine DLL reports
+ * "opengl32.dll+0x3db4", which names nothing, while "opengl32.dll!
+ * wglSwapBuffers+0x1c" names the function it is in. read32 returns the word at
+ * an address and 0 for one it cannot read, so every field below is checked
+ * before use; a module with no export table, an image that is not 32-bit, or an
+ * address below the first export answers 0. *name_rva is where the name sits in
+ * the image, *delta how far into the function the address is; unnamed exports
+ * are passed over, so the delta can span the unnamed ones that follow. */
+static inline int nx_prof_pe_export( uint64_t base, uint32_t rva, uint32_t (*read32)( uint64_t, void * ),
+                                     void *ctx, uint32_t *name_rva, uint32_t *delta )
+{
+    uint32_t lfanew, opt, dir_rva, dir_size, nfuncs, nnames, funcs, names, ordinals;
+    uint32_t best = 0, best_name = 0, i, count;
+    uint64_t exp;  /* the module's base need not fit in 32 bits */
+
+    if (!read32 || !base || (read32( base, ctx ) & 0xffff) != 0x5a4d) return 0;  /* MZ */
+    if (!(lfanew = read32( base + 0x3c, ctx )) || lfanew > 0x10000000) return 0;
+    if (read32( base + lfanew, ctx ) != 0x00004550) return 0;                   /* PE\0\0 */
+    opt = lfanew + 24;
+    if ((read32( base + opt, ctx ) & 0xffff) != 0x10b) return 0;                /* PE32 */
+    if (!read32( base + opt + 92, ctx )) return 0;                             /* rva count */
+    dir_rva = read32( base + opt + 96, ctx );
+    dir_size = read32( base + opt + 100, ctx );
+    if (!dir_rva || dir_size < 40) return 0;
+    exp = base + dir_rva;
+    nfuncs = read32( exp + 0x14, ctx );
+    nnames = read32( exp + 0x18, ctx );
+    funcs = read32( exp + 0x1c, ctx );
+    names = read32( exp + 0x20, ctx );
+    ordinals = read32( exp + 0x24, ctx );
+    if (!nfuncs || nfuncs > 0x10000 || !nnames || !funcs || !names || !ordinals) return 0;
+    count = nnames > 0x4000 ? 0x4000 : nnames;  /* a bound on the reads this may do */
+    for (i = 0; i < count; i++)
+    {
+        uint32_t ordinal = read32( base + ordinals + 2 * i, ctx ) & 0xffff;  /* u16 each */
+        uint32_t at;
+
+        if (ordinal >= nfuncs) continue;
+        if (!(at = read32( base + funcs + 4 * ordinal, ctx )) || at > rva) continue;
+        if (at >= best)
+        {
+            best = at;
+            best_name = read32( base + names + 4 * i, ctx );
+        }
+    }
+    if (!best || !best_name) return 0;
+    *name_rva = best_name;
+    *delta = rva - best;
+    return 1;
+}
+
 /* Two call sites as one key; each is an offset into the runtime, or
  * NX_PROF_NO_SITE where the chain left it (into translated code, say). */
 #define NX_PROF_NO_SITE 0xffffffffu

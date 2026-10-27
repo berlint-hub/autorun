@@ -38,6 +38,76 @@ struct i386_context_layout
     uint32_t edi, esi, ebx, edx, ecx, eax, ebp, eip, seg_cs, eflags, esp, seg_ss;
 };
 
+/* A small 32-bit PE image with an export table: three functions, two of them
+ * named. A stalled thread inside a Wine DLL is named through this table, and a
+ * wrong answer would put a function name on the wrong address. */
+static uint8_t pe_image[0x400];
+
+static uint32_t pe_read32( uint64_t address, void *ctx )
+{
+    uint64_t offset = address - (uint64_t)(uintptr_t)pe_image;
+    uint32_t value = 0;
+
+    (void)ctx;
+    if (offset + 4 <= sizeof(pe_image)) memcpy( &value, &pe_image[offset], 4 );
+    return value;
+}
+
+static void pe_put32( uint32_t at, uint32_t value ) { memcpy( &pe_image[at], &value, 4 ); }
+static void pe_put16( uint32_t at, uint16_t value ) { memcpy( &pe_image[at], &value, 2 ); }
+static void pe_puts( uint32_t at, const char *text ) { memcpy( &pe_image[at], text, strlen(text) + 1 ); }
+
+static void build_pe_image( void )
+{
+    memset( pe_image, 0, sizeof(pe_image) );
+    pe_put16( 0x00, 0x5a4d );           /* MZ */
+    pe_put32( 0x3c, 0x80 );             /* e_lfanew */
+    pe_put32( 0x80, 0x00004550 );       /* PE\0\0 */
+    pe_put16( 0x98, 0x10b );            /* optional header magic, PE32 */
+    pe_put32( 0x98 + 92, 16 );          /* NumberOfRvaAndSizes */
+    pe_put32( 0x98 + 96, 0x200 );       /* export directory */
+    pe_put32( 0x98 + 100, 40 );
+    pe_put32( 0x200 + 0x14, 3 );        /* NumberOfFunctions */
+    pe_put32( 0x200 + 0x18, 2 );        /* NumberOfNames */
+    pe_put32( 0x200 + 0x1c, 0x240 );    /* AddressOfFunctions */
+    pe_put32( 0x200 + 0x20, 0x250 );    /* AddressOfNames */
+    pe_put32( 0x200 + 0x24, 0x260 );    /* AddressOfNameOrdinals */
+    pe_put32( 0x240, 0x300 );
+    pe_put32( 0x244, 0x340 );
+    pe_put32( 0x248, 0x380 );
+    pe_put32( 0x250, 0x3a0 );
+    pe_put32( 0x254, 0x3a6 );
+    pe_put16( 0x260, 0 );
+    pe_put16( 0x262, 1 );
+    pe_puts( 0x3a0, "alpha" );
+    pe_puts( 0x3a6, "beta" );
+}
+
+static void check_pe_exports( void )
+{
+    uint32_t name = 0, delta = 0;
+
+    build_pe_image();
+    assert( nx_prof_pe_export( (uint64_t)(uintptr_t)pe_image, 0x300, pe_read32, NULL, &name, &delta ) );
+    assert( name == 0x3a0 && delta == 0 );                      /* alpha, exactly */
+    assert( nx_prof_pe_export( (uint64_t)(uintptr_t)pe_image, 0x345, pe_read32, NULL, &name, &delta ) );
+    assert( name == 0x3a6 && delta == 5 );                      /* beta+5 */
+    assert( nx_prof_pe_export( (uint64_t)(uintptr_t)pe_image, 0x3ff, pe_read32, NULL, &name, &delta ) );
+    assert( name == 0x3a6 && delta == 0xbf );                   /* past the last export */
+    /* The third function is exported without a name, so the last name stands and
+     * the delta grows past it: a name plus a distance is still an address. */
+    assert( nx_prof_pe_export( (uint64_t)(uintptr_t)pe_image, 0x400, pe_read32, NULL, &name, &delta ) );
+    assert( name == 0x3a6 && delta == 0xc0 );
+    assert( !nx_prof_pe_export( (uint64_t)(uintptr_t)pe_image, 0x2ff, pe_read32, NULL, &name, &delta ) );
+    /* An image without a header is not an image. */
+    pe_put16( 0x00, 0 );
+    assert( !nx_prof_pe_export( (uint64_t)(uintptr_t)pe_image, 0x300, pe_read32, NULL, &name, &delta ) );
+    /* A 64-bit image's export table is not laid out this way. */
+    build_pe_image();
+    pe_put16( 0x98, 0x20b );
+    assert( !nx_prof_pe_export( (uint64_t)(uintptr_t)pe_image, 0x300, pe_read32, NULL, &name, &delta ) );
+}
+
 int main(void)
 {
     uint64_t callers[8];
@@ -47,6 +117,8 @@ int main(void)
     assert( offsetof( struct i386_context_layout, ebp ) == NX_PROF_I386_EBP );
     assert( offsetof( struct i386_context_layout, eip ) == NX_PROF_I386_EIP );
     assert( offsetof( struct i386_context_layout, esp ) == NX_PROF_I386_ESP );
+
+    check_pe_exports();
 
     /* At a gate: esp 0x2000 holds the return into the stub and its caller's return;
      * ebp 0x2010 -> 0x2020, whose saved ebp points down. */
@@ -162,6 +234,7 @@ int main(void)
         assert( threads[0].new_core == 1 && threads[1].new_core == 0 && threads[2].new_core == -1 );
     }
 
-    puts( "thread profiler: svc decoding, classification, buckets, top, core shares and core balancing passed" );
+    puts( "thread profiler: svc decoding, i386 context offsets, export names, classification, buckets, "
+          "top, core shares and core balancing passed" );
     return 0;
 }

@@ -658,15 +658,88 @@ static int image_at( uint64_t address, void **base, char *name, size_t size )
     return &wine_nx_image_at && wine_nx_image_at( (void *)(uintptr_t)address, base, name, size );
 }
 
+/* The window of a module an export scan may read, after one check that the
+ * whole image is there: a table walk costs thousands of words, and asking the
+ * kernel about each of them would hold every paused thread for a second. */
+struct image_window { uint64_t lo, hi; };
+
+static uint32_t read_window_word( uint64_t address, void *ctx )
+{
+    struct image_window *win = ctx;
+
+    if (!win || win->hi < win->lo + 4 || address < win->lo || address > win->hi - 4) return 0;
+    return read_word32( address );
+}
+
+static uint32_t read_checked_word( uint64_t address )
+{
+    MemoryInfo info;
+
+    if (!readable_size( address, 4, &info )) return 0;
+    return read_word32( address );
+}
+
+/* A name from the export table, into buf. */
+static int read_image_string( uint64_t address, char *buf, size_t size )
+{
+    size_t i;
+
+    if (!size) return 0;
+    for (i = 0; i + 1 < size; i++)
+    {
+        MemoryInfo info;
+        char c;
+
+        if (!readable( address + i, &info )) break;
+        if (!(c = *(const char *)(uintptr_t)(address + i))) break;
+        buf[i] = c;
+    }
+    buf[i] = 0;
+    return i > 0;
+}
+
+/* The name of the function an address is in, where the image exports names:
+ * "opengl32.dll!wglSwapBuffers+0x1c" instead of "opengl32.dll+0x3db4". The
+ * image's own header says how large it is, and one check over that range makes
+ * the rest of the scan plain reads. */
+static int name_export( uint64_t address, void *base, char *buf, size_t size )
+{
+    struct image_window win;
+    MemoryInfo info;
+    uint64_t image = (uint64_t)(uintptr_t)base;
+    uint32_t lfanew, opt, image_size, name_rva, delta;
+    char name[64];
+
+    if (!image) return 0;
+    if (!(lfanew = read_checked_word( image + 0x3c )) || lfanew > 0x10000000) return 0;
+    opt = lfanew + 24;
+    image_size = read_checked_word( image + opt + 0x38 );  /* SizeOfImage */
+    if (!image_size || image_size < 0x200 || image_size > 0x40000000) return 0;
+    if (!readable_size( image, image_size, &info )) return 0;
+    win.lo = image;
+    win.hi = image + image_size;
+    if (!nx_prof_pe_export( image, (uint32_t)(address - image), read_window_word, &win, &name_rva, &delta ))
+        return 0;
+    if (!read_image_string( image + name_rva, name, sizeof(name) )) return 0;
+    if (delta) snprintf( buf, size, "%s+%#x", name, delta );
+    else snprintf( buf, size, "%s", name );
+    return 1;
+}
+
 static void name_address( uint64_t address, char *buf, size_t size )
 {
-    char module[64];
+    char module[64], symbol[96];
     void *base;
 
-    if (image_at( address, &base, module, sizeof(module) ))
-        snprintf( buf, size, "%s+%#lx", module[0] ? module : "exe", (unsigned long)(address - (uintptr_t)base) );
-    else
+    if (!image_at( address, &base, module, sizeof(module) ))
+    {
         snprintf( buf, size, "%#lx", (unsigned long)address );
+        return;
+    }
+    if (name_export( address, base, symbol, sizeof(symbol) ))
+        snprintf( buf, size, "%s!%s", module[0] ? module : "exe", symbol );
+    else
+        snprintf( buf, size, "%s+%#lx", module[0] ? module : "exe", (unsigned long)(address - (uintptr_t)base) );
 }
 
 static void name_site( uint32_t site, int guest, char *buf, size_t size )

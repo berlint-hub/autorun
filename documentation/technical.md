@@ -148,7 +148,12 @@ runtime; the full package now ships the Mesa 26 one.
   and its x86 frame chain: `| x86 at DarkAthena.exe+0x1a2b3c < RndrGL.DLL+0x…`.
   The same address is appended to a first-chance fault (`x86=0x…`), so a fault
   in translated code names a function of the program rather than a translated
-  address that names nothing.
+  address that names nothing. Inside one of Wine's own DLLs the module's export
+  table turns the offset into a name -- `opengl32.dll!wglSwapBuffers+0x1c`
+  instead of `opengl32.dll+0x3db4` -- which is the difference between a thread
+  that is somewhere in a megabyte of GL code and one that is in the swap. The
+  table is read against the image's own `SizeOfImage` and one kernel check of
+  that range, so naming costs microseconds and cannot fault.
 - **Caches on the card.** Mesa's on-disk shader cache is given a directory of
   its own, `sdmc:/switch/wine/cache`, and a 512 MB cap through
   `MESA_SHADER_CACHE_*` (and the `MESA_GLSL_*` names Mesa 20.1 reads), so a
