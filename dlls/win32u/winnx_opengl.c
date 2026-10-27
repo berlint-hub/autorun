@@ -31,6 +31,8 @@
 #include "../../horizon-wine/source/osk.h"
 #include "../../horizon-wine/source/controls_overlay.h"
 #include "../../horizon-wine/source/graphics_config.h"
+#include "../../horizon-wine/source/thread_profile.h"
+#include "../../horizon-wine/source/gl_entries.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(wgl);
 
@@ -258,6 +260,80 @@ static BOOL nx_drop_context_attribute( EGLint *attribs, EGLint **end, EGLint nam
     return TRUE;
 }
 
+/* A program can be inside one of the calls below for as long as the driver
+ * takes, and one that retries a call forever -- which is what Dark Athena turned
+ * out to be doing with wglSetPixelFormat -- looks from the outside exactly like
+ * an idle one: no frames, one core, no line in the log. Each call is counted per
+ * thread, with the arguments of its first calls and of each doubling, and the
+ * call a thread is inside is kept where the stall report can read it, because
+ * nothing else in a log says which of them is stuck. */
+static const char *const nx_gl_entry_names[NX_GL_ENTRIES] =
+{
+    "wglSetPixelFormat", "wglChoosePixelFormat", "wglCreateContext", "wglMakeCurrent", "wglSwapBuffers",
+};
+
+/* Per thread: how often each was called, and what the last one returned. */
+static __thread unsigned int nx_gl_calls[NX_GL_ENTRIES];
+static __thread int nx_gl_last_ret[NX_GL_ENTRIES];
+static __thread int nx_gl_inside = -1;
+
+/* Which call each thread is inside now, for the stall report: a thread cannot
+ * read another's thread-local storage, so the few words it needs are here. */
+struct nx_gl_stage { unsigned int tid; int entry; };
+#define NX_GL_STAGES 64
+static struct nx_gl_stage nx_gl_stages[NX_GL_STAGES];
+
+static unsigned int nx_gl_current_tid( void )
+{
+    return (unsigned int)HandleToULong( NtCurrentTeb()->ClientId.UniqueThread );
+}
+
+void wine_nx_gl_enter( unsigned int entry, int a, int b )
+{
+    struct nx_gl_stage *slot;
+    unsigned int tid = nx_gl_current_tid(), count;
+
+    if (entry >= NX_GL_ENTRIES || !&wine_nx_runtime_trace) return;
+    nx_gl_inside = (int)entry;
+    slot = &nx_gl_stages[tid % NX_GL_STAGES];
+    __atomic_store_n( &slot->tid, tid, __ATOMIC_RELAXED );
+    __atomic_store_n( &slot->entry, (int)entry, __ATOMIC_RELAXED );
+
+    count = ++nx_gl_calls[entry];
+    if (!nx_prof_counted_line( count )) return;
+    nx_log( "[NXGL] %s(%d, %d) called %u times; the one before returned %d", nx_gl_entry_names[entry],
+            a, b, count, nx_gl_last_ret[entry] );
+}
+
+void wine_nx_gl_leave( unsigned int entry, int ret )
+{
+    struct nx_gl_stage *slot;
+    unsigned int tid;
+
+    if (entry >= NX_GL_ENTRIES) return;
+    nx_gl_last_ret[entry] = ret;
+    if (nx_gl_inside != (int)entry) return;
+    nx_gl_inside = -1;
+    tid = nx_gl_current_tid();
+    slot = &nx_gl_stages[tid % NX_GL_STAGES];
+    if (__atomic_load_n( &slot->tid, __ATOMIC_RELAXED ) == tid)
+        __atomic_store_n( &slot->entry, -1, __ATOMIC_RELAXED );
+}
+
+/* For the stall report: which call this thread is inside, or -1. */
+int wine_nx_gl_stage_of( unsigned int tid )
+{
+    struct nx_gl_stage *slot = &nx_gl_stages[tid % NX_GL_STAGES];
+
+    if (__atomic_load_n( &slot->tid, __ATOMIC_RELAXED ) != tid) return -1;
+    return __atomic_load_n( &slot->entry, __ATOMIC_RELAXED );
+}
+
+const char *wine_nx_gl_entry_name( int entry )
+{
+    return entry >= 0 && entry < NX_GL_ENTRIES ? nx_gl_entry_names[entry] : NULL;
+}
+
 /* The EGL config of a pixel format, as win32u's egldrv chooses it for pbuffers. */
 static EGLConfig nx_config_for_format( int format )
 {
@@ -479,7 +555,13 @@ static BOOL nx_drawable_swap( struct opengl_drawable *base )
 
     nx_note_program_gl();
     if (!impl_from_opengl_drawable( base )->screen)
-        return funcs->p_eglSwapBuffers( egl->display, base->surface );
+    {
+        /* A drawable without the screen is a pbuffer: there is no window to
+         * present to, and the driver refuses eglSwapBuffers on one. Saying the
+         * swap failed would send a program round a retry loop over something
+         * that is not a failure, so the flush the caller already did stands. */
+        return TRUE;
+    }
     if (&wine_nx_vulkan_owns_screen && wine_nx_vulkan_owns_screen())
     {
         /* A Vulkan surface has the screen and shows it; an OpenGL surface left
@@ -523,6 +605,36 @@ static const struct opengl_drawable_funcs nx_drawable_funcs =
     .swap = nx_drawable_swap,
 };
 
+/* A window that cannot have the screen still gets a surface to draw into:
+ * offscreen, shown nowhere, the way a hidden window's is. Failing the call
+ * instead leaves a program with no context at all -- and one that treats a
+ * failed wglSetPixelFormat as "ask again", which Dark Athena does, never stops
+ * asking: no frames, one core, and a log with nothing in it. */
+static BOOL nx_offscreen_surface( struct nx_gl_drawable *gl, struct client_surface *client, int format )
+{
+    SIZE size = client->raw ? gl->base.monitor_size : gl->base.virtual_size;
+    EGLint attribs[5], error;
+
+    if (size.cx < 1) size.cx = 640;
+    if (size.cy < 1) size.cy = 480;
+    attribs[0] = EGL_WIDTH;
+    attribs[1] = size.cx;
+    attribs[2] = EGL_HEIGHT;
+    attribs[3] = size.cy;
+    attribs[4] = EGL_NONE;
+
+    if (!(gl->base.surface = funcs->p_eglCreatePbufferSurface( egl->display, nx_config_for_format( format ),
+                                                              attribs )))
+    {
+        error = funcs->p_eglGetError();
+        nx_log( "[NXGL] hwnd %p has no surface in format %d: eglCreatePbufferSurface failed, error %#x",
+                client->hwnd, format, error );
+        return FALSE;
+    }
+    gl->screen = FALSE;
+    return TRUE;
+}
+
 /* Visible OpenGL windows share the screen; hidden windows render offscreen. */
 static BOOL nx_surface_create( struct client_surface *client, int format, struct opengl_drawable **drawable )
 {
@@ -553,19 +665,12 @@ static BOOL nx_surface_create( struct client_surface *client, int format, struct
     gl->base.buffer_map[GL_FRONT - GL_FRONT_LEFT] = GL_BACK;
     gl->base.buffer_map[GL_FRONT_AND_BACK - GL_FRONT_LEFT] = GL_BACK;
 
+    /* A hidden window, and a capability probe that must not take the screen away
+     * from Vulkan, both draw offscreen. */
     if (InterlockedCompareExchange( &client->offscreen, 0, 0 ))
     {
-        /* Capability probes must not take the screen away from Vulkan. */
-        SIZE size = client->raw ? gl->base.monitor_size : gl->base.virtual_size;
-        const EGLint attribs[] = { EGL_WIDTH, size.cx, EGL_HEIGHT, size.cy, EGL_NONE };
-
-        if (!(gl->base.surface = funcs->p_eglCreatePbufferSurface( egl->display, nx_config_for_format( format ), attribs )))
-        {
-            ERR( "hwnd %p: eglCreatePbufferSurface failed, error %#x\n", hwnd, funcs->p_eglGetError() );
-            goto err;
-        }
-        TRACE( "hwnd %p: offscreen surface %p, size %s\n", hwnd, gl->base.surface,
-               wine_dbgstr_point( (POINT *)&size ) );
+        if (!nx_offscreen_surface( gl, client, format )) goto err;
+        TRACE( "hwnd %p: offscreen surface %p\n", hwnd, gl->base.surface );
         *drawable = &gl->base;
         return TRUE;
     }
@@ -584,10 +689,22 @@ static BOOL nx_surface_create( struct client_surface *client, int format, struct
     }
     if (nx_screen_surface)
     {
+        static unsigned int fell_back;
+        unsigned int count;
+        int taken = nx_screen_format;
+
         pthread_mutex_unlock( &nx_screen_mutex );
-        ERR( "hwnd %p: the screen has a format %d surface, cannot serve format %d\n",
-             hwnd, nx_screen_format, format );
-        goto err;
+        /* The screen belongs to a surface of another format: a second window
+         * surface of a different config cannot be made on the same NWindow.
+         * The window draws offscreen instead of failing, so the program keeps
+         * its context and its frame loop. */
+        count = __atomic_add_fetch( &fell_back, 1, __ATOMIC_RELAXED );
+        if (nx_prof_counted_line( count ))
+            nx_log( "[NXGL] hwnd %p asks for format %d and the screen's surface is format %d; "
+                    "this window draws offscreen (%u so far)", hwnd, format, taken, count );
+        if (!nx_offscreen_surface( gl, client, format )) goto err;
+        *drawable = &gl->base;
+        return TRUE;
     }
     pthread_mutex_unlock( &nx_screen_mutex );
 
@@ -596,8 +713,13 @@ static BOOL nx_surface_create( struct client_surface *client, int format, struct
 
         if (!(window = wine_nx_gl_acquire_window( size.cx, size.cy )))
         {
-            ERR( "hwnd %p: the screen already has an OpenGL surface\n", hwnd );
-            goto err;
+            /* Someone else -- a Vulkan surface, the compositor's own presenter --
+             * holds the screen. Draw offscreen rather than leave the program
+             * without a context. */
+            nx_log( "[NXGL] hwnd %p cannot have the screen (another surface holds it); it draws offscreen", hwnd );
+            if (!nx_offscreen_surface( gl, client, format )) goto err;
+            *drawable = &gl->base;
+            return TRUE;
         }
     }
     gl->screen = TRUE;

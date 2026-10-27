@@ -216,6 +216,15 @@ static inline unsigned int nx_prof_x86_frames( uint32_t esp, uint32_t ebp, uint6
     return n;
 }
 
+/* Whether the n-th call of something deserves a line in the log: the first
+ * four, then each time the number doubles. A call a program makes a million
+ * times therefore costs about forty lines, and its rate is still readable from
+ * the numbers in them. */
+static inline int nx_prof_counted_line( unsigned int n )
+{
+    return n && (n <= 4 || !(n & (n - 1)));
+}
+
 /* A window of memory that may be read without asking the kernel again: a PE
  * image is mapped in several pieces with different protections, so "the image
  * is readable" is not one check, while asking about every word of an export

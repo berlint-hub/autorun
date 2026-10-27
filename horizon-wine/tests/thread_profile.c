@@ -105,6 +105,20 @@ static int model_query( uint64_t address, uint64_t *lo, uint64_t *hi )
 }
 
 /* An address in the gap, and one paste the end of a piece, are not readable. */
+/* The logging rule for a call made in a loop: the first four, then each
+ * doubling. A million calls have to cost the log about twenty lines. */
+static void check_counted_lines( void )
+{
+    unsigned int n, lines = 0;
+
+    for (n = 1; n <= 1000000; n++) if (nx_prof_counted_line( n )) lines++;
+    assert( lines == 21 );
+    assert( nx_prof_counted_line( 1 ) && nx_prof_counted_line( 4 ) );
+    assert( !nx_prof_counted_line( 5 ) && nx_prof_counted_line( 8 ) );
+    assert( !nx_prof_counted_line( 12 ) && nx_prof_counted_line( 16 ) );
+    assert( !nx_prof_counted_line( 0 ) );
+}
+
 static void check_window( void )
 {
     struct nx_prof_window win = {0};
@@ -145,6 +159,7 @@ static void check_pe_exports( void )
     pe_put16( 0x98, 0x20b );
     assert( !nx_prof_pe_export( (uint64_t)(uintptr_t)pe_image, 0x300, pe_read32, NULL, &name, &delta ) );
     check_window();
+    check_counted_lines();
 }
 
 int main(void)

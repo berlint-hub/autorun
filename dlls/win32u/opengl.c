@@ -33,6 +33,9 @@
 #include "ntstatus.h"
 #include "ntgdi_private.h"
 #include "win32u_private.h"
+#ifdef __SWITCH__
+#include "../../horizon-wine/source/gl_entries.h"
+#endif
 #include "ntuser_private.h"
 
 #include "wine/opengl_driver.h"
@@ -2374,9 +2377,18 @@ static BOOL win32u_wglSetPixelFormat( HDC hdc, int new_format, const PIXELFORMAT
     const struct opengl_funcs *funcs = &display_funcs;
     UINT total, onscreen;
     HWND hwnd;
+#ifdef __SWITCH__
+    BOOL ret;
+#define NX_RETURN( value ) do { ret = (value); goto done; } while (0)
+#else
+#define NX_RETURN( value ) return (value)
+#endif
 
+#ifdef __SWITCH__
+    wine_nx_gl_enter( NX_GL_SET_PIXEL_FORMAT, new_format, (int)(ULONG_PTR)hdc );
+#endif
     funcs->p_get_pixel_formats( NULL, 0, &total, &onscreen );
-    if (new_format <= 0 || new_format > total) return FALSE;
+    if (new_format <= 0 || new_format > total) NX_RETURN( FALSE );
 
     if ((hwnd = NtUserWindowFromDC( hdc )))
     {
@@ -2386,24 +2398,30 @@ static BOOL win32u_wglSetPixelFormat( HDC hdc, int new_format, const PIXELFORMAT
         if (new_format > onscreen)
         {
             WARN( "Invalid format %d for %p/%p\n", new_format, hdc, hwnd );
-            return FALSE;
+            NX_RETURN( FALSE );
         }
 
         TRACE( "%p/%p format %d\n", hdc, hwnd, new_format );
 
-        if ((old_format = get_window_pixel_format( hwnd ))) return old_format == new_format;
+        if ((old_format = get_window_pixel_format( hwnd ))) NX_RETURN( old_format == new_format );
 
-        if (!(drawable = get_window_unused_drawable( hwnd, new_format ))) return FALSE;
+        if (!(drawable = get_window_unused_drawable( hwnd, new_format ))) NX_RETURN( FALSE );
         set_window_opengl_drawable( hwnd, drawable, TRUE );
         set_window_opengl_drawable( hwnd, drawable, FALSE );
         opengl_drawable_release( drawable );
 
-        return set_window_pixel_format( hwnd, new_format, FALSE );
+        NX_RETURN( set_window_pixel_format( hwnd, new_format, FALSE ) );
     }
 
     TRACE( "%p/%p format %d\n", hdc, hwnd, new_format );
-    return NtGdiSetPixelFormat( hdc, new_format );
+    NX_RETURN( NtGdiSetPixelFormat( hdc, new_format ) );
+#ifdef __SWITCH__
+done:
+    wine_nx_gl_leave( NX_GL_SET_PIXEL_FORMAT, ret );
+    return ret;
+#endif
 }
+#undef NX_RETURN
 
 BOOL set_dc_pixel_format_internal( HDC hdc, int format, struct list *drawables )
 {
@@ -2582,15 +2600,24 @@ static BOOL win32u_make_current( HDC draw_hdc, HDC read_hdc, struct opengl_conte
 {
     struct opengl_context *prev_context = NtCurrentTeb()->glContext;
     int format;
+#ifdef __SWITCH__
+    BOOL ret;
+#define NX_RETURN( value ) do { ret = (value); goto nx_done; } while (0)
+#else
+#define NX_RETURN( value ) return (value)
+#endif
 
     TRACE( "draw_hdc %p, read_hdc %p, context %p\n", draw_hdc, read_hdc, context );
+#ifdef __SWITCH__
+    wine_nx_gl_enter( NX_GL_MAKE_CURRENT, (int)(ULONG_PTR)draw_hdc, context ? 1 : 0 );
+#endif
 
     if (!context)
     {
         struct opengl_drawable *draw = NULL, *read = NULL;
 
-        if (!make_internal_context_current( NULL, NULL )) return FALSE;
-        if (!(context = prev_context)) return TRUE;
+        if (!make_internal_context_current( NULL, NULL )) NX_RETURN( FALSE );
+        if (!(context = prev_context)) NX_RETURN( TRUE );
         NtCurrentTeb()->glContext = NULL;
 
         context_exchange_drawables( context, &draw, &read );
@@ -2599,7 +2626,7 @@ static BOOL win32u_make_current( HDC draw_hdc, HDC read_hdc, struct opengl_conte
         if (read->client) set_window_opengl_drawable( read->client->hwnd, read, FALSE );
         opengl_drawable_release( read );
 
-        return TRUE;
+        NX_RETURN( TRUE );
     }
 
     if ((format = get_dc_pixel_format( draw_hdc )) <= 0 &&
@@ -2608,16 +2635,22 @@ static BOOL win32u_make_current( HDC draw_hdc, HDC read_hdc, struct opengl_conte
         WARN( "Invalid draw_hdc %p format %u\n", draw_hdc, format );
         if (!format) RtlSetLastWin32Error( ERROR_INVALID_PIXEL_FORMAT );
         else RtlSetLastWin32Error( ERROR_INVALID_HANDLE );
-        return FALSE;
+        NX_RETURN( FALSE );
     }
 
     create_memory_pbuffer( context, draw_hdc, NULL );
-    if (!context_sync_drawables( context, draw_hdc, read_hdc )) return FALSE;
+    if (!context_sync_drawables( context, draw_hdc, read_hdc )) NX_RETURN( FALSE );
     NtCurrentTeb()->glContext = context;
 
     if (!context->initialized) opengl_context_init( context );
-    return TRUE;
+    NX_RETURN( TRUE );
+#ifdef __SWITCH__
+nx_done:
+    wine_nx_gl_leave( NX_GL_MAKE_CURRENT, ret );
+    return ret;
+#endif
 }
+#undef NX_RETURN
 
 static void opengl_client_pbuffer_init( HPBUFFERARB client_pbuffer, struct pbuffer *pbuffer, const struct opengl_funcs *funcs )
 {
@@ -2943,12 +2976,18 @@ static struct opengl_context *win32u_context_create( HDC hdc, const int *attribs
     int format;
 
     TRACE( "hdc %p, attribs %p\n", hdc, attribs );
+#ifdef __SWITCH__
+    wine_nx_gl_enter( NX_GL_CREATE_CONTEXT, (int)(ULONG_PTR)hdc, attribs ? attribs[0] : 0 );
+#endif
 
     if ((format = get_dc_pixel_format( hdc )) <= 0 &&
         (format = get_window_pixel_format( NtUserWindowFromDC( hdc ) )) <= 0)
     {
         if (!format) RtlSetLastWin32Error( ERROR_INVALID_PIXEL_FORMAT );
         else RtlSetLastWin32Error( ERROR_INVALID_HANDLE );
+#ifdef __SWITCH__
+        wine_nx_gl_leave( NX_GL_CREATE_CONTEXT, FALSE );
+#endif
         return NULL;
     }
     doublebuffer = !!(pixel_formats[format - 1].pfd.dwFlags & PFD_DOUBLEBUFFER);
@@ -2956,6 +2995,9 @@ static struct opengl_context *win32u_context_create( HDC hdc, const int *attribs
     if (!(context = driver_funcs->p_context_create( format, global_context, attribs, &shared )))
     {
         WARN( "Failed to create driver context for context %p\n", context );
+#ifdef __SWITCH__
+        wine_nx_gl_leave( NX_GL_CREATE_CONTEXT, FALSE );
+#endif
         return NULL;
     }
     context->format = format;
@@ -2964,6 +3006,9 @@ static struct opengl_context *win32u_context_create( HDC hdc, const int *attribs
     *broken_sharing = !shared;
 
     TRACE( "created context %p, format %u\n", context, format );
+#ifdef __SWITCH__
+    wine_nx_gl_leave( NX_GL_CREATE_CONTEXT, TRUE );
+#endif
     return context;
 }
 
@@ -3017,7 +3062,17 @@ static BOOL win32u_wglSwapBuffers( HDC hdc )
     HWND hwnd;
     BOOL ret;
 
-    if (!(hwnd = NtUserWindowFromDC( hdc ))) return flush_memory_pbuffer( funcs->p_glFlush );
+#ifdef __SWITCH__
+    wine_nx_gl_enter( NX_GL_SWAP_BUFFERS, (int)(ULONG_PTR)hdc, context ? 1 : 0 );
+#endif
+    if (!(hwnd = NtUserWindowFromDC( hdc )))
+    {
+        ret = flush_memory_pbuffer( funcs->p_glFlush );
+#ifdef __SWITCH__
+        wine_nx_gl_leave( NX_GL_SWAP_BUFFERS, ret );
+#endif
+        return ret;
+    }
 
     interval = get_window_swap_interval( hwnd );
 
@@ -3026,11 +3081,20 @@ static BOOL win32u_wglSwapBuffers( HDC hdc )
     if (context) context_sync_drawables( context, 0, 0 );
 
     if (context) opengl_drawable_add_ref( (draw = context->draw) );
-    else if (!(draw = get_window_current_drawable( hwnd ))) return FALSE;
+    else if (!(draw = get_window_current_drawable( hwnd )))
+    {
+#ifdef __SWITCH__
+        wine_nx_gl_leave( NX_GL_SWAP_BUFFERS, FALSE );
+#endif
+        return FALSE;
+    }
 
     opengl_drawable_flush( draw, interval, 0 );
     ret = opengl_drawable_swap( draw );
     opengl_drawable_release( draw );
+#ifdef __SWITCH__
+    wine_nx_gl_leave( NX_GL_SWAP_BUFFERS, ret );
+#endif
 
     return ret;
 }

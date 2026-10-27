@@ -150,6 +150,22 @@ runtime; the full package now ships the Mesa 26 one.
   It comes with a line about the program's OpenGL (`has not swapped a frame
   yet; its OpenGL is 4.3 (Core Profile) …`), which separates "no usable
   context" from "never reached the first frame".
+- **A call stuck, and a call retried forever, look the same.** A program
+  sitting in one of the OpenGL entry points -- `wglSetPixelFormat`,
+  `wglMakeCurrent`, `wglCreateContext`, `wglSwapBuffers` -- shows up from
+  outside as no frames and one core, exactly like a program retrying a call
+  that fails. Each of them is therefore counted per thread, the first call and
+  each doubling are logged with the arguments and the previous result, and the
+  call a thread is inside is reported by name in its stall line (`| inside
+  wglSetPixelFormat`). A call made a million times costs about twenty lines.
+- **A window that cannot have the screen draws offscreen.** A second window
+  surface of a different pixel format cannot be made on the same NWindow, and
+  failing the call leaves a program with no context at all -- Dark Athena
+  answers a failed `wglSetPixelFormat` by asking again, which is a loop with one
+  core and no frames. Such a window now gets a pbuffer drawable instead (and so
+  does one whose window is hidden, and one that loses the screen to a Vulkan
+  surface), a swap on it succeeds without presenting anything, and the log says
+  once per doubling how often that happened.
 - **A stall that names the program's own function.** ntdll+0x40130 is where a
   thread is only because it is inside a system call, and every waiting thread
   reports the same thing. A thread stopped there has its x86 context saved in

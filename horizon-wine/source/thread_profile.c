@@ -823,6 +823,18 @@ void wine_nx_threads_report_stalled( void )
                 len = appendf( line, len, " %s(%#x) x%u", name ? name : "syscall", call, calls );
             else len = appendf( line, len, " %s(%#x)", name ? name : "syscall", call );
         }
+        /* Which OpenGL call the thread is inside, where it is one the display
+         * driver counts: a program retrying a call forever and one waiting
+         * inside a call that never returns both read as "no frames, one core",
+         * and the name is the difference. */
+        {
+            extern int wine_nx_gl_stage_of( unsigned int tid ) __attribute__((weak));
+            extern const char *wine_nx_gl_entry_name( int entry ) __attribute__((weak));
+            int entry = &wine_nx_gl_stage_of ? wine_nx_gl_stage_of( tid ) : -1;
+            const char *gl = entry >= 0 && &wine_nx_gl_entry_name ? wine_nx_gl_entry_name( entry ) : NULL;
+
+            if (gl) len = appendf( line, len, " | inside %s", gl );
+        }
         for (f = 0; f < frames; f++)
         {
             name_address( callers[f], where, sizeof(where) );
