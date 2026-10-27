@@ -159,7 +159,12 @@ runtime; the full package now ships the Mesa 26 one.
   and its x86 frame chain: `| x86 at DarkAthena.exe+0x1a2b3c < RndrGL.DLL+0x…`.
   The same address is appended to a first-chance fault (`x86=0x…`), so a fault
   in translated code names a function of the program rather than a translated
-  address that names nothing. Inside one of Wine's own DLLs the module's export
+  address that names nothing. A thread is sampled three times a millisecond
+  apart, so a loop shows the places it returns to and not just the one address
+  a single sample finds, and the frames that are in the runtime itself -- its
+  own code, libnx and Mesa are one image -- are named `runtime+0x…`, which
+  separates a thread spinning in the driver from one spinning in translated
+  code. Inside one of Wine's own DLLs the module's export
   table turns the offset into a name -- `opengl32.dll!wglSwapBuffers+0x1c`
   instead of `opengl32.dll+0x3db4` -- which is the difference between a thread
   that is somewhere in a megabyte of GL code and one that is in the swap. The

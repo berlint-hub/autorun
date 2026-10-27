@@ -726,6 +726,23 @@ static int name_export( uint64_t address, void *base, char *buf, size_t size )
     return 1;
 }
 
+/* Where the runtime is in memory, for naming the frames that are in it: its
+ * own code, libnx and Mesa are linked into the same image, so an address in
+ * that range is one of ours and one outside it is the translator's or the
+ * program's. The sampler records the range when it starts; a stall report
+ * without the profiler asks about the runtime's own function instead. */
+static int runtime_range( void )
+{
+    MemoryInfo info;
+    u32 page;
+
+    if (runtime_end > runtime_base) return 1;
+    if (R_FAILED( svcQueryMemory( &info, &page, (u64)(uintptr_t)&wine_nx_profile_start ) )) return 0;
+    runtime_base = info.addr;
+    runtime_end = (uintptr_t)__end__;
+    return runtime_end > runtime_base;
+}
+
 static void name_address( uint64_t address, char *buf, size_t size )
 {
     char module[64], symbol[96];
@@ -733,7 +750,10 @@ static void name_address( uint64_t address, char *buf, size_t size )
 
     if (!image_at( address, &base, module, sizeof(module) ))
     {
-        snprintf( buf, size, "%#lx", (unsigned long)address );
+        if (runtime_range() && in_runtime( address ))
+            snprintf( buf, size, "runtime+%#lx", (unsigned long)(address - runtime_base) );
+        else
+            snprintf( buf, size, "%#lx", (unsigned long)address );
         return;
     }
     if (name_export( address, base, symbol, sizeof(symbol) ))
@@ -833,6 +853,42 @@ void wine_nx_threads_report_stalled( void )
                         len = appendf( line, len, " < %s", where );
                     }
                 }
+            }
+        }
+        /* One sample says where a thread is, not where it is going: a thread
+         * spinning in a loop is caught at one of the addresses it returns to
+         * and the rest of the loop stays invisible. Two more samples, a
+         * millisecond apart, name the other places it keeps coming back to. */
+        {
+            uint64_t extra[2], first = ctx.pc.x;
+            unsigned int k, seen = 0;
+
+            for (k = 0; k < 2; k++)
+            {
+                ThreadContext again;
+                Result rc2 = 0;
+                int tries2;
+
+                svcSleepThread( 1000000ULL );
+                pthread_mutex_lock( &profile_mutex );
+                if (R_FAILED( svcSetThreadActivity( handle, ThreadActivity_Paused ) ))
+                {
+                    pthread_mutex_unlock( &profile_mutex );
+                    break;
+                }
+                for (tries2 = 0; R_FAILED( rc2 = svcGetThreadContext3( &again, handle ) ) && tries2 < 4; tries2++)
+                    svcSleepThread( 0 );
+                svcSetThreadActivity( handle, ThreadActivity_Runnable );
+                pthread_mutex_unlock( &profile_mutex );
+                if (R_FAILED( rc2 )) break;
+                if (again.pc.x == first || (seen && extra[0] == again.pc.x)) continue;
+                extra[seen++] = again.pc.x;
+                if (seen == 2) break;
+            }
+            for (k = 0; k < seen; k++)
+            {
+                name_address( extra[k], where, sizeof(where) );
+                len = appendf( line, len, " | also at %s", where );
             }
         }
         wine_nx_runtime_trace( line );
