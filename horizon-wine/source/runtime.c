@@ -610,6 +610,10 @@ static int runtime_gl_2003;
 /* The program's CPU translator choice: "opt", "" for the stock modules, or
  * NULL when it has none and fex-variant.txt decides. */
 static const char *runtime_fex_variant;
+/* Which of them the loader settled on ("stock" for the plain pair), once it has
+ * looked: the translator's code cache is kept apart per build, since the
+ * module keys its own directory by its settings rather than by itself. */
+static char runtime_fex_module_tag[48];
 static int runtime_four_cores;
 static int runtime_dxvk_hud;
 static char runtime_vkd3d_version[32];
@@ -2379,34 +2383,27 @@ static size_t runtime_fex_environment( const char *target, char *buffer, size_t 
          * window onto the file, and a window over a file on a card is at best a
          * copy of it every page. */
         static const char disk_cache[] = "FEX_DISKCACHE=1\0FEX_DISKCACHEFILEMAPPING=0";
-        char database[640], root[480];
+        char build[80], database[640];
+        int length;
 
         if (sizeof(disk_cache) > size - used) return 0;
         memcpy( buffer + used, disk_cache, sizeof(disk_cache) );
         used += sizeof(disk_cache);
-        /* The module reads its settings out of the environment of the process
-         * it runs in, not out of the program's environment block, so the two
-         * switches above have to be here as well as in the block. The database
-         * needs it more than they do: left to itself the module asks for the
-         * user's home -- which the console does not have -- and falls back to
-         * a .cache/fex-emu under the runtime's working directory, where nothing
-         * measures it, prunes it or gives it back. It is told where to
-         * put it, and anything else of its own with it. */
-        setenv( "FEX_DISKCACHE", "1", 1 );
-        setenv( "FEX_DISKCACHEFILEMAPPING", "0", 1 );
-        if (fex_cache_database_path( database, sizeof(database), RUNTIME_DIR, WINE_NX_RUNTIME_BUILD ))
+        /* One directory per build. The module's own directory is keyed by a
+         * hash of the settings it runs with, not by the translator that made
+         * the code, so the stock modules and a differently built pair would
+         * read each other's translations from it -- and the modules are
+         * replaced on the card without the runtime changing. */
+        snprintf( build, sizeof(build), "%s-%s", WINE_NX_RUNTIME_BUILD,
+                  runtime_fex_module_tag[0] ? runtime_fex_module_tag : "stock" );
+        if (fex_cache_database_path( database, sizeof(database), build ))
         {
-            setenv( "FEX_DISKCACHEPATH", database, 1 );
+            length = snprintf( buffer + used, size - used, "FEX_DISKCACHEPATH=%s", database );
+            if (length < 0 || (size_t)length + 1 > size - used) return 0;
+            used += length + 1;
             log_line( "[FEX] the code cache database is %s", database );
-            if (fex_cache_root( root, sizeof(root), RUNTIME_DIR, 0 ))
-            {
-                char location[500];
-
-                snprintf( location, sizeof(location), "%s/", root );
-                setenv( "FEX_APP_CACHE_LOCATION", location, 1 );
-            }
         }
-        else log_line( "[FEX] there is no room for a code cache database path; the module picks its own" );
+        else log_line( "[FEX] no room for a code cache database path; the module picks its own" );
     }
     for (i = 0; i < NX_FEX_OPTION_COUNT; i++)
     {
@@ -2416,9 +2413,6 @@ static size_t runtime_fex_environment( const char *target, char *buffer, size_t 
 
         if (launcher_kv_get( &kv, option->name, configured, sizeof(configured) ) &&
             nx_fex_option_choice( option, configured ) >= 0) value = configured;
-        /* Also in the runtime's own environment, which is where the module
-         * looks for them; the program's block is for the program. */
-        setenv( option->name, value, 1 );
         length = snprintf( buffer + used, size - used, "%s=%s", option->name, value );
         if (length < 0 || (size_t)length + 1 > size - used) return 0;
         used += length + 1;
@@ -3297,6 +3291,7 @@ static const char *runtime_fex_cpu_module( int amd64 )
             if (variant[0]) log_line( "[CPU] fex-variant.txt names the \"%s\" modules", variant );
         }
     }
+    snprintf( runtime_fex_module_tag, sizeof(runtime_fex_module_tag), "%s", variant[0] ? variant : "stock" );
     if (variant[0])
     {
         snprintf( names[amd64 != 0], sizeof(names[0]), "%s-%s.dll", stem, variant );

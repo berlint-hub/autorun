@@ -96,22 +96,20 @@ runtime; the full package now ships the Mesa 26 one.
   below it) does not read `MESA_SHADER_CACHE_MAX_SIZE` at all, so the runtime
   measures it and gives whole driver versions back oldest first at 512 MB,
   keeping 384 MB (`fex_cache_prune_tree`, the measurement the translator's cache
-  uses). FEX's
-  translated-code cache (2609's `FEX_DISKCACHE`) is the per-program
+  uses). FEX's translated-code cache (2609's `FEX_DISKCACHE`) is the per-program
   **Translated code cache**, off unless asked for because 2609 calls it
-  experimental. With it on, the module is told where to keep it
-  (`FEX_DISKCACHEPATH`, from `fex_cache_database_path()`): a directory of its
-  own per build under `drive_c/users/steamuser/AppData/Local/fex-emu/DiskCache`,
-  named after the runtime's build so a database written by another translator
-  is never read as this one's — the release keys its directory by a hash of its
-  own settings, which does not change when the code it emits does. Left alone
-  it asks for the user's home, which the console does not have, and falls back
-  to a `.cache/fex-emu` under the runtime's working directory, where nothing
-  measures it or gives it back. The runtime measures the cache before the
-  program starts and gives whole configurations back oldest first until it is
-  under a gigabyte, keeping 768 MB — the limit 2610 added upstream, and the
-  guard 2609 does not have (`source/fex_cache.c`). The cache belongs to no one
-  program — the module keys its entries by the code they hold — so its size is
+  experimental. Left alone the module keeps it in `%LOCALAPPDATA%\fex-emu`,
+  which on the card is the directory the launcher measures and clears; with it
+  on, the module is pointed at a directory of its own per build
+  (`FEX_DISKCACHEPATH`, from `fex_cache_database_path()`), named after the
+  runtime and the CPU module variant, because the release keys its own
+  directory by a hash of its settings alone — two builds of the translator
+  would read each other's emitted code out of one. The runtime measures the
+  cache before the program starts and gives whole configurations back oldest
+  first until it is under a gigabyte, keeping 768 MB — the limit 2610 added
+  upstream, and the guard 2609 does not have (`source/fex_cache.c`). The cache
+  belongs to no one program — the module keys its entries by the code they hold
+  — so its size is
   shown, and it is cleared, from the launcher's Settings tab rather than from a
   game's menu; `fex_cache_root()` names the directories both sides use, so the
   runtime and the launcher cannot drift apart. The database is read and written
@@ -121,12 +119,15 @@ runtime; the full package now ships the Mesa 26 one.
   comes back — a program that could not start with the cache, a crash — has the
   cache off for the next start rather than leaving its owner to find the switch
   (`fex_cache_marker_*`).
-- **The translator's settings go in the runtime's environment.** FEX reads them
-  from the environment of the process it runs in (its `EnvLoader` is given
-  `_environ`), not from the program's environment block, which is why the
-  runtime `setenv`s the program's choices as well as handing them to the
-  program — the same reason `mesa_glthread` is set there. A program's block
-  still carries them: they are part of what it was started with.
+- **Two environments, one per kind of library.** The translator's switches
+  (`FEX_*`) are read by FEX's own Windows CRT, which takes them from the
+  process environment block (`Source/Windows/Common/CRT/Misc.cpp` reads
+  `PEB->ProcessParameters->Environment`), so the runtime puts them in the block
+  it starts the program with — the same block the program sees. Mesa's are read
+  by a Unix library inside this process and have to be `setenv`'d here
+  (`mesa_glthread`, the shader-cache names). Neither belongs in the other:
+  setting `FEX_*` with `setenv` would say nothing to the module, and a
+  `MESA_*` in the block would say nothing to the driver.
 - **Audio.** `winenxaudio.drv` plays through audout, for mmdevapi and DirectSound.
 - **Input.** The touchscreen, the controller as a mouse or as a keyboard with
   per-game mappings, and XInput, which sees player 1 as an Xbox 360 controller.

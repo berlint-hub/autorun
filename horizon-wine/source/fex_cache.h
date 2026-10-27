@@ -58,23 +58,23 @@ static inline int fex_cache_root( char *out, size_t size, const char *runtime_di
     return length > 0 && (size_t)length < size;
 }
 
-/* Where the translator itself is pointed at (FEX_DISKCACHEPATH): a directory
- * of its own under the root above, named after the build. Left alone, the
- * module asks for the user's home -- which the console does not have -- and
- * takes the runtime's working directory instead, where its .cache/fex-emu is
- * outside everything the launcher can measure or give back. The build in the
- * name matters: the release keys its directory by a hash of its own settings,
- * which does not change when the code the translator emits does, so a database
- * written by another build would be read as if it were this one's. The
- * trailing slash is the module's: it appends its database's file names. */
-static inline int fex_cache_database_path( char *out, size_t size, const char *runtime_dir,
-                                           const char *build )
+/* Where the translator itself is pointed at (FEX_DISKCACHEPATH), in the form
+ * the module reads it in: a Windows path, because the module is a Windows
+ * binary whose file calls go through Wine, not through this process's libc.
+ * The directory below the root above is named after the build -- one for the
+ * stock CPU modules, one for each other variant -- because the release keys
+ * its own directory by a hash of its settings alone: two builds of the
+ * translator would read each other's emitted code from it. The trailing
+ * separator is the module's, which appends its database's file names to it. */
+#define FEX_CACHE_WINDOWS_ROOT "C:\\users\\steamuser\\AppData\\Local\\fex-emu\\DiskCache\\"
+
+static inline int fex_cache_database_path( char *out, size_t size, const char *build )
 {
-    char root[480], name[64];
+    char name[64];
     size_t i;
     int length;
 
-    if (!build || !build[0] || !fex_cache_root( root, sizeof(root), runtime_dir, 0 )) return 0;
+    if (!build || !build[0]) return 0;
     for (i = 0; build[i] && i + 1 < sizeof(name); i++)
     {
         const char c = build[i];
@@ -83,7 +83,7 @@ static inline int fex_cache_database_path( char *out, size_t size, const char *r
         name[i] = (isalnum( (unsigned char)c ) || c == '.' || c == '-' || c == '_') ? c : '_';
     }
     name[i] = 0;
-    length = snprintf( out, size, "%s/DiskCache/%s/", root, name );
+    length = snprintf( out, size, FEX_CACHE_WINDOWS_ROOT "%s\\", name );
     return length > 0 && (size_t)length < size;
 }
 
