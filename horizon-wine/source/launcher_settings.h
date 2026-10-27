@@ -218,7 +218,7 @@ enum {
     LAUNCHER_UPSCALING_COUNT = 3,
     LAUNCHER_SCALING_COUNT = 4,
     LAUNCHER_SHARPNESS_COUNT = 6,
-    LAUNCHER_RESOLUTION_COUNT = 5,
+    LAUNCHER_RESOLUTION_COUNT = 6,
     LAUNCHER_VOODOO_API_COUNT = 6,
     LAUNCHER_VOODOO_SCALING_COUNT = 5,
     LAUNCHER_VOODOO_RESOLUTION_COUNT = 6,
@@ -243,11 +243,14 @@ static const char *const launcher_scaling_values[] =
     { "full", "aspect", "integer", "stretch_4_3" };
 static const char *const launcher_sharpness_labels[] = { "0%", "20%", "40%", "60%", "80%", "100%" };
 static const float launcher_sharpness_values[] = { 0.0f, 0.2f, 0.4f, 0.6f, 0.8f, 1.0f };
-/* The screen a program starts with. The first is the panel, and the default. */
+/* The screen a program starts with. The first is the panel, and the default;
+ * the last is exactly half of it, so a game drawing at that size lands on the
+ * panel in whole steps (Scaling: Integer) with a quarter of the pixels to fill.
+ * The first five keep their places: a saved program names its size by label. */
 static const char *const launcher_resolution_labels[] =
-    { "1280x720", "1920x1080", "1024x768", "800x600", "640x480" };
+    { "1280x720", "1920x1080", "1024x768", "800x600", "640x480", "640x360" };
 static const int launcher_resolution_sizes[][2] =
-    { { 1280, 720 }, { 1920, 1080 }, { 1024, 768 }, { 800, 600 }, { 640, 480 } };
+    { { 1280, 720 }, { 1920, 1080 }, { 1024, 768 }, { 800, 600 }, { 640, 480 }, { 640, 360 } };
 /* dgVoodoo2 wrapper settings. The values are dgVoodoo.conf entries; when the
  * Voodoo switch of the program is on, the runtime writes the file beside the
  * program before every start. */

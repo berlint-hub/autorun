@@ -218,6 +218,11 @@ says what happens to it:
 - **Stretch 4:3** fills the screen with the central 4:3 of the picture, the
   classic console-on-a-widescreen-TV look.
 
+For pixel art, **Resolution** in the same options offers **640x360**, exactly
+half of the screen: at that size a game can be drawn with a quarter of the
+pixels and, with **Integer**, lands on the screen in whole steps without a
+shimmer.
+
 **Upscaling** decides how the picture is filtered inside that rectangle:
 bilinear, FSR 1.0 with its own sharpness setting, or nearest for the square
 blocks. Scaling reaches Vulkan and DXVK games through the runtime's own scaled

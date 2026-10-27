@@ -2711,9 +2711,10 @@ static int program_menu_run( struct launcher *l, struct program *p, char *target
         snprintf( row->value, sizeof(row->value), "%s", launcher_scaling_labels[p->settings.scaling] );
 
         ADD_ROW( ROW_RESOLUTION, SECTION_GRAPHICS, "Resolution",
-                 "The screen a game starts with. 1280x720 is the panel itself, the fewest pixels to draw. "
-                 "A game that asks for a display mode of its own still gets it, and whatever it draws "
-                 "is scaled onto the panel." );
+                 "The screen a game starts with. 1280x720 is the panel itself; 640x360 is exactly half "
+                 "of it, a quarter of the pixels, and with Scaling on Integer it lands on the panel in "
+                 "whole steps. A game that asks for a display mode of its own still gets it, and "
+                 "whatever it draws is placed on the panel by the Scaling setting." );
         row->kind = UI_ROW_DROPDOWN;
         row->choices = LAUNCHER_RESOLUTION_COUNT;
         snprintf( row->value, sizeof(row->value), "%s", launcher_resolution_labels[p->settings.resolution] );
