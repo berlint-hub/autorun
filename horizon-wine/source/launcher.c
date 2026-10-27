@@ -2704,8 +2704,11 @@ static int program_menu_run( struct launcher *l, struct program *p, char *target
                   state_text( p->settings.profile, l->options->profile, "On", "Off", buffer, sizeof(buffer) ) );
 
         ADD_ROW( ROW_WINDOWS, SECTION_GRAPHICS, "Windows shown by",
-                 "The compositor draws every window through OpenGL. The framebuffer copies window pixels "
-                 "straight to the screen, for when the compositor misbehaves." );
+                 "The compositor draws every window through OpenGL: the picture, dialogs, the on-screen "
+                 "keyboard and the pointer. The framebuffer copies window pixels straight to the screen "
+                 "instead, which is for a program that draws with GDI or DirectDraw. A program that draws "
+                 "with OpenGL or Vulkan -- every 3D game here -- puts its own picture on the screen either "
+                 "way, and with the framebuffer chosen nothing can be drawn over it." );
         row->adjustable = 1;
         snprintf( row->value, sizeof(row->value), "%s",
                   state_text( p->settings.framebuffer, l->options->framebuffer, "Framebuffer", "Compositor",
@@ -4074,8 +4077,10 @@ static void settings_menu( struct launcher *l )
         snprintf( rows[SET_WINDOWS].label, sizeof(rows[0].label), "Windows shown by" );
         snprintf( rows[SET_WINDOWS].value, sizeof(rows[0].value), "%s",
                   l->options->framebuffer ? "Framebuffer" : "Compositor" );
-        rows[SET_WINDOWS].help = "The framebuffer copies window pixels straight to the screen, "
-                                 "for when the OpenGL compositor misbehaves.";
+        rows[SET_WINDOWS].help = "Window pixels go straight to the screen instead of through the OpenGL "
+                                 "compositor. Only a program that draws with GDI or DirectDraw gains anything: "
+                                 "one that draws with OpenGL or Vulkan is on the screen either way, and nothing "
+                                 "can be drawn over it.";
         launcher_input_rows( rows + SET_INPUT, l->options->runtime_dir, NULL, l->options->swkbd_auto );
         for (i = SET_INPUT; i <= SET_INPUT_END; i++) rows[i].group = SET_SECTION_CONTROLS;
 

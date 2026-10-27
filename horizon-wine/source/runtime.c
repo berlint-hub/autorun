@@ -1220,6 +1220,18 @@ static void *wine_nx_screen_acquire( int width, int height, int vulkan )
     else if (window) nwindowSetCrop( window, 0, 0, 0, 0 );
     log_line( "[NXGL] %s", window ? (vulkan ? "screen handed to a Vulkan surface" : "screen handed to an OpenGL surface")
                           : (vulkan ? "screen busy; Vulkan surface refused" : "screen busy; OpenGL surface refused") );
+    /* The framebuffer setting does not apply to a surface: it is set to show
+     * window pixels, and a program drawing through OpenGL or Vulkan has none
+     * to show. Said once, so the log answers "why is the framebuffer setting
+     * not doing anything" for the program that made it wonder. */
+    if (window && !wine_nx_compositor_mode)
+    {
+        static int told;
+
+        if (!__atomic_exchange_n( &told, 1, __ATOMIC_ACQ_REL ))
+            log_line( "[NXGL] the framebuffer setting has nothing to show here: %s draws its own picture",
+                      vulkan ? "this program's Vulkan" : "this program's OpenGL" );
+    }
     if (taken_over) log_line( "[NXGL] the screen is taken over from the OpenGL surface" );
     if (window) log_line( "[NXGL] the surface is %dx%d, scaled onto the %dx%d panel", width, height,
                           WINE_NX_FB_W, WINE_NX_FB_H );
@@ -4857,8 +4869,10 @@ int main( int argc, char **argv )
     if (!config_bool( "display-devices", 1, "no-display-devices.txt", 1 )) wine_nx_display_devices = 0;
     log_line( "[INIT] display devices %s", wine_nx_display_devices ? "registered" : "off" );
     if (!config_bool( "windows-through-opengl", 1, "framebuffer.txt", 1 )) wine_nx_compositor_mode = 0;
-    log_line( "[INIT] windows shown by %s",
-              wine_nx_compositor_mode ? "the OpenGL compositor" : "the framebuffer" );
+    log_line( "[INIT] windows shown by %s", wine_nx_compositor_mode ?
+              "the OpenGL compositor" :
+              "the framebuffer (window pixels only: a program that draws with OpenGL or Vulkan puts its "
+              "own surface on the screen either way, and nothing else can be drawn over it)" );
     /* Both are wanted on the way out, when the card is a poor thing to ask. */
     runtime_loader_anyway = config_bool( "hand-the-process-back-anyway", 0, "loader-anyway.txt", 0 );
     runtime_reopen_launcher = config_bool( "reopen-the-launcher-on-exit", 1, "reload-launcher.txt", 0 );

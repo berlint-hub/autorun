@@ -62,7 +62,18 @@ runtime; the full package now ships the Mesa 26 one.
   an AF_INET6 socket is IPv4 underneath, reaching `::`, `::ffff:a.b.c.d` and
   `::1`.
 - **Graphics.** Windows are drawn as layers of one OpenGL compositor, or
-  straight to the framebuffer. The runtime links Mesa 26 from
+  straight to the framebuffer. The two are not two speeds of the same thing:
+  the framebuffer receives *window pixels*, so it shows what is painted with
+  GDI or DirectDraw, while a program that draws with OpenGL or Vulkan hands
+  its picture to the screen through its own surface either way -- the
+  compositor suspends while that surface holds the display, and the
+  framebuffer never sees those frames. Choosing the framebuffer therefore
+  costs nothing and gains nothing for a 3D program; it only means no other
+  window, dialog, pointer or on-screen keyboard can be drawn over the game.
+  The log says which of the two is showing (`[INIT] windows shown by …`) and,
+  the first time a surface takes the screen with the framebuffer chosen, that
+  the setting has nothing to show for this program.
+  The runtime links Mesa 26 from
   [mesa-switch](https://github.com/danfromtico/mesa-switch): OpenGL through
   nvc0 and Vulkan through NVK, with Wine's winevulkan on top. Direct3D runs
   through wined3d on OpenGL, or through architecture-specific DXVK payloads on
