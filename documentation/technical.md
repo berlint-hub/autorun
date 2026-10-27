@@ -98,11 +98,26 @@ runtime; the full package now ships the Mesa 26 one.
   if need be, without the version, so the program gets the driver's own default
   context instead of nothing, and says so
   (`[NXGL] the driver refused a context with…`). What it asked for and what it
-  got are both in the log — `[NXGL] the program asks for…` at creation, and at
-  the first swap `[NXGL] the program's OpenGL: <version> (GLSL <version>, a
-  core|compatibility profile), its extension list is N bytes`, which is the
-  pair of facts that decide whether a game's `#version 120` shaders can
-  compile at all and whether its extension buffer is overrun.
+  got are both in the log — `[NXGL] the program asks for…` at creation, and
+  `[NXGL] the program's OpenGL: <version> (GLSL <version>, a
+  core|compatibility profile), its extension list is N bytes` when that
+  context first holds the program's window. Those are the pair of facts that
+  decide whether a game's `#version 120` shaders can compile at all and whether
+  its extension buffer is overrun, and taking them when the context is made
+  current rather than at the first frame means a game that never draws still
+  says what it was given; a context the driver refuses is logged too (`the
+  program's OpenGL context could not be made current, error …`), because that
+  answer exists nowhere else.
+- **A stall that names the call it is standing in.** `[STALL]` reports where
+  every thread is, and a thread inside ntdll says only "ntdll". The system call
+  dispatcher therefore keeps, per thread, the number of the call it was last
+  in (`wine_nx_syscall_last`), and the report names it from Wine's own call
+  tables -- `thread 4w at ntdll.dll+0x6d024 … NtUserMsgWaitForMultipleObjectsEx
+  (0x11d4)`, name and number as the tables have them. Waiting, spinning and
+  locked out all look the same from outside and each needs a different fix;
+  the call is what tells them apart. It comes with a line about the program's
+  OpenGL (`has not swapped a frame yet; its OpenGL is 4.3 (Core Profile) …`),
+  which separates "no usable context" from "never reached the first frame".
 - **Caches on the card.** Mesa's on-disk shader cache is given a directory of
   its own, `sdmc:/switch/wine/cache`, and a 512 MB cap through
   `MESA_SHADER_CACHE_*` (and the `MESA_GLSL_*` names Mesa 20.1 reads), so a

@@ -685,6 +685,16 @@ void wine_nx_threads_report_stalled( void )
         len = snprintf( line, sizeof(line), "[STALL] thread %u%c at %s sp=%#lx lr=%#lx",
                         tid, kind, where,
                         (unsigned long)ctx.sp, (unsigned long)ctx.lr );
+        /* A thread stopped inside a system call is waiting or spinning, and
+         * which call it is says which of the two. */
+        {
+            extern unsigned int wine_nx_syscall_last_of( unsigned int ) __attribute__((weak));
+            extern const char *wine_nx_syscall_name( unsigned int ) __attribute__((weak));
+            unsigned int call = &wine_nx_syscall_last_of ? wine_nx_syscall_last_of( tid ) : 0;
+            const char *name = call && &wine_nx_syscall_name ? wine_nx_syscall_name( call ) : NULL;
+
+            if (call) len = appendf( line, len, " %s(%#x)", name ? name : "syscall", call );
+        }
         for (f = 0; f < frames; f++)
         {
             name_address( callers[f], where, sizeof(where) );

@@ -170,13 +170,25 @@ static void nx_log( const char *format, ... )
     wine_nx_runtime_trace( buffer );
 }
 
-/* What the program's own context turned out to be, said once, at its first
- * swap: the GL and GLSL versions it was given, whether that is a core or a
- * compatibility profile, and how long the extension list it reads is. All four
- * are what a game of the 2000s quietly depends on: GLSL 1.20 shaders do not
- * compile in a core profile at all, and the extension list is what such a game
- * copies into a buffer of its era's size -- the launcher's year switch is what
- * shortens that list, and this line is how a change to it is seen. */
+/* What the program's context is, for the stall report: a game that never swaps
+ * a frame is one whose OpenGL is either unusable or unused, and the version
+ * says which at a glance -- a context that is not there at all reads
+ * differently from one reported as 4.3. */
+static char nx_program_gl[80] = "no context yet";
+
+const char *wine_nx_gl_program_version( void )
+{
+    return nx_program_gl;
+}
+
+/* What the program's own context turned out to be, said once, the first time it
+ * draws or the first time it is made current: the GL and GLSL versions it was
+ * given, whether that is a core or a compatibility profile, and how long the
+ * extension list it reads is. All four are what a game of the 2000s quietly
+ * depends on: GLSL 1.20 shaders do not compile in a core profile at all, and
+ * the extension list is what such a game copies into a buffer of its era's
+ * size -- the launcher's year switch is what shortens that list, and this line
+ * is how a change to it is seen. */
 static void nx_note_program_gl( void )
 {
     const char *version, *shading, *extensions;
@@ -185,6 +197,7 @@ static void nx_note_program_gl( void )
 
     if (InterlockedExchange( &noted, 1 ) || !funcs->p_glGetString) return;
     version = (const char *)funcs->p_glGetString( GL_VERSION );
+    if (version) snprintf( nx_program_gl, sizeof(nx_program_gl), "%s", version );
     shading = (const char *)funcs->p_glGetString( GL_SHADING_LANGUAGE_VERSION );
     extensions = (const char *)funcs->p_glGetString( GL_EXTENSIONS );
     if (funcs->p_glGetIntegerv) funcs->p_glGetIntegerv( GL_CONTEXT_PROFILE_MASK, &profile );
@@ -722,6 +735,31 @@ static struct opengl_context *nx_context_create( int format, struct opengl_conte
     return context;
 }
 
+/* The driver's own way of making a context current, kept so ours can say what
+ * happened: a refusal here is what a program sees as "no rendering at all",
+ * and eglMakeCurrent's answer is the only place it is visible. */
+static BOOL (*nx_base_context_activate)( struct opengl_context *, struct opengl_drawable *, struct opengl_drawable * );
+
+static BOOL nx_context_activate( struct opengl_context *context, struct opengl_drawable *draw,
+                                 struct opengl_drawable *read )
+{
+    BOOL ret = nx_base_context_activate( context, draw, read );
+    EGLint error = funcs->p_eglGetError();
+
+    if (!ret)
+    {
+        static int failures;
+
+        if (failures++ < 4)
+            nx_log( "[NXGL] the program's OpenGL context could not be made current, error %#x", error );
+        return FALSE;
+    }
+    /* Only the program's own window tells us what it got; a context that draws
+     * into a pbuffer or the compositor's own is none of our business. */
+    if (draw && draw->surface == nx_screen_surface) nx_note_program_gl();
+    return TRUE;
+}
+
 /* Mesa's Switch platform is the default display; its windows are NWindows. */
 static void nx_init_egl_platform( struct egl_platform *platform )
 {
@@ -735,6 +773,7 @@ static struct opengl_driver_funcs nx_driver_funcs =
     .p_init_egl_platform = nx_init_egl_platform,
     .p_surface_create = nx_surface_create,
     .p_context_create = nx_context_create,
+    .p_context_activate = nx_context_activate,
 };
 
 UINT wine_nx_drv_OpenGLInit( UINT version, const struct opengl_funcs *opengl_funcs,
@@ -753,7 +792,7 @@ UINT wine_nx_drv_OpenGLInit( UINT version, const struct opengl_funcs *opengl_fun
     nx_driver_funcs.p_describe_pixel_format = (*driver_funcs)->p_describe_pixel_format;
     nx_driver_funcs.p_init_extensions = (*driver_funcs)->p_init_extensions;
     nx_driver_funcs.p_context_destroy = (*driver_funcs)->p_context_destroy;
-    nx_driver_funcs.p_context_activate = (*driver_funcs)->p_context_activate;
+    nx_base_context_activate = (*driver_funcs)->p_context_activate;
     nx_driver_funcs.p_pbuffer_create = (*driver_funcs)->p_pbuffer_create;
     nx_driver_funcs.p_pbuffer_updated = (*driver_funcs)->p_pbuffer_updated;
     nx_driver_funcs.p_pbuffer_bind = (*driver_funcs)->p_pbuffer_bind;

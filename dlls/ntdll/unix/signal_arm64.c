@@ -543,6 +543,41 @@ void *wine_nx_current_teb(void)
 
 /* System calls from PE code, reported by the runtime's [PROGRESS] line. */
 unsigned int wine_nx_syscalls;
+#ifdef __SWITCH__
+/* The system call each thread was last in. A program that has stopped drawing
+ * is, half the time, sitting in one of these -- a wait for an event nobody
+ * sets, a message queue that stays empty, a loop around the clock -- and which
+ * one it is decides what the runtime has to fix. The thread's own stack says
+ * only "ntdll", so the number is kept here, where every call passes, and the
+ * stall report reads it back by thread id. Two relaxed stores per call. */
+#define NX_SYSCALL_LAST_SLOTS 64
+struct nx_syscall_last { unsigned int tid, id; };
+static struct nx_syscall_last wine_nx_syscall_last[NX_SYSCALL_LAST_SLOTS];
+
+static inline void nx_syscall_note( unsigned int id )
+{
+    unsigned int tid = (unsigned int)HandleToULong( NtCurrentTeb()->ClientId.UniqueThread );
+    struct nx_syscall_last *slot = &wine_nx_syscall_last[tid % NX_SYSCALL_LAST_SLOTS];
+
+    __atomic_store_n( &slot->tid, tid, __ATOMIC_RELAXED );
+    __atomic_store_n( &slot->id, id, __ATOMIC_RELAXED );
+}
+
+/* What the thread with this id was last doing, for the stall report. */
+unsigned int wine_nx_syscall_last_of( unsigned int tid )
+{
+    unsigned int i;
+
+    for (i = 0; i < NX_SYSCALL_LAST_SLOTS; i++)
+    {
+        struct nx_syscall_last *slot = &wine_nx_syscall_last[i];
+
+        if (__atomic_load_n( &slot->tid, __ATOMIC_RELAXED ) != tid) continue;
+        return __atomic_load_n( &slot->id, __ATOMIC_RELAXED );
+    }
+    return 0;
+}
+#endif
 /* Calls per system call id (table << 12 | function), for the runtime's [PROGRESS] line. */
 unsigned int wine_nx_syscall_counts[0x2000];
 static __thread unsigned int wine_nx_syscall_sample;
@@ -589,6 +624,9 @@ ULONG_PTR wine_nx_do_syscall( ULONG_PTR *stack_args,
     }
 
     arg_bytes = table->ArgumentTable ? table->ArgumentTable[func_idx] : 0;
+#ifdef __SWITCH__
+    nx_syscall_note( syscall_id );
+#endif
 
     if (trace_syscall)
     {

@@ -275,6 +275,18 @@ BOOLEAN KeAddSystemServiceTable( ULONG_PTR *funcs, ULONG_PTR *counters, ULONG li
     return TRUE;
 }
 
+/* The name of a system call by its number, for the runtime's stall report: a
+ * program that has stopped drawing is usually inside one of these, and which
+ * one says whether it is waiting, spinning or locked out. */
+const char *wine_nx_syscall_name( UINT id )
+{
+    UINT idx = (id >> 12) & 3, num = id & 0xfff;
+    const char **names = syscall_names[idx];
+
+    if (names && names[num]) return names[num];
+    return NULL;
+}
+
 void trace_syscall( UINT id, ULONG_PTR *args, ULONG len )
 {
     UINT idx = (id >> 12) & 3, num = id & 0xfff;
