@@ -196,6 +196,24 @@ runtime; the full package now ships the Mesa 26 one.
   does one whose window is hidden, and one that loses the screen to a Vulkan
   surface), a swap on it succeeds without presenting anything, and the log says
   once per doubling how often that happened.
+- **A window keeps the buffers it was given.** libnx refuses to resize a
+  window that still has buffers registered, and destroying an EGL surface does
+  not release them. The compositor handed the screen to Dark Athena's OpenGL,
+  the program asked for 800x600 and was refused without a word, its first
+  frame went into a window still sized to the compositor's, and
+  `eglSwapBuffers` never came back: one core, every other thread parked, six
+  compositor frames on the screen and no line in the log between the context
+  and the stall report. The runtime now releases the window's buffers both
+  ways -- after the presenter has detached, and before it takes the screen
+  back -- and says how many it found (`[NXGL] the screen still had 3 buffers
+  registered for the program: released`), a refused resize is named
+  (`[NXGL] the screen would not take the program's 800x600`), the first three
+  swaps are logged with their surface size and how long they took, and a swap
+  still inside the driver two seconds later is named in the stall report,
+  which also prints the screen's window as libnx keeps it -- slots registered,
+  size and format, whether a buffer is out -- so "never registered", "stuck
+  waiting for a buffer" and "stuck handing one back" are told apart by reading
+  one line.
 - **The message loop's clock is not free.** Every message loop turn asks for a
   performance counter tick to decide whether to poll the driver, and on Horizon
   a read of that counter is the one system call the runtime deliberately makes
@@ -414,7 +432,10 @@ Everything the runtime writes is in `switch/wine/logs`. Each run writes
 `_verbose` and `_profiler` added to the name when those were on, so a
 diagnostic run keeps its own file. The program's standard handles are
 `stdin.txt`, `stdout.txt` and `stderr.txt` there, and verbose runs add
-`horizon-trace.log`. A log's first lines include `[BUILD]`, the runtime
+`horizon-trace.log`. `driver.txt` holds the graphics driver's own words: Mesa's
+switch backend writes a present that goes wrong to stderr
+(`egl-switch present: <call> failed (error=…, slot=…)`), and on this console
+stderr goes nowhere else. A log's first lines include `[BUILD]`, the runtime
 version, worth
 checking before reading anything else. `[PROGRESS]` lines report every 10
 seconds: frames, OpenGL and system call rates, memory and translation counters.

@@ -385,6 +385,29 @@ static void nx_drawable_flush( struct opengl_drawable *base, UINT flags )
 extern unsigned long long horizon_interrupt_time(void);
 unsigned int wine_nx_gl_swaps;
 unsigned long long wine_nx_gl_swap_time;  /* 100 ns */
+/* When the swap the program is inside now began, 0 while none is. A swap that
+ * never comes back can be the whole of a program's run -- Dark Athena called
+ * wglSwapBuffers once and sat inside it at 100 % of a core for the rest of the
+ * two minutes it was given -- and from outside that looks the same as a program
+ * that never reached its first frame. The first three swaps are named with
+ * their surface's size and what they returned, and the runtime's stall report
+ * reads the start back (runtime.c, stall_watch) to say a swap is stuck and for
+ * how long. */
+static unsigned long long nx_swap_begun_at;
+static unsigned int nx_swap_named;
+
+/* Milliseconds the program's swap has been inside the driver, 0 if none is.
+ * Read from another thread, hence the atomics; the clock is the same one the
+ * frame times are measured with. */
+unsigned int wine_nx_gl_swap_stuck_ms( void )
+{
+    unsigned long long began = __atomic_load_n( &nx_swap_begun_at, __ATOMIC_ACQUIRE ), now;
+
+    if (!began) return 0;
+    now = horizon_interrupt_time();
+    if (now <= began) return 0;
+    return (unsigned int)((now - began) / 10000);  /* 100 ns ticks to ms */
+}
 
 /* The floating keyboard (horizon-wine/source/osk.c), put into the back
  * buffer just before it is shown: its picture in a texture of each context's
@@ -555,6 +578,8 @@ static void nx_drawable_screenshot( struct opengl_drawable *base )
 static BOOL nx_drawable_swap( struct opengl_drawable *base )
 {
     unsigned long long start;
+    EGLint width = 0, height = 0;
+    unsigned int index;
     BOOL ret;
 
     nx_note_program_gl();
@@ -585,8 +610,6 @@ static BOOL nx_drawable_swap( struct opengl_drawable *base )
      * the Vulkan blit and the compositor follow. */
     if (&wine_nx_present_fit_stretched && base->client)
     {
-        EGLint width = 0, height = 0;
-
         if (funcs->p_eglQuerySurface( egl->display, base->surface, EGL_WIDTH, &width ) &&
             funcs->p_eglQuerySurface( egl->display, base->surface, EGL_HEIGHT, &height ))
             wine_nx_present_fit_stretched( width, height, base->client->virtual_rect.left,
@@ -594,10 +617,33 @@ static BOOL nx_drawable_swap( struct opengl_drawable *base )
     }
     nx_osk_draw( base );
     nx_drawable_screenshot( base );
+    /* The first three swaps say what they are, because the first one is where
+     * a program that shows nothing stops: a swap the driver never returns used
+     * to leave the log with no line between the context and the stall report,
+     * and the window it was swapped on was the question. */
+    index = __atomic_add_fetch( &nx_swap_named, 1, __ATOMIC_RELAXED );
+    if (index <= 3)
+        nx_log( "[NXGL] swap #%u began on the program's %dx%d surface", index, width, height );
     start = horizon_interrupt_time();
+    /* The first one in, not the last: two windows can swap at once, and the
+     * one worth naming is the one that has been in there the longest. */
+    if (!__atomic_load_n( &nx_swap_begun_at, __ATOMIC_ACQUIRE ))
+        __atomic_store_n( &nx_swap_begun_at, start, __ATOMIC_RELEASE );
     ret = funcs->p_eglSwapBuffers( egl->display, base->surface );
+    if (__atomic_load_n( &nx_swap_begun_at, __ATOMIC_RELAXED ) == start)
+        __atomic_store_n( &nx_swap_begun_at, 0, __ATOMIC_RELEASE );
     __atomic_add_fetch( &wine_nx_gl_swap_time, horizon_interrupt_time() - start, __ATOMIC_RELAXED );
     __atomic_add_fetch( &wine_nx_gl_swaps, 1, __ATOMIC_RELAXED );
+    if (index <= 3)
+    {
+        if (ret)
+            nx_log( "[NXGL] swap #%u came back after %u ms", index,
+                    (unsigned int)((horizon_interrupt_time() - start) / 10000) );
+        else
+            nx_log( "[NXGL] swap #%u failed after %u ms: EGL error 0x%x", index,
+                    (unsigned int)((horizon_interrupt_time() - start) / 10000),
+                    funcs->p_eglGetError() );
+    }
     return ret;
 }
 

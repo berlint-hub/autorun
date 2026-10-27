@@ -597,6 +597,39 @@ static void stall_watch( void *arg )
             if (&wine_nx_gl_swaps && !__atomic_load_n( &wine_nx_gl_swaps, __ATOMIC_RELAXED ))
                 log_line( "[STALL] the program has not swapped a frame yet; its OpenGL is %s",
                           &wine_nx_gl_program_version ? wine_nx_gl_program_version() : "unknown" );
+            /* A program inside a swap that never returns is not a program
+             * waiting for an event: the one call is where it stopped, and how
+             * long it has been there says whether it is stuck or slow. */
+            {
+                extern unsigned int wine_nx_gl_swap_stuck_ms( void ) __attribute__((weak));
+
+                if (&wine_nx_gl_swap_stuck_ms)
+                {
+                    unsigned int stuck = wine_nx_gl_swap_stuck_ms();
+
+                    if (stuck >= 2000)
+                        log_line( "[STALL] the program's swap has been inside the driver for "
+                                  "%u.%u s: eglSwapBuffers has not come back",
+                                  stuck / 1000, stuck % 1000 / 100 );
+                }
+            }
+            /* The window the program draws into, as libnx keeps it. A screen
+             * that never shows a frame is one of three things, and three of
+             * these numbers say which: the program's buffers never reached
+             * the window (no slots, or slots at somebody else's size), a
+             * buffer is out of it and has not come back (stuck in the queue),
+             * or it has none out and is waiting for one (stuck in the
+             * dequeue). */
+            {
+                NWindow *window = nwindowGetDefault();
+
+                log_line( "[STALL] the screen's window: %u slots registered, %dx%d format %u, %s, %s",
+                          (unsigned)__builtin_popcountll( (unsigned long long)window->slots_configured ),
+                          (unsigned)window->width, (unsigned)window->height, (unsigned)window->format,
+                          window->is_connected ? "connected" : "not connected",
+                          window->cur_slot >= 0 ? "a buffer is out and has not come back"
+                                                : "no buffer is out" );
+            }
             /* A program waiting for a moment in time and one waiting for an
              * event look the same from outside; the two clocks tell them
              * apart, so they are always in the stall report. */
@@ -1122,6 +1155,36 @@ int wine_nx_compositor_enabled(void)
     return 1;
 }
 
+/* The window is resized to the picture the program is about to draw, and a
+ * window that still has another client's buffers registered refuses to be
+ * resized at all (nwindowSetDimensions, nx/source/display/native_window.c:
+ * "cannot be called when there are buffers registered").  Releasing them is
+ * the driver's job when it destroys a surface -- mesa-switch does it, except
+ * for a zink window, whose swapchain owns the registration, and after any of
+ * the early returns its cleanup takes when a present went wrong -- so a window
+ * can arrive here still holding the compositor's slots, and the program gets
+ * the compositor's size instead of its own.  Dark Athena asked for 800x600,
+ * took a window the compositor had been presenting 1280x720 into, and its
+ * first eglSwapBuffers never came back, at 100 % of a core with every other
+ * thread parked.  So: set, and if the window says no, take the buffers back
+ * and set again.  The release disconnects the producer, which the driver's
+ * next nwindowConfigureBuffer connects again; the line is only logged in the
+ * case worth knowing about, so a run without one says the driver did its part.
+ */
+static void screen_take_dimensions( int width, int height )
+{
+    NWindow *window = nwindowGetDefault();
+    Result rc = nwindowSetDimensions( window, width, height );
+
+    if (R_SUCCEEDED(rc)) return;
+    log_line( "[NXGL] the screen would not take the program's %dx%d (error 0x%x); another "
+              "client's buffers were still on it, and were released", width, height, rc );
+    rc = nwindowReleaseBuffers( window );
+    if (R_SUCCEEDED(rc)) rc = nwindowSetDimensions( window, width, height );
+    if (R_FAILED(rc))
+        log_line( "[NXGL] the screen still will not take %dx%d: error 0x%x", width, height, rc );
+}
+
 /* A window surface takes the screen. libnx's framebuffer and EGL cannot
  * both queue buffers to the default NWindow, so the framebuffer is closed, or
  * the compositor gives the screen up, while the surface exists; GDI keeps
@@ -1197,6 +1260,9 @@ static void *wine_nx_screen_acquire( int width, int height, int vulkan )
         else wine_nx_gl_window = 1;
     }
     pthread_mutex_unlock( &wine_nx_fb_mutex );
+    /* After the suspend: the presenter has destroyed its surface by now, and
+     * what its EGL left registered is what the window has to be rid of before
+     * it can take the program's size. */
     if (window && compositor) wine_nx_compositor_suspend();
     /* The surface is the window's own size: the program draws 1:1 and the
      * display compositor scales the buffer onto the panel, like it does for
@@ -1211,7 +1277,7 @@ static void *wine_nx_screen_acquire( int width, int height, int vulkan )
      * compositor shows only the central 4:3 of the buffer, stretched over the
      * whole panel.  The Vulkan screen buffers are drawn already cropped and
      * stay whole. */
-    if (window) nwindowSetDimensions( window, width, height );
+    if (window) screen_take_dimensions( width, height );
     if (window && vulkan)
         nwindowSetCrop( window, 0, 0, 0, 0 );  /* the Vulkan buffers carry their own crop */
     else if (window && screen_scaling_crops_4_3( wine_nx_scaling_mode ))
@@ -1221,7 +1287,9 @@ static void *wine_nx_screen_acquire( int width, int height, int vulkan )
         screen_crop_4_3( &crop_w, &crop_h );
         left = (width - crop_w) / 2;
         top = (height - crop_h) / 2;
-        nwindowSetCrop( window, left, top, left + crop_w, top + crop_h );
+        Result rc = nwindowSetCrop( window, left, top, left + crop_w, top + crop_h );
+
+        if (R_FAILED(rc)) log_line( "[NXGL] the crop would not take: error 0x%x", rc );
         log_line( "[NXGL] the crop is %d,%d-%d,%d", left, top, left + crop_w, top + crop_h );
     }
     else if (window) nwindowSetCrop( window, 0, 0, 0, 0 );
@@ -1276,6 +1344,11 @@ static void wine_nx_screen_return( void )
         wine_nx_desktop_h = wine_nx_desktop_default_h;
     }
     log_line( "[NXGL] screen returned to the %s", compositor ? "compositor" : "framebuffer" );
+    /* The program's surface is gone by now (wine_nx_gl_release_window), so
+     * what its EGL registered goes back too: the compositor cannot resize the
+     * window, nor register its own buffers, while they are there, and its
+     * attach would fail with the error logged instead of the picture drawn. */
+    nwindowReleaseBuffers( nwindowGetDefault() );
     if (compositor) wine_nx_compositor_resume();
 }
 
@@ -4848,6 +4921,18 @@ int main( int argc, char **argv )
             R_FAILED( threadStart( &stall_watch_thread ) ))
             threadClose( &stall_watch_thread );
         else stall_watch_running = 1;
+    }
+    /* The graphics driver keeps its own log, and a present that goes wrong
+     * says what went wrong there and nowhere else: Mesa's switch backend
+     * writes `egl-switch present: <call> failed (error=…, slot=…)` to stderr,
+     * which on this console goes nowhere at all. It goes beside the runtime's
+     * log instead, one file per run. */
+    if (log_file)
+    {
+        if (freopen( RUNTIME_LOGS "/driver.txt", "w", stderr ))
+            log_line( "[LOG] the driver's own words are kept in " RUNTIME_LOGS "/driver.txt" );
+        else
+            log_line( "[LOG] the driver's own log could not be opened" );
     }
     /* First, before anything else: which build this is and which file it was
      * started from. Without it a log from an older NRO on the card reads just

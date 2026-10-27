@@ -71,8 +71,17 @@ static const struct compositor_gl_funcs *egl_init( char *error, int size )
 static int egl_attach( int width, int height, char *error, int size )
 {
     NWindow *window = nwindowGetDefault();
+    Result rc = nwindowSetDimensions( window, width, height );
 
-    nwindowSetDimensions( window, width, height );
+    /* The surface is made at the window's size, so a window that refused to
+     * be resized makes buffers that do not fit it: named instead of failing
+     * later inside a swap that never comes back. */
+    if (R_FAILED(rc))
+    {
+        snprintf( error, size, "nwindowSetDimensions(%dx%d) failed, error 0x%x", width, height,
+                  rc );
+        return -1;
+    }
     if (!(egl_surface = eglCreateWindowSurface( egl_display, egl_config, (EGLNativeWindowType)window, NULL )))
     {
         snprintf( error, size, "eglCreateWindowSurface failed, error 0x%x", eglGetError() );
