@@ -108,6 +108,24 @@ runtime; the full package now ships the Mesa 26 one.
   says what it was given; a context the driver refuses is logged too (`the
   program's OpenGL context could not be made current, error …`), because that
   answer exists nowhere else.
+- **A clock that cannot stand still.** `NtQuerySystemTime` is what a program
+  reads when it waits for a moment in time — `Sleep`, a frame pacer, a timeout
+  around a load — and on the console the calendar clock behind it belongs to
+  the system's time services, which this runtime's C library may not have at
+  all: `gettimeofday` then fails or answers the same value every time, and a
+  program waiting for a deadline that never arrives looks exactly like one
+  waiting for an event nobody sets. (Dark Athena was this: its main thread on a
+  full core of `NtQuerySystemTime` calls, not one frame in three minutes.)
+  Windows itself keeps the system time as the calendar clock read once at boot
+  plus interrupt time, never re-reading the RTC, so that is what the Switch
+  build does now: one read of the calendar clock, cached, plus time since boot.
+  It never steps backwards, it never stops, and it answers in a tick read
+  instead of a round trip to the time service — the shared-data clock thread
+  alone asks for it a thousand times a second. If the clock is unreadable the
+  program starts from 2000-01-01 and still moves; the log says which
+  (`[CLOCK] the console's calendar clock says …` or `this program has no
+  calendar clock to read`), and every stall report carries what both clocks
+  did since the previous one (`[STALL] the clocks moved: …`).
 - **A stall that names the call it is standing in.** `[STALL]` reports where
   every thread is, and a thread inside ntdll says only "ntdll". The system call
   dispatcher therefore keeps, per thread, the number of the call it was last

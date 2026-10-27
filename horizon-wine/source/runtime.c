@@ -588,6 +588,21 @@ static void stall_watch( void *arg )
             if (&wine_nx_gl_swaps && !__atomic_load_n( &wine_nx_gl_swaps, __ATOMIC_RELAXED ))
                 log_line( "[STALL] the program has not swapped a frame yet; its OpenGL is %s",
                           &wine_nx_gl_program_version ? wine_nx_gl_program_version() : "unknown" );
+            /* A program waiting for a moment in time and one waiting for an
+             * event look the same from outside; the two clocks tell them
+             * apart, so they are always in the stall report. */
+            {
+                extern void wine_nx_clock_advance( char *buffer, size_t size ) __attribute__((weak));
+
+                if (&wine_nx_clock_advance)
+                {
+                    char clocks[128];
+
+                    clocks[0] = 0;
+                    wine_nx_clock_advance( clocks, sizeof(clocks) );
+                    log_line( "[STALL] the clocks moved: %s", clocks );
+                }
+            }
             wine_nx_threads_report_stalled();
             reported++;
         }

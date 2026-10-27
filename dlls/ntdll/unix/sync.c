@@ -2685,9 +2685,109 @@ NTSTATUS WINAPI NtQueryPerformanceCounter( LARGE_INTEGER *counter, LARGE_INTEGER
 /***********************************************************************
  *              NtQuerySystemTime (NTDLL.@)
  */
-NTSTATUS WINAPI NtQuerySystemTime( LARGE_INTEGER *time )
+#ifdef __SWITCH__
+/* The program's calendar time, and the one thing about it that must never be
+ * true: that it stands still. Horizon's calendar clock comes from the console's
+ * time services, and this runtime's C library may not have them at all -- then
+ * gettimeofday() fails or answers the same value every time. A program that
+ * takes a deadline from that clock -- Sleep(), a frame pacer, a timeout around
+ * a load -- waits for a moment that never arrives, and looks exactly like one
+ * waiting for an event nobody sets. Dark Athena's main thread did that: a full
+ * core of NtQuerySystemTime calls and not one frame drawn.
+ *
+ * Time since boot always moves, so the system time is the calendar clock read
+ * once, at the first call, plus time since boot. It never goes backwards, it
+ * never stops, and it is answered without asking the time service again --
+ * which also takes a round trip out of a call that a game makes in a loop. */
+static LONGLONG nx_system_time_base;
+static int nx_system_time_base_set;
+
+/* The console's calendar clock, in 100ns units since 1601. FALSE if this
+ * runtime's C library has no clock to read. */
+static int nx_calendar_time( LONGLONG *ticks )
 {
 #ifdef HAVE_CLOCK_GETTIME
+    struct timespec ts = {0};
+
+    if (!clock_gettime( CLOCK_REALTIME, &ts ))
+    {
+        *ticks = (LONGLONG)ticks_from_time_t( ts.tv_sec ) + (ts.tv_nsec + 50) / 100;
+        return TRUE;
+    }
+#endif
+    {
+        struct timeval now = {0};
+
+        if (!gettimeofday( &now, 0 ))
+        {
+            *ticks = (LONGLONG)ticks_from_time_t( now.tv_sec ) + now.tv_usec * 10;
+            return TRUE;
+        }
+    }
+    return FALSE;
+}
+
+/* What the two clocks the program can see have done since this was last asked,
+ * for the runtime's stall report. A program waiting on a clock that does not
+ * move reads there as plain as a program waiting on an event. */
+void wine_nx_clock_advance( char *buffer, size_t size )
+{
+    extern unsigned long long horizon_interrupt_time(void);
+    static LONGLONG last_calendar;
+    static unsigned long long last_boot;
+    LONGLONG calendar = 0;
+    unsigned long long boot = horizon_interrupt_time();
+    int have_calendar = nx_calendar_time( &calendar );
+
+    if (!have_calendar)
+        snprintf( buffer, size, "no calendar clock this program can read; %lld ms of time since boot",
+                  (long long)((boot - last_boot) / 10000) );
+    else if (!last_boot)
+        snprintf( buffer, size, "first reading (calendar %lld s after 1970, %lld s since boot)",
+                  (long long)(calendar / TICKSPERSEC) - SECS_1601_TO_1970, (long long)(boot / TICKSPERSEC) );
+    else
+        snprintf( buffer, size, "calendar %+lld ms, time since boot %+lld ms since the last report",
+                  (long long)((calendar - last_calendar) / 10000), (long long)((boot - last_boot) / 10000) );
+    if (have_calendar) last_calendar = calendar;
+    last_boot = boot;
+}
+#endif
+
+NTSTATUS WINAPI NtQuerySystemTime( LARGE_INTEGER *time )
+{
+#ifdef __SWITCH__
+    extern unsigned long long horizon_interrupt_time(void);
+    extern void wine_nx_runtime_trace( const char *msg );
+    unsigned long long boot = horizon_interrupt_time();
+
+    if (!nx_system_time_base_set)
+    {
+        LONGLONG calendar = 0;
+        int have_calendar = nx_calendar_time( &calendar );
+
+        /* A clock the C library cannot read leaves the program starting from
+         * the first of January 2000 rather than from nowhere: the time it is
+         * given still moves, which is what everything that waits depends on. */
+        if (!have_calendar) calendar = (LONGLONG)ticks_from_time_t( 946684800 );
+        nx_system_time_base = calendar - (LONGLONG)boot;
+        nx_system_time_base_set = 1;
+        if (&wine_nx_runtime_trace)
+        {
+            char line[200];
+
+            if (have_calendar)
+                snprintf( line, sizeof(line), "[CLOCK] the console's calendar clock says %lld s after 1970; "
+                          "system time is that, read once, plus time since boot",
+                          (long long)(calendar / TICKSPERSEC) - SECS_1601_TO_1970 );
+            else
+                snprintf( line, sizeof(line), "[CLOCK] this program has no calendar clock to read; "
+                          "system time starts at 2000-01-01 and moves with time since boot" );
+            wine_nx_runtime_trace( line );
+        }
+    }
+    time->QuadPart = (ULONGLONG)(nx_system_time_base + (LONGLONG)boot);
+    return STATUS_SUCCESS;
+#elif defined(HAVE_CLOCK_GETTIME)
     struct timespec ts;
     static clockid_t clock_id = CLOCK_MONOTONIC; /* placeholder */
 
