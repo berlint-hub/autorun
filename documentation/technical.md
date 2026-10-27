@@ -78,6 +78,18 @@ runtime; the full package now ships the Mesa 26 one.
   starts (`record_compute_cmd`). The earlier runtime on
   Mesa 20.1's nouveau driver, patched for pinned 32-bit buffers
   (`horizon-wine/mesa`), can still be built.
+- **Caches on the card.** Mesa's on-disk shader cache is given a directory of
+  its own, `sdmc:/switch/wine/cache`, and a 512 MB cap through
+  `MESA_SHADER_CACHE_*` (and the `MESA_GLSL_*` names Mesa 20.1 reads), so a
+  game's shaders are compiled once rather than at every start: left alone the
+  drivers look under `$HOME/.cache`, which the console does not have. FEX's
+  translated-code cache (2609's `FEX_DISKCACHE`) is the per-program
+  **Translated code cache**, off unless asked for because 2609 calls it
+  experimental. With it on, the runtime measures
+  `drive_c/users/steamuser/AppData/{Local,Roaming}/fex-emu/DiskCache` before
+  the program starts and gives whole configurations back oldest first until it
+  is under a gigabyte, keeping 768 MB -- the limit 2610 added upstream, and
+  the guard 2609 does not have (`source/fex_cache.c`).
 - **Audio.** `winenxaudio.drv` plays through audout, for mmdevapi and DirectSound.
 - **Input.** The touchscreen, the controller as a mouse or as a keyboard with
   per-game mappings, and XInput, which sees player 1 as an Xbox 360 controller.

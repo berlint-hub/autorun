@@ -1836,7 +1836,7 @@ enum program_row
     ROW_VOODOO,
     ROW_LSFG, ROW_LSFG_DLL, ROW_LSFG_PERFORMANCE, ROW_LSFG_FLOW,
     ROW_UPSCALING, ROW_UPSCALING_SHARPNESS,
-    ROW_INPUT, ROW_INPUT_END = ROW_INPUT + INPUT_ROW_COUNT - 1, ROW_BOX64, ROW_FEX, ROW_SYNC, ROW_CPU, ROW_FOUR_CORES, ROW_LAZY_FILE_VIEWS,
+    ROW_INPUT, ROW_INPUT_END = ROW_INPUT + INPUT_ROW_COUNT - 1, ROW_BOX64, ROW_FEX, ROW_SYNC, ROW_CPU, ROW_FEX_CACHE, ROW_FOUR_CORES, ROW_LAZY_FILE_VIEWS,
     ROW_HIDE, ROW_LIBRARY, ROW_GAME_FIX, PROGRAM_ROWS
 };
 
@@ -2655,6 +2655,17 @@ static int program_menu_run( struct launcher *l, struct program *p, char *target
             row->choices = 3;
             snprintf( row->value, sizeof(row->value), "%s", cpu_names[cpu] );
         }
+        if (x86 || x64)
+        {
+            ADD_ROW( ROW_FEX_CACHE, SECTION_EMULATION, "Translated code cache",
+                     "Keeps the code FEX has translated on the card, so a later start does not "
+                     "translate it again: quicker loads and fewer hitches from the second run on. "
+                     "Up to a gigabyte; the oldest is given back first. Turn it off if a game "
+                     "behaves oddly with it." );
+            row->kind = UI_ROW_SWITCH;
+            row->on = p->settings.fex_disk_cache;
+            snprintf( row->value, sizeof(row->value), "%s", p->settings.fex_disk_cache ? "Enabled" : "Disabled" );
+        }
 #endif
         ADD_ROW( ROW_FOUR_CORES, SECTION_EMULATION, "4-core support",
                  l->options->four_cores_available
@@ -3277,6 +3288,11 @@ static int program_menu_run( struct launcher *l, struct program *p, char *target
 
         case ROW_LAZY_FILE_VIEWS:
             p->settings.lazy_file_views = action == UI_ACTION_RESET ? 0 : !p->settings.lazy_file_views;
+            save_program_settings( l, p );
+            break;
+
+        case ROW_FEX_CACHE:
+            p->settings.fex_disk_cache = action == UI_ACTION_RESET ? 0 : !p->settings.fex_disk_cache;
             save_program_settings( l, p );
             break;
 

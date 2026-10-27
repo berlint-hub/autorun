@@ -17,11 +17,16 @@ copies to the SD card and start them from Autorun's library.
 
 - **32-bit and 64-bit games.** [FEX](https://github.com/FEX-Emu/FEX) translates
   both x86 and x64 code; [Box64](https://github.com/ptitSeb/box64) is there as a
-  second translator for 32-bit programs.
+  second translator for 32-bit programs. A game can keep what FEX has
+  translated on the card (**Translated code cache**), so a second start does
+  not translate the same blocks all over again.
 - **The Switch's GPU.** OpenGL and Vulkan come from Mesa 26
   ([mesa-switch](https://github.com/danfromtico/mesa-switch)), and Direct3D 8
   to 11 run through [DXVK](https://github.com/doitsujin/dxvk), Direct3D 12
   through [VKD3D-Proton](https://github.com/HansKristian-Work/vkd3d-proton).
+- **Shaders compiled once.** Mesa's on-disk shader cache lives in
+  `sdmc:/switch/wine/cache`, up to 512 MB: an effect a game has already met is
+  read back instead of being compiled again at every start.
 - **Frame generation** with [LSFG-VK](https://git.lsfg-vk.dev/lsfg-vk-archive.git),
   for Vulkan games, with your own copy of Lossless Scaling.
 - **A panel that follows the game**: a game that cannot hold 60 fps runs the
@@ -170,7 +175,8 @@ played**.
   **Integer** or **Stretch 4:3**) and filtered inside that rectangle (FSR 1.0,
   bilinear or nearest), and **Frame Generation**;
 - pick the CPU translator (Box64, FEX, or the Switch-tuned FEX), and give it
-  its own controls;
+  its own controls, including whether its translated code is kept on the card
+  between runs;
 - pick a **preset** — **Balanced**, **Performance**, **Battery** or
   **Compatibility** — which sets the translator, the fast paths, vsync and the
   frame cap in one go, or put the game back to its defaults with **Reset

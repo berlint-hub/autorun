@@ -40,6 +40,7 @@
 #include "games/left4dead.h"
 #include "games/ff7remake.h"
 #include "fex_options.h"
+#include "fex_cache.h"
 #include "dxvk_options.h"
 #include "input_profile.h"
 #include "config_json.h"
@@ -590,6 +591,9 @@ int wine_nx_runtime_verbose;
 static enum launcher_d3d_renderer runtime_d3d;
 static enum dxvk_source runtime_dxvk_source;
 static int runtime_fex;
+/* The program keeps the translator's code on the card between runs
+ * (fex-cache=1), so a second start does not translate it again. */
+static int runtime_fex_disk_cache;
 /* The program's CPU translator choice: "opt", "" for the stock modules, or
  * NULL when it has none and fex-variant.txt decides. */
 static const char *runtime_fex_variant;
@@ -2354,6 +2358,14 @@ static size_t runtime_fex_environment( const char *target, char *buffer, size_t 
         log_line( "[FEX] program settings are too large; using defaults" );
         kv.size = 0;
         kv.text[0] = 0;
+    }
+    if (runtime_fex_disk_cache)
+    {
+        static const char disk_cache[] = "FEX_DISKCACHE=1";
+
+        if (sizeof(disk_cache) > size - used) return 0;
+        memcpy( buffer + used, disk_cache, sizeof(disk_cache) );
+        used += sizeof(disk_cache);
     }
     for (i = 0; i < NX_FEX_OPTION_COUNT; i++)
     {
@@ -5020,6 +5032,7 @@ int main( int argc, char **argv )
             runtime_fex_variant = settings.fex == 2 ? "opt" : settings.fex == 1 ? "" : NULL;
 #endif
             runtime_four_cores = settings.four_cores;
+            runtime_fex_disk_cache = settings.fex_disk_cache;
             if (settings.verbose >= 0) wine_nx_runtime_verbose = settings.verbose;
             if (settings.profile >= 0) runtime_profile = settings.profile;
             if (settings.framebuffer >= 0) wine_nx_compositor_mode = !settings.framebuffer;
@@ -5176,6 +5189,40 @@ int main( int argc, char **argv )
         }
     }
 
+    /* The translator's code, kept on the card (fex-cache=1). FEX 2609 writes
+     * every block it translates to a database and reads it back before
+     * translating again, which is what makes a second run of a game start
+     * quicker. The release has no size limit of its own and a program that
+     * changes its own code can make the cache grow without end, so it is
+     * measured here and the oldest configurations are given back first. The
+     * database is under the user's profile, where the module's own environment
+     * points it; the roaming half is looked at too, for a module that puts it
+     * there. */
+    if (runtime_fex && runtime_fex_disk_cache)
+    {
+        static const char *const cache_roots[] = { WINE_USER_DIR "/AppData/Local/fex-emu",
+                                                   WINE_USER_DIR "/AppData/Roaming/fex-emu" };
+        unsigned long long kept = 0;
+        unsigned int configurations = 0, removed = 0;
+        unsigned int i;
+
+        for (i = 0; i < ARRAY_SIZE(cache_roots); i++)
+        {
+            struct fex_cache_report report;
+
+            if (!fex_cache_prune( cache_roots[i], FEX_CACHE_LIMIT, FEX_CACHE_KEEP, &report ))
+            {
+                log_line( "[FEX] %s could not be read; the code cache is left alone", cache_roots[i] );
+                continue;
+            }
+            kept += report.kept;
+            configurations += report.buckets;
+            removed += report.buckets_removed;
+        }
+        log_line( "[FEX] code cache %llu MiB in %u configuration(s), %u given back to the card",
+                  kept >> 20, configurations, removed );
+    }
+
     /* Views of files read on demand (horizon.c, horizon_lazy_file_view_wanted):
      * lazy-file-views=1 in the program's settings, or lazy-file-views.txt in
      * its folder, which a game's own setup can leave there. */
@@ -5299,6 +5346,22 @@ int main( int argc, char **argv )
         server_init_process( first_data );
     }
     log_line( "[INIT] server process initialized" );
+
+    /* Mesa compiles a shader once and keeps the result on disk, both for its
+     * OpenGL driver and for nvk; that cache is what keeps a game's first
+     * minutes from hitching every time it meets a new effect. Left to itself
+     * the driver looks under $HOME/.cache, which the console does not have,
+     * so the card gets a directory of its own and a size. Mesa prunes it. */
+    mkdir( RUNTIME_DIR "/cache", 0777 );   /* a second start finds it there */
+    setenv( "MESA_SHADER_CACHE_DIR", RUNTIME_DIR "/cache", 1 );
+    setenv( "MESA_SHADER_CACHE_MAX_SIZE", "512M", 1 );
+    setenv( "MESA_SHADER_CACHE_DISABLE", "0", 1 );
+    /* What Mesa 20.1 -- the build the runtime can still be made with -- reads;
+     * newer drivers ignore these three and take the names above. */
+    setenv( "MESA_GLSL_CACHE_DIR", RUNTIME_DIR "/cache", 1 );
+    setenv( "MESA_GLSL_CACHE_MAX_SIZE", "512M", 1 );
+    setenv( "MESA_GLSL_CACHE_DISABLE", "0", 1 );
+    log_line( "[MESA] shaders are cached in " RUNTIME_DIR "/cache, up to 512 MB" );
 
     wine_nx_runtime_environment_init();
     log_line( "[INIT] Wine NLS/environment ready" );

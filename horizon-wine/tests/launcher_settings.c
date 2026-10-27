@@ -108,6 +108,22 @@ static void test_settings( const char *dir )
     load_text( &kv, "sync=fsync\n" );
     launcher_settings_read( &kv, &settings );
     assert( !settings.fast_sync );
+    /* The translator's code cache is off unless a program asks for it, and a
+     * card that has never had the key written reads as off. */
+    load_text( &kv, "" );
+    launcher_settings_read( &kv, &settings );
+    assert( !settings.fex_disk_cache );
+    load_text( &kv, "fex-cache=1\n" );
+    launcher_settings_read( &kv, &settings );
+    assert( settings.fex_disk_cache && launcher_settings_write( &kv, &settings ) &&
+            strstr( kv.text, "fex-cache=1" ) );
+    launcher_settings_read( &kv, &back );
+    assert( back.fex_disk_cache );
+    settings.fex_disk_cache = 0;
+    assert( launcher_settings_write( &kv, &settings ) && !strstr( kv.text, "fex-cache=" ) );
+    load_text( &kv, "fex-cache=0\n" );
+    launcher_settings_read( &kv, &settings );
+    assert( !settings.fex_disk_cache );
     load_text( &kv, "resolution=1920x1080\n" );
     launcher_settings_read( &kv, &settings );
     assert( settings.resolution == 1 );

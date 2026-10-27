@@ -189,6 +189,7 @@ struct launcher_settings
     int fex;      /* 0: Box64, 1: FEX, 2: FEX optimized, -1: fex-variant.txt decides */
     int four_cores;
     int lazy_file_views;  /* views of files read from the card on demand */
+    int fex_disk_cache;   /* translated code kept on the card between runs */
     int framebuffer;  /* 1: windows go to the framebuffer, 0: through the compositor */
     int scaling;      /* how the picture is placed on the panel: launcher_scaling_values */
     enum launcher_d3d_renderer d3d;
@@ -487,6 +488,7 @@ static inline void launcher_settings_read( const struct launcher_kv *kv, struct 
     else settings->fex = 1;
     settings->four_cores = launcher_setting_state( kv, "four-cores" ) != 0;
     settings->lazy_file_views = launcher_setting_state( kv, "lazy-file-views" ) == 1;
+    settings->fex_disk_cache = launcher_setting_state( kv, "fex-cache" ) == 1;
     settings->framebuffer = -1;
     /* Aspect ratio is what the old two-way Aspect setting meant for anything
      * drawn through Vulkan; "stretch" was its widescreen hack. The key changed
@@ -631,6 +633,7 @@ static inline int launcher_settings_write( struct launcher_kv *kv, const struct 
                                        settings->fex == 2 ? "fex-opt" : "fex" ) &&
            launcher_kv_set( kv, "four-cores", settings->four_cores ? NULL : "0" ) &&
            launcher_kv_set( kv, "lazy-file-views", settings->lazy_file_views ? "1" : NULL ) &&
+           launcher_kv_set( kv, "fex-cache", settings->fex_disk_cache ? "1" : NULL ) &&
            launcher_kv_set( kv, "windows", settings->framebuffer < 0 ? NULL :
                                            settings->framebuffer ? "framebuffer" : "compositor" ) &&
            launcher_kv_set( kv, "aspect", NULL ) &&

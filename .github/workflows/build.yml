@@ -71,6 +71,16 @@ jobs:
             horizon-wine/tests/log_repeat.c -o log_repeat
           ./log_repeat
 
+      # The translator's code cache on the card: what one configuration is,
+      # which one is given back first when the card has no room for another,
+      # and that a card without a cache is left alone.
+      - name: FEX code cache
+        run: |
+          cc -std=gnu11 -Wall -Wextra -Werror -O1 -g -I horizon-wine/source \
+            horizon-wine/tests/fex_cache.c horizon-wine/source/fex_cache.c \
+            -o fex_cache
+          ./fex_cache
+
       # The launcher's own logic that needs no SDL: the play time a game keeps,
       # the bundles that set a game's emulation and frame pacing at once, and the
       # copy of the settings a card can be put back to.
