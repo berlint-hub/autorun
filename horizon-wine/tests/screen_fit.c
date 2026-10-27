@@ -158,6 +158,71 @@ int main(void)
         }
     }
 
+    /* The compute blit's workgroup grid: it covers the picture's rectangle and
+     * never starts or ends outside the image, because an invocation that lands
+     * outside would write outside it. */
+    {
+        unsigned int bx, by, gx, gy;
+
+        /* 4:3 in the middle of the panel: whole groups on both sides */
+        if (!screen_dispatch_grid( 160, 0, 960, 720, 1280, 720, &bx, &by, &gx, &gy ) ||
+            bx != 20 || by != 0 || gx != 120 || gy != 90)
+        {
+            fprintf( stderr, "FAIL grid 160,0 960x720: %u,%u %ux%u\n", bx, by, gx, gy );
+            failures++;
+        }
+        /* the whole image: no base to speak of */
+        if (!screen_dispatch_grid( 0, 0, 1280, 720, 1280, 720, &bx, &by, &gx, &gy ) ||
+            bx != 0 || by != 0 || gx != 160 || gy != 90)
+        {
+            fprintf( stderr, "FAIL grid full: %u,%u %ux%u\n", bx, by, gx, gy );
+            failures++;
+        }
+        /* an odd rectangle: the grid is a group wider than the picture, which
+         * is what the extra invocations painting the bars black are */
+        if (!screen_dispatch_grid( 93, 11, 533, 333, 1280, 720, &bx, &by, &gx, &gy ) ||
+            bx != 11 || by != 1 || gx != 68 || gy != 42)
+        {
+            fprintf( stderr, "FAIL grid 93,11 533x333: %u,%u %ux%u\n", bx, by, gx, gy );
+            failures++;
+        }
+        /* an image smaller than a group cannot be dispatched at all */
+        if (screen_dispatch_grid( 0, 0, 4, 4, 4, 4, &bx, &by, &gx, &gy ))
+        {
+            fprintf( stderr, "FAIL grid tiny image: covered\n" );
+            failures++;
+        }
+    }
+
+    /* Every rectangle of every image: the grid stays inside the image, starts
+     * no later than the rectangle and ends no earlier, and is never empty. */
+    {
+        static const int images[][2] = { { 1280, 720 }, { 1920, 1080 }, { 640, 480 }, { 1013, 707 } };
+        int i, w, h;
+
+        for (i = 0; i < 4; i++)
+        for (w = 1; w < images[i][0]; w += 37)
+        for (h = 1; h < images[i][1]; h += 29)
+        {
+            int x = (images[i][0] - w) / 2, y = (images[i][1] - h) / 2;
+            unsigned int bx = 0, by = 0, gx = 0, gy = 0;
+
+            if (!screen_dispatch_grid( x, y, w, h, images[i][0], images[i][1], &bx, &by, &gx, &gy ) ||
+                !gx || !gy ||
+                (int)(bx * 8) > x || (int)(by * 8) > y ||
+                (int)((bx + gx) * 8) < x + w || (int)((by + gy) * 8) < y + h ||
+                (int)((bx + gx) * 8) > (images[i][0] / 8) * 8 ||
+                (int)((by + gy) * 8) > (images[i][1] / 8) * 8)
+            {
+                fprintf( stderr, "FAIL grid %dx%d at %d,%d in %dx%d: %u,%u %ux%u\n",
+                         w, h, x, y, images[i][0], images[i][1], bx, by, gx, gy );
+                failures++;
+                i = 4;
+                break;
+            }
+        }
+    }
+
     if (failures) return 1;
     printf( "screen_fit: all cases pass\n" );
     return 0;

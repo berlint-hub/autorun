@@ -106,6 +106,48 @@ static inline void screen_fit_rect( int mode, int src_w, int src_h, int panel_w,
     if (y) *y = (panel_h - height) / 2;
 }
 
+/* The workgroup grid the compute blit is dispatched with for one rectangle of
+ * a picture whose destination is image_w x image_h. The shaders' local size is
+ * 8, and vkCmdDispatchBase only starts a grid on a whole group: so the base is
+ * the rectangle's start rounded down to a group, and the count is what it takes
+ * from that base to the rectangle's end -- the few invocations before it fall
+ * in the black bars, which they paint black again. Both are pulled back inside
+ * the image, so no invocation ever lands outside it.
+ *
+ * Returns 0 for an image smaller than one group, which no dispatch can cover.
+ * Used by dlls/win32u/vulkan.c (record_compute_cmd) and its host test. */
+static inline int screen_dispatch_grid( int rect_x, int rect_y, int rect_w, int rect_h,
+                                        int image_w, int image_h,
+                                        unsigned int *base_x, unsigned int *base_y,
+                                        unsigned int *groups_x, unsigned int *groups_y )
+{
+    int max_x = image_w / 8, max_y = image_h / 8;
+    int bx, by, gx, gy;
+
+    if (max_x < 1 || max_y < 1 || rect_w < 1 || rect_h < 1) return 0;
+    bx = (rect_x > 0 ? rect_x : 0) / 8;
+    by = (rect_y > 0 ? rect_y : 0) / 8;
+    if (bx > max_x - 1) bx = max_x - 1;
+    if (by > max_y - 1) by = max_y - 1;
+    gx = (rect_x + rect_w - bx * 8 + 7) / 8;
+    gy = (rect_y + rect_h - by * 8 + 7) / 8;
+    if (bx + gx > max_x)
+    {
+        bx = max_x - gx;
+        if (bx < 0) { bx = 0; gx = max_x; }
+    }
+    if (by + gy > max_y)
+    {
+        by = max_y - gy;
+        if (by < 0) { by = 0; gy = max_y; }
+    }
+    if (base_x) *base_x = bx;
+    if (base_y) *base_y = by;
+    if (groups_x) *groups_x = gx;
+    if (groups_y) *groups_y = gy;
+    return 1;
+}
+
 /* The central 4:3 crop of a picture: narrow it (or shorten it) until it is
  * 4:3, keeping the centre. A 4:3 picture is returned unchanged. */
 static inline void screen_crop_4_3( int *width, int *height )

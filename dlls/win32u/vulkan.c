@@ -332,6 +332,11 @@ struct fs_hack_image
 {
     uint32_t cmd_queue_idx;
     VkCommandBuffer cmd;
+    /* The bars around the picture, painted black once: the compute blit then
+     * only writes the picture's own rectangle. See record_bars_cmd(). */
+    VkCommandBuffer bars_cmd;
+    uint32_t bars_queue_idx;   /* the pool it came from */
+    int bars_painted;
     VkImage swapchain_image;
     VkImage user_image;
     VkSemaphore blit_finished;
@@ -2829,6 +2834,7 @@ static void destroy_fs_hack_image( struct vulkan_device *device, struct swapchai
     device->p_vkDestroyImage( device->host.device, hack->user_image, NULL );
     device->p_vkDestroyImage( device->host.device, hack->mid_image, NULL );
     if (hack->cmd) device->p_vkFreeCommandBuffers( device->host.device, swapchain->cmd_pools[hack->cmd_queue_idx], 1, &hack->cmd );
+    if (hack->bars_cmd) device->p_vkFreeCommandBuffers( device->host.device, swapchain->cmd_pools[hack->bars_queue_idx], 1, &hack->bars_cmd );
     device->p_vkDestroySemaphore( device->host.device, hack->blit_finished, NULL );
 }
 
@@ -3529,12 +3535,21 @@ static VkCommandBuffer create_hack_cmd( struct vulkan_queue *queue, struct swapc
     return cmd;
 }
 
-static VkResult record_compute_cmd( struct vulkan_device *device, struct swapchain *swapchain, struct fs_hack_image *hack )
+/* rect_only: the bars around the picture are already black in this image (the
+ * clear below ran), so this pass writes the picture's rectangle and nothing
+ * else. Without it -- the first present, or a device that cannot start a
+ * dispatch at a group offset -- every pixel is written, the bars included, and
+ * the image is taken as one whose contents do not matter. */
+static VkResult record_compute_cmd( struct vulkan_device *device, struct swapchain *swapchain,
+                                    struct fs_hack_image *hack, int rect_only )
 {
     VkResult res;
     VkImageMemoryBarrier barriers[3] = {{0}};
     VkCommandBufferBeginInfo beginInfo = {0};
     struct fs_hack_constants constants = {0};
+    unsigned int groups[2] = { (swapchain->host_extents.width + 7) / 8,
+                               (swapchain->host_extents.height + 7) / 8 };
+    unsigned int base[2] = { 0, 0 };
 
     TRACE( "recording compute command\n" );
 
@@ -3560,9 +3575,11 @@ static VkResult record_compute_cmd( struct vulkan_device *device, struct swapcha
     barriers[0].dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
 
     /* storage image... */
-    /* transition swapchain image from whatever to GENERAL */
+    /* transition swapchain image from whatever to GENERAL. With the bars kept,
+     * "whatever" is where the last present and the bars' clear left it, and its
+     * contents have to survive: they are the picture's frame around the edges. */
     barriers[1].sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-    barriers[1].oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    barriers[1].oldLayout = rect_only ? VK_IMAGE_LAYOUT_PRESENT_SRC_KHR : VK_IMAGE_LAYOUT_UNDEFINED;
     barriers[1].newLayout = VK_IMAGE_LAYOUT_GENERAL;
     barriers[1].srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     barriers[1].dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
@@ -3634,6 +3651,21 @@ static VkResult record_compute_cmd( struct vulkan_device *device, struct swapcha
         }
         TRACE( "scaling mode %d: %dx%d of %dx%d at %d,%d in %dx%d\n", nx_scaling_mode,
                crop_w, crop_h, src_w, src_h, rect_x, rect_y, rect_w, rect_h );
+
+        /* Only the rectangle is dispatched: the workgroup grid starts at a
+         * group offset (vkCmdDispatchBase), so an invocation still lands on the
+         * pixel it always did and the shaders stay as they are. A grid starts
+         * on a whole group of 8, so the base is rounded down and the count up
+         * -- the extra invocations fall in the bars and write them black, which
+         * is what they held anyway -- and both are pulled back so that no
+         * invocation lands outside the image. */
+        if (rect_only && device->p_vkCmdDispatchBase &&
+            screen_dispatch_grid( rect_x, rect_y, rect_w, rect_h,
+                                  swapchain->host_extents.width, swapchain->host_extents.height,
+                                  &base[0], &base[1], &groups[0], &groups[1] ))
+        {
+            TRACE( "dispatch %ux%u groups from %u,%u\n", groups[0], groups[1], base[0], base[1] );
+        }
     }
 #else
     if (swapchain->fsr)
@@ -3660,9 +3692,11 @@ static VkResult record_compute_cmd( struct vulkan_device *device, struct swapcha
     device->p_vkCmdPushConstants( hack->cmd, swapchain->pipeline_layout,
                                   VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(constants), &constants );
 
-    /* local sizes in shader are 8 */
-    device->p_vkCmdDispatch( hack->cmd, ceil( swapchain->host_extents.width / 8. ),
-                             ceil( swapchain->host_extents.height / 8. ), 1 );
+    /* local sizes in shader are 8; base is in whole groups */
+    if (base[0] || base[1])
+        device->p_vkCmdDispatchBase( hack->cmd, base[0], base[1], 0, groups[0], groups[1], 1 );
+    else
+        device->p_vkCmdDispatch( hack->cmd, groups[0], groups[1], 1 );
 
     if (swapchain->fsr)
     {
@@ -3673,8 +3707,10 @@ static VkResult record_compute_cmd( struct vulkan_device *device, struct swapcha
         device->p_vkCmdPipelineBarrier( hack->cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
                                         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0, NULL, 0, NULL, 1, &barriers[2] );
         device->p_vkCmdBindPipeline( hack->cmd, VK_PIPELINE_BIND_POINT_COMPUTE, swapchain->rcas_pipeline );
-        device->p_vkCmdDispatch( hack->cmd, ceil( swapchain->host_extents.width / 8. ),
-                                 ceil( swapchain->host_extents.height / 8. ), 1 );
+        if (base[0] || base[1])
+            device->p_vkCmdDispatchBase( hack->cmd, base[0], base[1], 0, groups[0], groups[1], 1 );
+        else
+            device->p_vkCmdDispatch( hack->cmd, groups[0], groups[1], 1 );
     }
 
     /* transition user image from SHADER_READ back to PRESENT_SRC */
@@ -3720,6 +3756,50 @@ static VkResult record_compute_cmd( struct vulkan_device *device, struct swapcha
 }
 
 #ifdef __SWITCH__
+/* Paints a swapchain image black once, before it is first shown. From then on
+ * the compute blit writes only the picture's rectangle (record_compute_cmd's
+ * rect_only) and the bars around it are these pixels: the image keeps what it
+ * has between one present and the next, which is what makes painting them once
+ * enough. Submitted ahead of the image's first frame, on the same queue, so the
+ * frame that follows finds them there. */
+static VkResult record_bars_cmd( struct vulkan_device *device, struct fs_hack_image *hack )
+{
+    VkCommandBufferBeginInfo begin = {.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
+    VkImageMemoryBarrier barrier = {.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
+    VkImageSubresourceRange range = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+    VkClearColorValue black = {{0.0f, 0.0f, 0.0f, 1.0f}};
+    VkResult res;
+
+    begin.flags = VK_COMMAND_BUFFER_USAGE_SIMULTANEOUS_USE_BIT;
+    barrier.srcQueueFamilyIndex = barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.image = hack->swapchain_image;
+    barrier.subresourceRange = range;
+
+    if ((res = device->p_vkBeginCommandBuffer( hack->bars_cmd, &begin )))
+    {
+        ERR( "vkBeginCommandBuffer: %d\n", res );
+        return res;
+    }
+    /* Nothing of what the image holds is needed, and the compute pass after
+     * this one expects to find it in PRESENT_SRC. */
+    barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    device->p_vkCmdPipelineBarrier( hack->bars_cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                                    VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, NULL, 0, NULL, 1, &barrier );
+    device->p_vkCmdClearColorImage( hack->bars_cmd, hack->swapchain_image,
+                                    VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &black, 1, &range );
+    barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    barrier.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+    barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    barrier.dstAccessMask = 0;
+    device->p_vkCmdPipelineBarrier( hack->bars_cmd, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                                    VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0, NULL, 0, NULL, 1, &barrier );
+
+    if ((res = device->p_vkEndCommandBuffer( hack->bars_cmd ))) ERR( "vkEndCommandBuffer: %d\n", res );
+    return res;
+}
+
 /* Counted in the runtime's [PROGRESS] frames. */
 unsigned int wine_nx_vk_presents;
 static LONG nx_present_logs;
@@ -4107,7 +4187,9 @@ static VkResult win32u_vkQueuePresentKHR( VkQueue client_queue, const VkPresentI
     TRACE( "queue %p, present_info %p\n", queue, present_info );
 
     if (!(swapchains = mem_alloc( &pool, present_info->swapchainCount * sizeof(*swapchains) ))) return VK_ERROR_OUT_OF_HOST_MEMORY;
-    if (!(blit_cmds = mem_alloc( &pool, present_info->swapchainCount * sizeof(blit_cmds) ))) goto failed;
+    /* Two per swapchain: the bars' clear, on an image's first present, and the
+     * frame itself. */
+    if (!(blit_cmds = mem_alloc( &pool, 2 * present_info->swapchainCount * sizeof(blit_cmds) ))) goto failed;
 
     for (uint32_t i = 0; i < present_info->swapchainCount; ++i)
     {
@@ -4126,16 +4208,37 @@ static VkResult win32u_vkQueuePresentKHR( VkQueue client_queue, const VkPresentI
             if (hack->cmd) device->p_vkFreeCommandBuffers( queue->device->host.device, swapchain->cmd_pools[hack->cmd_queue_idx], 1, &hack->cmd );
             if (!(queue->device->queue_props[queue->info.queueFamilyIndex].queueFlags & VK_QUEUE_COMPUTE_BIT)) goto failed; /* TODO */
 
-            if (!(hack->cmd = create_hack_cmd( queue, swapchain, queue->info.queueFamilyIndex )) || record_compute_cmd( queue->device, swapchain, hack ))
+            hack->cmd_queue_idx = queue->info.queueFamilyIndex;
+#ifdef __SWITCH__
+            /* The bars, painted once: only with a group offset to start the
+             * dispatch at can the picture be drawn on its own. */
+            if (!hack->bars_cmd && !hack->bars_painted && queue->device->p_vkCmdDispatchBase &&
+                (hack->bars_cmd = create_hack_cmd( queue, swapchain, hack->cmd_queue_idx )))
+            {
+                hack->bars_queue_idx = hack->cmd_queue_idx;
+                if (record_bars_cmd( queue->device, hack ))
+                {
+                    device->p_vkFreeCommandBuffers( queue->device->host.device,
+                                                    swapchain->cmd_pools[hack->bars_queue_idx],
+                                                    1, &hack->bars_cmd );
+                    hack->bars_cmd = NULL;
+                }
+                else nx_vk_trace( "[NXVK] the bars are painted once; a frame draws the picture's rectangle "
+                                  "only (%ux%u in %ux%u)", swapchain->extents.width, swapchain->extents.height,
+                                  swapchain->host_extents.width, swapchain->host_extents.height );
+            }
+#endif
+
+            if (!(hack->cmd = create_hack_cmd( queue, swapchain, hack->cmd_queue_idx )) ||
+                record_compute_cmd( queue->device, swapchain, hack, hack->bars_cmd != NULL ))
             {
                 device->p_vkFreeCommandBuffers( queue->device->host.device, swapchain->cmd_pools[hack->cmd_queue_idx], 1, &hack->cmd );
                 hack->cmd = NULL;
                 goto failed;
             }
-
-            hack->cmd_queue_idx = queue->info.queueFamilyIndex;
         }
 
+        if (hack->bars_cmd && !hack->bars_painted) blit_cmds[blit_count++] = hack->bars_cmd;
         blit_cmds[blit_count++] = hack->cmd;
     }
 
@@ -4193,6 +4296,18 @@ static VkResult win32u_vkQueuePresentKHR( VkQueue client_queue, const VkPresentI
 
         present_info->waitSemaphoreCount = 1;
         present_info->pWaitSemaphores = &blit_sema;
+
+        /* The clear went out ahead of the frame it belongs to, so the next
+         * frames of these images find their bars black and never touch them. */
+        for (uint32_t i = 0; i < present_info->swapchainCount; ++i)
+        {
+            struct swapchain *swapchain = swapchain_from_handle( client_swapchains[i] );
+            struct fs_hack_image *hack;
+
+            if (!swapchain->fshack_dpi) continue;
+            hack = &swapchain->fs_hack_images[present_info->pImageIndices[i]];
+            if (hack->bars_cmd) hack->bars_painted = 1;
+        }
     }
 
     pthread_mutex_lock( &present_lock );

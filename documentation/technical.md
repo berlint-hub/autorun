@@ -72,7 +72,10 @@ runtime; the full package now ships the Mesa 26 one.
   over the screen, kept in proportion with bars, by whole pixel steps, or with
   the central 4:3 stretched (`source/screen_fit.h`). The same rectangle places
   the compositor's windows and maps input, so what is shown and what is touched
-  agree. The earlier runtime on
+  agree. Only that rectangle is dispatched: the bars are cleared once, when a
+  swapchain image is first shown, and a frame after that writes the picture
+  alone, with `vkCmdDispatchBase` starting the workgroup grid where the picture
+  starts (`record_compute_cmd`). The earlier runtime on
   Mesa 20.1's nouveau driver, patched for pinned 32-bit buffers
   (`horizon-wine/mesa`), can still be built.
 - **Audio.** `winenxaudio.drv` plays through audout, for mmdevapi and DirectSound.
