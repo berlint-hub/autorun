@@ -83,6 +83,44 @@ static void build_pe_image( void )
     pe_puts( 0x3a6, "beta" );
 }
 
+/* A memory model of two mappings with a gap between them, to prove the export
+ * scan reads across pieces of an image and asks about each piece once: a real
+ * image is mapped that way, and "is the whole image readable" answers no. */
+static unsigned int query_count;
+
+static int model_query( uint64_t address, uint64_t *lo, uint64_t *hi )
+{
+    static const struct { uint64_t lo, hi; } pieces[] = { { 0x10000, 0x18000 }, { 0x1a000, 0x20000 } };
+    unsigned int i;
+
+    query_count++;
+    for (i = 0; i < sizeof(pieces) / sizeof(pieces[0]); i++)
+        if (address >= pieces[i].lo && address < pieces[i].hi)
+        {
+            *lo = pieces[i].lo;
+            *hi = pieces[i].hi;
+            return 1;
+        }
+    return 0;
+}
+
+/* An address in the gap, and one paste the end of a piece, are not readable. */
+static void check_window( void )
+{
+    struct nx_prof_window win = {0};
+
+    query_count = 0;
+    assert( nx_prof_window_cover( &win, 0x10010, 4, model_query ) );
+    assert( query_count == 1 );
+    assert( nx_prof_window_cover( &win, 0x17ff0, 4, model_query ) );
+    assert( query_count == 1 );                                  /* same piece, no new question */
+    assert( nx_prof_window_cover( &win, 0x1b000, 4, model_query ) );
+    assert( query_count == 2 );                                  /* the second piece */
+    assert( !nx_prof_window_cover( &win, 0x19000, 4, model_query ) );  /* the gap */
+    assert( !nx_prof_window_cover( &win, 0x17fff, 4, model_query ) );  /* straddles the end */
+    assert( !nx_prof_window_cover( &win, 0x19000, 0, model_query ) );  /* nothing asked for */
+}
+
 static void check_pe_exports( void )
 {
     uint32_t name = 0, delta = 0;
@@ -106,6 +144,7 @@ static void check_pe_exports( void )
     build_pe_image();
     pe_put16( 0x98, 0x20b );
     assert( !nx_prof_pe_export( (uint64_t)(uintptr_t)pe_image, 0x300, pe_read32, NULL, &name, &delta ) );
+    check_window();
 }
 
 int main(void)
@@ -234,7 +273,7 @@ int main(void)
         assert( threads[0].new_core == 1 && threads[1].new_core == 0 && threads[2].new_core == -1 );
     }
 
-    puts( "thread profiler: svc decoding, i386 context offsets, export names, classification, buckets, "
-          "top, core shares and core balancing passed" );
+    puts( "thread profiler: svc decoding, i386 context offsets, export names, mapped windows, "
+          "classification, buckets, top, core shares and core balancing passed" );
     return 0;
 }

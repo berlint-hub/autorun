@@ -216,6 +216,33 @@ static inline unsigned int nx_prof_x86_frames( uint32_t esp, uint32_t ebp, uint6
     return n;
 }
 
+/* A window of memory that may be read without asking the kernel again: a PE
+ * image is mapped in several pieces with different protections, so "the image
+ * is readable" is not one check, while asking about every word of an export
+ * table would hold every paused thread for a second. The window remembers the
+ * piece it last asked about and only asks again when an address leaves it.
+ * query(address, &lo, &hi) answers 1 and the readable range around the address,
+ * or 0. Returns 1 when [address, address + size) is inside what may be read. */
+struct nx_prof_window
+{
+    uint64_t lo, hi;  /* the readable range last asked about; empty when equal */
+};
+
+static inline int nx_prof_window_cover( struct nx_prof_window *win, uint64_t address, uint64_t size,
+                                        int (*query)( uint64_t, uint64_t *, uint64_t * ) )
+{
+    uint64_t lo, hi;
+
+    if (!size) return 0;
+    if (win->hi > win->lo && address >= win->lo && address - win->lo <= win->hi - win->lo - size)
+        return 1;
+    win->lo = win->hi = 0;
+    if (!query || !query( address, &lo, &hi ) || hi < lo || hi - lo < size) return 0;
+    win->lo = lo;
+    win->hi = hi;
+    return address >= lo && address - lo <= hi - lo - size;
+}
+
 /* The nearest named export at or below an RVA of a 32-bit PE image, from the
  * image's own export table: a stalled thread inside a Wine DLL reports
  * "opengl32.dll+0x3db4", which names nothing, while "opengl32.dll!

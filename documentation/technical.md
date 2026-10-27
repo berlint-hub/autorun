@@ -168,8 +168,11 @@ runtime; the full package now ships the Mesa 26 one.
   table turns the offset into a name -- `opengl32.dll!wglSwapBuffers+0x1c`
   instead of `opengl32.dll+0x3db4` -- which is the difference between a thread
   that is somewhere in a megabyte of GL code and one that is in the swap. The
-  table is read against the image's own `SizeOfImage` and one kernel check of
-  that range, so naming costs microseconds and cannot fault.
+  tables are walked through a window that remembers the mapped piece it last
+  asked about, so naming costs one kernel check per piece and cannot fault: an
+  image is several pieces with different protections, and asking once whether
+  the whole `SizeOfImage` is readable answers no for every one of them -- which
+  is exactly how the first version of this named nothing at all.
 - **Caches on the card.** Mesa's on-disk shader cache is given a directory of
   its own, `sdmc:/switch/wine/cache`, and a 512 MB cap through
   `MESA_SHADER_CACHE_*` (and the `MESA_GLSL_*` names Mesa 20.1 reads), so a
