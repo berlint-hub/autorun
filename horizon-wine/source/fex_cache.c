@@ -37,7 +37,7 @@ static int fex_cache_skip( const char *name )
 
 /* What one configuration holds and when it was last written. A directory whose
  * files cannot be read counts as empty: it is not worth pruning. */
-static void fex_cache_measure( struct fex_cache_bucket *bucket )
+static void fex_cache_weigh( struct fex_cache_bucket *bucket )
 {
     struct dirent *entry;
     struct stat st;
@@ -137,7 +137,7 @@ int fex_cache_prune( const char *root, unsigned long long limit, unsigned long l
         /* The age is the newest file the configuration holds, not the
          * directory's own time: a directory's time is when something in it
          * last changed, which for a cache that is being written is now. */
-        fex_cache_measure( &bucket );
+        fex_cache_weigh( &bucket );
         if (!bucket.bytes) continue;   /* a directory the translator has not filled yet */
         if (count == room)
         {
@@ -186,4 +186,22 @@ int fex_cache_prune( const char *root, unsigned long long limit, unsigned long l
     }
     free( buckets );
     return 1;
+}
+
+int fex_cache_measure( const char *root, unsigned long long *bytes, unsigned int *buckets )
+{
+    struct fex_cache_report report;
+    int ok = fex_cache_prune( root, ~0ull, 0, &report );
+
+    *bytes = report.bytes;
+    *buckets = report.buckets;
+    return ok;
+}
+
+int fex_cache_clear( const char *root )
+{
+    struct fex_cache_report report;
+
+    if (!fex_cache_prune( root, 0, 0, &report )) return 0;
+    return !report.pruned || report.kept == 0;
 }

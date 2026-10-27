@@ -44,6 +44,7 @@
 #include "launcher_input.h"
 #include "launcher_preset.h"
 #include "launcher_settings.h"
+#include "fex_cache.h"
 #include "launcher_ui.h"
 #include "launcher_forwarder.h"
 #include "launcher_image.h"
@@ -3544,7 +3545,7 @@ enum settings_row
 #ifdef WINE_NX_SWAP_POC
     SET_SWAP_SIZE,
 #endif
-    SET_BACKUP, SET_RESTORE, SET_CREDITS, SETTINGS_ROWS
+    SET_CACHE, SET_BACKUP, SET_RESTORE, SET_CREDITS, SETTINGS_ROWS
 };
 
 static void save_look( struct launcher *l )
@@ -3973,6 +3974,7 @@ static void settings_menu( struct launcher *l )
 #ifdef WINE_NX_SWAP_POC
             [SET_SWAP_SIZE] = SET_SECTION_SYSTEM,
 #endif
+            [SET_CACHE] = SET_SECTION_SYSTEM,
             [SET_BACKUP] = SET_SECTION_SYSTEM,
             [SET_RESTORE] = SET_SECTION_SYSTEM,
             [SET_CREDITS] = SET_SECTION_SYSTEM,
@@ -4121,6 +4123,35 @@ static void settings_menu( struct launcher *l )
         }
 #endif
         {
+            /* The translator's code cache is shared by every game -- it is
+             * keyed by the translator's own configuration, not by the program
+             * -- so it is measured and cleared here rather than in a game's
+             * menu. */
+            unsigned long long bytes = 0;
+            unsigned int buckets = 0, roaming;
+            char path[520];
+
+            for (roaming = 0; roaming < 2; roaming++)
+            {
+                unsigned long long part = 0;
+                unsigned int count = 0;
+
+                if (!fex_cache_root( path, sizeof(path), l->options->runtime_dir, roaming )) continue;
+                if (!fex_cache_measure( path, &part, &count )) continue;
+                bytes += part;
+                buckets += count;
+            }
+            snprintf( rows[SET_CACHE].label, sizeof(rows[0].label), "Translated code cache" );
+            if (bytes) snprintf( rows[SET_CACHE].value, sizeof(rows[0].value), "%llu MiB in %u", bytes >> 20, buckets );
+            else snprintf( rows[SET_CACHE].value, sizeof(rows[0].value), "Empty" );
+            rows[SET_CACHE].kind = UI_ROW_ACTION;
+            rows[SET_CACHE].adjustable = 0;
+            rows[SET_CACHE].disabled = !bytes;
+            rows[SET_CACHE].help = "What FEX has translated and kept on the card for the games that turn "
+                                   "the cache on, shared by all of them. Choosing this clears it: the "
+                                   "games translate again next time, once.";
+        }
+        {
             int backups = launcher_backup_count( l->options->runtime_dir );
 
             snprintf( rows[SET_BACKUP].label, sizeof(rows[0].label), "Back up settings" );
@@ -4247,6 +4278,39 @@ static void settings_menu( struct launcher *l )
         case SET_REMOVE_MISSING:
             if (action == UI_ACTION_CHOOSE) remove_missing_games( l );
             continue;
+        case SET_CACHE:
+            if (action == UI_ACTION_CHOOSE)
+            {
+                unsigned long long before = 0;
+                unsigned int roaming;
+
+                if (!ui_confirm( ui, "Translated code cache",
+                                 "Give back everything FEX has translated and kept on the card? Every "
+                                 "game translates its own code again the next time it starts, once.",
+                                 "Clear" )) break;
+                for (roaming = 0; roaming < 2; roaming++)
+                {
+                    char path[520];
+                    unsigned long long bytes = 0;
+                    unsigned int count = 0;
+
+                    if (!fex_cache_root( path, sizeof(path), l->options->runtime_dir, roaming )) continue;
+                    if (!fex_cache_measure( path, &bytes, &count )) continue;
+                    before += bytes;
+                    fex_cache_clear( path );
+                }
+                if (before)
+                {
+                    char line[64];
+
+                    snprintf( line, sizeof(line), "%llu MiB given back", before >> 20 );
+                    ui_toast( ui, line, 2000 );
+                }
+                else ui_toast( ui, "Nothing to clear", 1500 );
+                settings_menu( l );
+            }
+            continue;
+
         case SET_BACKUP:
             if (action == UI_ACTION_CHOOSE) backup_settings( l );
             continue;

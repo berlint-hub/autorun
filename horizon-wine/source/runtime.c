@@ -5206,19 +5206,19 @@ int main( int argc, char **argv )
      * there. */
     if (runtime_fex && runtime_fex_disk_cache)
     {
-        static const char *const cache_roots[] = { WINE_USER_DIR "/AppData/Local/fex-emu",
-                                                   WINE_USER_DIR "/AppData/Roaming/fex-emu" };
         unsigned long long kept = 0;
         unsigned int configurations = 0, removed = 0;
-        unsigned int i;
+        int roaming;
 
-        for (i = 0; i < ARRAY_SIZE(cache_roots); i++)
+        for (roaming = 0; roaming < 2; roaming++)
         {
+            char cache_root[520];
             struct fex_cache_report report;
 
-            if (!fex_cache_prune( cache_roots[i], FEX_CACHE_LIMIT, FEX_CACHE_KEEP, &report ))
+            if (!fex_cache_root( cache_root, sizeof(cache_root), RUNTIME_DIR, roaming )) continue;
+            if (!fex_cache_prune( cache_root, FEX_CACHE_LIMIT, FEX_CACHE_KEEP, &report ))
             {
-                log_line( "[FEX] %s could not be read; the code cache is left alone", cache_roots[i] );
+                log_line( "[FEX] %s could not be read; the code cache is left alone", cache_root );
                 continue;
             }
             kept += report.kept;

@@ -97,7 +97,11 @@ runtime; the full package now ships the Mesa 26 one.
   `drive_c/users/steamuser/AppData/{Local,Roaming}/fex-emu/DiskCache` before
   the program starts and gives whole configurations back oldest first until it
   is under a gigabyte, keeping 768 MB -- the limit 2610 added upstream, and
-  the guard 2609 does not have (`source/fex_cache.c`).
+  the guard 2609 does not have (`source/fex_cache.c`). The cache belongs to no
+  one program -- the module keys it by its own configuration -- so its size is
+  shown, and it is cleared, from the launcher's Settings tab rather than from a
+  game's menu; `fex_cache_root()` names the directories both sides use, so the
+  runtime and the launcher cannot drift apart.
 - **Audio.** `winenxaudio.drv` plays through audout, for mmdevapi and DirectSound.
 - **Input.** The touchscreen, the controller as a mouse or as a keyboard with
   per-game mappings, and XInput, which sees player 1 as an Xbox 360 controller.

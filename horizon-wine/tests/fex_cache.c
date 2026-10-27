@@ -12,6 +12,8 @@
 
 #include "../source/fex_cache.h"
 
+#define FEX_CACHE_PATH_TEST 128
+
 static char root[512];
 static char detail[256];
 static unsigned long long written;
@@ -239,6 +241,43 @@ int main( void )
     note_report( &report );
     CHECK( report.buckets == 2 && report.bytes == 202 && report.buckets_removed == 1 );
     CHECK( report.kept == 101 && !bucket_exists( "aa" ) && bucket_exists( "bb" ) );
+
+    /* Measuring is reading: the launcher's line about the cache must not take
+     * anything away, and the same bytes the prune starts from are what it
+     * says. */
+    reset_tree( 1 );
+    make_bucket( "aa", 100, now - 3000 );
+    make_bucket( "zz", 200, now - 1000 );
+    {
+        unsigned long long bytes = 0;
+        unsigned int buckets = 0;
+
+        CHECK( fex_cache_measure( root, &bytes, &buckets ) );
+        note_report( &report );
+        CHECK( bytes == written && buckets == 2 );
+        CHECK( bucket_exists( "aa" ) && bucket_exists( "zz" ) );
+        /* And a cache that is not there measures as nothing, not as a fault. */
+        CHECK( fex_cache_measure( "/nonexistent/wine-nx", &bytes, &buckets ) );
+        CHECK( !bytes && !buckets );
+    }
+
+    /* Clearing gives every configuration back and leaves the directory the
+     * translator fills; a second clear finds nothing and is not a fault. */
+    CHECK( fex_cache_clear( root ) );
+    CHECK( !bucket_exists( "aa" ) && !bucket_exists( "zz" ) && cache_exists() );
+    CHECK( fex_cache_clear( root ) );
+    CHECK( fex_cache_clear( "/nonexistent/wine-nx" ) );
+
+    /* The path the runtime and the launcher both name: the module's database
+     * is under the user profile, local or roaming. */
+    {
+        char path[FEX_CACHE_PATH_TEST];
+
+        CHECK( fex_cache_root( path, sizeof(path), "sdmc:/switch/wine", 0 ) );
+        CHECK( !strcmp( path, "sdmc:/switch/wine/drive_c/users/steamuser/AppData/Local/fex-emu" ) );
+        CHECK( fex_cache_root( path, sizeof(path), "sdmc:/switch/wine", 1 ) );
+        CHECK( !strcmp( path, "sdmc:/switch/wine/drive_c/users/steamuser/AppData/Roaming/fex-emu" ) );
+    }
 
     /* A root that is not there is not a fault; the cache is simply not made
      * yet, which is what every first run looks like. */

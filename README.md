@@ -24,6 +24,9 @@ copies to the SD card and start them from Autorun's library.
   ([mesa-switch](https://github.com/danfromtico/mesa-switch)), and Direct3D 8
   to 11 run through [DXVK](https://github.com/doitsujin/dxvk), Direct3D 12
   through [VKD3D-Proton](https://github.com/HansKristian-Work/vkd3d-proton).
+- **What the translator keeps** can be seen and given back: **Settings →
+  Translated code cache** shows how much FEX has stored on the card and clears
+  it in one go.
 - **Shaders compiled once.** Mesa's on-disk shader cache lives in
   `sdmc:/switch/wine/cache`, up to 512 MB: an effect a game has already met is
   read back instead of being compiled again at every start.

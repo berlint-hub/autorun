@@ -26,6 +26,7 @@
 #define WINE_NX_FEX_CACHE_H
 
 #include <stddef.h>
+#include <stdio.h>
 
 /* FEX 2610's own default, which the console's card has room for. */
 #define FEX_CACHE_LIMIT (1024ull * 1024 * 1024)
@@ -43,6 +44,18 @@ struct fex_cache_report
     int failed;                 /* 1 when DiskCache/ could not be read */
 };
 
+/* Where the module keeps the database, given the runtime's own directory
+ * (sdmc:/switch/wine): under the user's profile, the local half and the
+ * roaming one, because a module may put it in either. One function for the
+ * runtime and for the launcher, so the two cannot drift apart. */
+static inline int fex_cache_root( char *out, size_t size, const char *runtime_dir, int roaming )
+{
+    int length = snprintf( out, size, "%s/drive_c/users/steamuser/AppData/%s/fex-emu",
+                           runtime_dir, roaming ? "Roaming" : "Local" );
+
+    return length > 0 && (size_t)length < size;
+}
+
 /* Measures `root`/DiskCache and, when it holds more than `limit` bytes, takes
  * whole configurations away oldest first until `keep` bytes or less remain.
  * A root without a cache is not an error: nothing has been translated yet.
@@ -50,5 +63,14 @@ struct fex_cache_report
  * can say so once and carry on. */
 int fex_cache_prune( const char *root, unsigned long long limit, unsigned long long keep,
                      struct fex_cache_report *report );
+
+/* What the cache holds, without touching it: the launcher's line about it, and
+ * the same measurement the prune starts from. 0 is returned only when the
+ * cache is there and cannot be read. */
+int fex_cache_measure( const char *root, unsigned long long *bytes, unsigned int *buckets );
+
+/* Gives every configuration back -- the launcher's "clear it" -- and leaves the
+ * directory for the translator to fill again. */
+int fex_cache_clear( const char *root );
 
 #endif
