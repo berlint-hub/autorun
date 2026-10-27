@@ -1,7 +1,6 @@
 /* Host test for the prune of FEX's translated code cache (source/fex_cache.c):
  * what counts as one configuration, which one goes first when the card has no
  * room, and that a card without a cache is left alone. */
-#include <assert.h>
 #include <dirent.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -14,7 +13,39 @@
 #include "../source/fex_cache.h"
 
 static char root[512];
+static char detail[256];
 static unsigned long long written;
+
+/* The last prune's numbers, so a failure says which one was not what the case
+ * asked for. */
+static void note_report( const struct fex_cache_report *report )
+{
+    snprintf( detail, sizeof(detail), " [buckets %u, bytes %llu, kept %llu, removed %u, pruned %d, failed %d]",
+              report->buckets, report->bytes, report->kept, report->buckets_removed,
+              report->pruned, report->failed );
+}
+
+/* A failed case is named rather than left as a bare signal: the runner shows
+ * the line as an annotation on the commit, which is where a failure in a
+ * filesystem this test cannot see is worth reading. */
+static void check_failed( int line, const char *what )
+{
+    char path[512];
+    FILE *log;
+
+    printf( "::error file=horizon-wine/tests/fex_cache.c,line=%d::%s%s\n", line, what, detail );
+    fflush( stdout );
+    mkdir( "shots", 0777 );
+    snprintf( path, sizeof(path), "shots/fex_cache-failure.txt" );
+    if ((log = fopen( path, "w" )))
+    {
+        fprintf( log, "line %d: %s%s\n", line, what, detail );
+        fclose( log );
+    }
+    abort();
+}
+
+#define CHECK(x) do { if (!(x)) check_failed( __LINE__, #x ); } while (0)
 
 static void path_of( char *out, size_t size, const char *name )
 {
@@ -30,10 +61,10 @@ static void make_file( const char *dir, const char *name, long size, time_t when
     FILE *handle;
 
     snprintf( file, sizeof(file), "%s/%s", dir, name );
-    assert( (handle = fopen( file, "wb" )) );
+    CHECK( (handle = fopen( file, "wb" )) );
     for (long i = 0; i < size; i++) fputc( 'x', handle );
-    assert( !fclose( handle ) );
-    assert( !utime( file, &stamp ) );
+    CHECK( !fclose( handle ) );
+    CHECK( !utime( file, &stamp ) );
     written += (unsigned long long)size;
 }
 
@@ -44,7 +75,7 @@ static void make_bucket( const char *name, long size, time_t when )
     char dir[600];
 
     path_of( dir, sizeof(dir), name );
-    assert( !mkdir( dir, 0777 ) );
+    CHECK( !mkdir( dir, 0777 ) );
     make_file( dir, "RWCacheDB.foz", size, when );
     make_file( dir, "RWCacheDB_idx.foz", 1, when );
 }
@@ -105,10 +136,10 @@ static void reset_tree( int with_cache )
     char dir[600];
 
     remove_tree( root );
-    assert( !mkdir( root, 0777 ) );
+    CHECK( !mkdir( root, 0777 ) );
     if (!with_cache) return;
     path_of( dir, sizeof(dir), NULL );
-    assert( !mkdir( dir, 0777 ) );
+    CHECK( !mkdir( dir, 0777 ) );
     written = 0;
 }
 
@@ -118,18 +149,20 @@ int main( void )
     char template[] = "/tmp/wine-nx-fex-cache-XXXXXX";
     const time_t now = 1700000000;
 
-    assert( mkdtemp( template ) );
+    CHECK( mkdtemp( template ) );
     snprintf( root, sizeof(root), "%s", template );
 
     /* No cache yet: nothing measured, and no complaint about it. */
     reset_tree( 0 );
-    assert( fex_cache_prune( root, FEX_CACHE_LIMIT, FEX_CACHE_KEEP, &report ) );
-    assert( !report.buckets && !report.bytes && !report.pruned && !report.failed );
+    CHECK( fex_cache_prune( root, FEX_CACHE_LIMIT, FEX_CACHE_KEEP, &report ) );
+    note_report( &report );
+    CHECK( !report.buckets && !report.bytes && !report.pruned && !report.failed );
 
     /* A cache directory the translator has made but not filled. */
     reset_tree( 1 );
-    assert( fex_cache_prune( root, FEX_CACHE_LIMIT, FEX_CACHE_KEEP, &report ) );
-    assert( !report.buckets && !report.pruned && !report.failed );
+    CHECK( fex_cache_prune( root, FEX_CACHE_LIMIT, FEX_CACHE_KEEP, &report ) );
+    note_report( &report );
+    CHECK( !report.buckets && !report.pruned && !report.failed );
 
     /* Three configurations, 101, 201 and 301 bytes, the newest written last.
      * Their names sort the other way round, so a prune that went by name would
@@ -138,25 +171,28 @@ int main( void )
     make_bucket( "aa", 100, now - 3000 );
     make_bucket( "zz", 200, now - 2000 );
     make_bucket( "mm", 300, now - 1000 );
-    assert( written == 603 );
+    CHECK( written == 603 );
 
     /* Under the limit: measured, nothing taken. */
-    assert( fex_cache_prune( root, 1000, 500, &report ) );
-    assert( report.buckets == 3 && report.bytes == 603 && report.kept == 603 );
-    assert( !report.pruned && !report.buckets_removed );
+    CHECK( fex_cache_prune( root, 1000, 500, &report ) );
+    note_report( &report );
+    CHECK( report.buckets == 3 && report.bytes == 603 && report.kept == 603 );
+    CHECK( !report.pruned && !report.buckets_removed );
 
     /* Over it: the oldest goes, then the next, until what is left fits -- and
      * never a file out of a configuration. */
-    assert( fex_cache_prune( root, 450, 350, &report ) );
-    assert( report.pruned && report.buckets == 3 && report.bytes == 603 );
-    assert( report.buckets_removed == 2 && report.kept == 301 );
-    assert( !bucket_exists( "aa" ) && !bucket_exists( "zz" ) && bucket_exists( "mm" ) );
+    CHECK( fex_cache_prune( root, 450, 350, &report ) );
+    note_report( &report );
+    CHECK( report.pruned && report.buckets == 3 && report.bytes == 603 );
+    CHECK( report.buckets_removed == 2 && report.kept == 301 );
+    CHECK( !bucket_exists( "aa" ) && !bucket_exists( "zz" ) && bucket_exists( "mm" ) );
 
     /* What fits is looked at again on the next start and left alone, and the
      * cache's own directory is still there for the translator to fill. */
-    assert( fex_cache_prune( root, 450, 350, &report ) );
-    assert( !report.pruned && report.buckets == 1 && report.kept == 301 );
-    assert( !report.failed && !report.buckets_removed && cache_exists() );
+    CHECK( fex_cache_prune( root, 450, 350, &report ) );
+    note_report( &report );
+    CHECK( !report.pruned && report.buckets == 1 && report.kept == 301 );
+    CHECK( !report.failed && !report.buckets_removed && cache_exists() );
 
     /* A configuration with something else in it is still one configuration,
      * measured with it and given back whole. */
@@ -169,15 +205,17 @@ int main( void )
         make_file( dir, "notes.bin", 500, now - 3000 );
     }
     make_bucket( "zz", 200, now - 2000 );
-    assert( written == 802 );
-    assert( fex_cache_prune( root, 700, 650, &report ) );
-    assert( report.buckets == 2 && report.bytes == 802 && report.buckets_removed == 1 );
-    assert( report.kept == 201 && !bucket_exists( "aa" ) && bucket_exists( "zz" ) );
+    CHECK( written == 802 );
+    CHECK( fex_cache_prune( root, 700, 650, &report ) );
+    note_report( &report );
+    CHECK( report.buckets == 2 && report.bytes == 802 && report.buckets_removed == 1 );
+    CHECK( report.kept == 201 && !bucket_exists( "aa" ) && bucket_exists( "zz" ) );
 
     /* A root that is not there is not a fault; the cache is simply not made
      * yet, which is what every first run looks like. */
-    assert( fex_cache_prune( "/nonexistent/wine-nx", 400, 100, &report ) );
-    assert( !report.failed && !report.buckets );
+    CHECK( fex_cache_prune( "/nonexistent/wine-nx", 400, 100, &report ) );
+    note_report( &report );
+    CHECK( !report.failed && !report.buckets );
 
     remove_tree( root );
 
