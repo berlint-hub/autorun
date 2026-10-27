@@ -78,6 +78,14 @@ runtime; the full package now ships the Mesa 26 one.
   starts (`record_compute_cmd`). The earlier runtime on
   Mesa 20.1's nouveau driver, patched for pinned 32-bit buffers
   (`horizon-wine/mesa`), can still be built.
+- **OpenGL, tuned per program.** Two of Mesa's switches are the program's own:
+  `mesa_glthread=true` (a DRI option, so lower case, and set before the first
+  context) marshals GL commands on a worker thread, which is what the Android
+  wrappers ship on by default and what takes the driver's bookkeeping off the
+  game's thread; `MESA_EXTENSION_MAX_YEAR=2003` keeps Mesa from advertising
+  extensions a driver of that year did not have, for games that probe them and
+  refuse to start. Both are off unless a program asks for them, since the first
+  costs a little on titles that do not need it and the second breaks newer ones.
 - **Caches on the card.** Mesa's on-disk shader cache is given a directory of
   its own, `sdmc:/switch/wine/cache`, and a 512 MB cap through
   `MESA_SHADER_CACHE_*` (and the `MESA_GLSL_*` names Mesa 20.1 reads), so a

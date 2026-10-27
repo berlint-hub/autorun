@@ -174,6 +174,9 @@ played**.
   is fitted to the 1280x720 screen (**Aspect ratio**, **Full screen**,
   **Integer** or **Stretch 4:3**) and filtered inside that rectangle (FSR 1.0,
   bilinear or nearest), and **Frame Generation**;
+- for OpenGL games, hand the driver's work to a **worker thread** when a game
+  stutters, and show **older OpenGL games** only the extensions a 2003 driver
+  had, for titles that refuse to start on a modern one;
 - pick the CPU translator (Box64, FEX, or the Switch-tuned FEX), and give it
   its own controls, including whether its translated code is kept on the card
   between runs;

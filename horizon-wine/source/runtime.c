@@ -594,6 +594,10 @@ static int runtime_fex;
 /* The program keeps the translator's code on the card between runs
  * (fex-cache=1), so a second start does not translate it again. */
 static int runtime_fex_disk_cache;
+/* Mesa's two switches for OpenGL: commands marshalled on a worker thread, and
+ * only the extensions a 2003 driver had. */
+static int runtime_gl_thread;
+static int runtime_gl_2003;
 /* The program's CPU translator choice: "opt", "" for the stock modules, or
  * NULL when it has none and fex-variant.txt decides. */
 static const char *runtime_fex_variant;
@@ -5033,6 +5037,8 @@ int main( int argc, char **argv )
 #endif
             runtime_four_cores = settings.four_cores;
             runtime_fex_disk_cache = settings.fex_disk_cache;
+            runtime_gl_thread = settings.gl_thread;
+            runtime_gl_2003 = settings.gl_2003;
             if (settings.verbose >= 0) wine_nx_runtime_verbose = settings.verbose;
             if (settings.profile >= 0) runtime_profile = settings.profile;
             if (settings.framebuffer >= 0) wine_nx_compositor_mode = !settings.framebuffer;
@@ -5362,6 +5368,20 @@ int main( int argc, char **argv )
     setenv( "MESA_GLSL_CACHE_MAX_SIZE", "512M", 1 );
     setenv( "MESA_GLSL_CACHE_DISABLE", "0", 1 );
     log_line( "[MESA] shaders are cached in " RUNTIME_DIR "/cache, up to 512 MB" );
+    /* The program's own two OpenGL switches. glthread is a DRI option, so its
+     * name is the lower case one Mesa's driver reads, not the MESA_* form,
+     * and it has to be here rather than in the program's environment: the
+     * driver reads it when the first context is made. */
+    if (runtime_gl_thread)
+    {
+        setenv( "mesa_glthread", "true", 1 );
+        log_line( "[MESA] OpenGL commands are marshalled on a worker thread" );
+    }
+    if (runtime_gl_2003)
+    {
+        setenv( "MESA_EXTENSION_MAX_YEAR", "2003", 1 );
+        log_line( "[MESA] OpenGL reports only the extensions a 2003 driver had" );
+    }
 
     wine_nx_runtime_environment_init();
     log_line( "[INIT] Wine NLS/environment ready" );

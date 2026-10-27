@@ -1835,7 +1835,7 @@ enum program_row
     ROW_WINDOWS, ROW_SCALING, ROW_RESOLUTION, ROW_D3D9, ROW_VKD3D_VERSION, ROW_DXVK_VERSION, ROW_DXVK_OPTIONS, ROW_DXVK_HUD, ROW_FRAME_LIMIT, ROW_FRAME_LIMIT_SYNC, ROW_VSYNC,
     ROW_VOODOO,
     ROW_LSFG, ROW_LSFG_DLL, ROW_LSFG_PERFORMANCE, ROW_LSFG_FLOW,
-    ROW_UPSCALING, ROW_UPSCALING_SHARPNESS,
+    ROW_UPSCALING, ROW_UPSCALING_SHARPNESS, ROW_GL_THREAD, ROW_GL_2003,
     ROW_INPUT, ROW_INPUT_END = ROW_INPUT + INPUT_ROW_COUNT - 1, ROW_BOX64, ROW_FEX, ROW_SYNC, ROW_CPU, ROW_FEX_CACHE, ROW_FOUR_CORES, ROW_LAZY_FILE_VIEWS,
     ROW_HIDE, ROW_LIBRARY, ROW_GAME_FIX, PROGRAM_ROWS
 };
@@ -2834,6 +2834,27 @@ static int program_menu_run( struct launcher *l, struct program *p, char *target
             }
         }
 
+        /* OpenGL's own two switches. Both are Mesa's: the first hands the
+         * marshalling of GL commands to a worker thread, which takes the
+         * driver's bookkeeping off the game's thread; the second keeps Mesa
+         * from advertising anything a 2003 driver did not have, which is what
+         * games of that age test for and trip over. */
+        ADD_ROW( ROW_GL_THREAD, SECTION_GRAPHICS, "OpenGL on a worker thread",
+                 "Moves the driver's OpenGL work to a thread of its own, so a game waiting on the "
+                 "graphics driver does not hold up its own. Helps OpenGL games that stutter; some "
+                 "drivers and some games are slower or unstable with it, so it stays off by default." );
+        row->kind = UI_ROW_SWITCH;
+        row->on = p->settings.gl_thread;
+        snprintf( row->value, sizeof(row->value), "%s", p->settings.gl_thread ? "Enabled" : "Disabled" );
+
+        ADD_ROW( ROW_GL_2003, SECTION_GRAPHICS, "Older OpenGL games",
+                 "Shows games only the OpenGL extensions a 2003 driver had. For games from before "
+                 "2004 that refuse to start or draw wrongly because they probe extensions they were "
+                 "never written for. Leave it off for anything newer." );
+        row->kind = UI_ROW_SWITCH;
+        row->on = p->settings.gl_2003;
+        snprintf( row->value, sizeof(row->value), "%s", p->settings.gl_2003 ? "Enabled" : "Disabled" );
+
 #ifdef WINE_NX_LSFG
         runtime_file( l, "lsfg/Lossless.dll", path, sizeof(path) );
         lsfg_installed = file_exists( path );
@@ -3293,6 +3314,16 @@ static int program_menu_run( struct launcher *l, struct program *p, char *target
 
         case ROW_FEX_CACHE:
             p->settings.fex_disk_cache = action == UI_ACTION_RESET ? 0 : !p->settings.fex_disk_cache;
+            save_program_settings( l, p );
+            break;
+
+        case ROW_GL_THREAD:
+            p->settings.gl_thread = action == UI_ACTION_RESET ? 0 : !p->settings.gl_thread;
+            save_program_settings( l, p );
+            break;
+
+        case ROW_GL_2003:
+            p->settings.gl_2003 = action == UI_ACTION_RESET ? 0 : !p->settings.gl_2003;
             save_program_settings( l, p );
             break;
 

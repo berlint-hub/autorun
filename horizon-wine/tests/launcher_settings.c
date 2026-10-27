@@ -124,6 +124,22 @@ static void test_settings( const char *dir )
     load_text( &kv, "fex-cache=0\n" );
     launcher_settings_read( &kv, &settings );
     assert( !settings.fex_disk_cache );
+    /* Mesa's two OpenGL switches: off unless a program turns them on, and a
+     * key written as 0 or "off" is off. */
+    load_text( &kv, "" );
+    launcher_settings_read( &kv, &settings );
+    assert( !settings.gl_thread && !settings.gl_2003 );
+    load_text( &kv, "gl-thread=1\ngl-2003=on\n" );
+    launcher_settings_read( &kv, &settings );
+    assert( settings.gl_thread && settings.gl_2003 );
+    assert( launcher_settings_write( &kv, &settings ) && strstr( kv.text, "gl-thread=1" ) &&
+            strstr( kv.text, "gl-2003=1" ) );
+    launcher_settings_read( &kv, &back );
+    assert( back.gl_thread && back.gl_2003 );
+    settings.gl_thread = 0;
+    settings.gl_2003 = 0;
+    assert( launcher_settings_write( &kv, &settings ) && !strstr( kv.text, "gl-thread=" ) &&
+            !strstr( kv.text, "gl-2003=" ) );
     load_text( &kv, "resolution=1920x1080\n" );
     launcher_settings_read( &kv, &settings );
     assert( settings.resolution == 1 );
