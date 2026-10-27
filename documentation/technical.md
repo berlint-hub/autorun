@@ -139,6 +139,19 @@ runtime; the full package now ships the Mesa 26 one.
   (`[CLOCK] the console's calendar clock says …` or `this program has no
   calendar clock to read`), and every stall report carries what both clocks
   did since the previous one (`[STALL] the clocks moved: …`).
+- **A memory report a program can size its caches by.** Every program that
+  streams -- and a game of the 2000s streams everything -- asks Windows how
+  much memory it may use before deciding how large its level cache is. The
+  answer was built from Horizon's figure for the process, and libnx claims the
+  whole memory grant as its heap at startup: a program that had done nothing
+  read "1907 MB of 2048 used" and was offered 140 MB, and Dark Athena read
+  19 MB of its level, stopped, and parked every thread with nothing in the log
+  to say why. Free is now what the allocator can still hand out, from its own
+  books (the same figure the runtime prints as `heap_free_mb`), so the same
+  moment reads 900 MB free and the log's `[INIT] heap pool 0x…..0x… = N MB`
+  line says how large the pool behind it is. (The opposite failure lived here
+  once: AvailPageFile at 4 MB, and Fallout New Vegas, which wants 512 MB, quit
+  with "Not enough memory to run application.")
 - **A stall that names the call it is standing in.** `[STALL]` reports where
   every thread is, and a thread inside ntdll says only "ntdll". The system call
   dispatcher therefore keeps, per thread, the number of the call it was last
@@ -158,6 +171,10 @@ runtime; the full package now ships the Mesa 26 one.
   each doubling are logged with the arguments and the previous result, and the
   call a thread is inside is reported by name in its stall line (`| inside
   wglSetPixelFormat`). A call made a million times costs about twenty lines.
+  The slot a thread's call is recorded in holds the thread id one above itself,
+  so that a slot nobody has filled -- which reads as "thread 0, call 0" -- does
+  not claim that thread 0 is inside `wglSetPixelFormat`; thread 0 is a real
+  entry in the same report, and it was named after a call it had not made.
 - **A window that cannot have the screen draws offscreen.** A second window
   surface of a different pixel format cannot be made on the same NWindow, and
   failing the call leaves a program with no context at all -- Dark Athena

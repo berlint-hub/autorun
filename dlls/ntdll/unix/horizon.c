@@ -4056,31 +4056,27 @@ unsigned int horizon_get_processor_count(void)
  * caches, dictionaries and thread counts from GlobalMemoryStatusEx. */
 void horizon_get_memory_info( unsigned long long *total, unsigned long long *used )
 {
-    extern char *fake_heap_start, *fake_heap_end;
-    unsigned long long heap_size, heap_free;
-    struct mallinfo heap;
+    extern size_t wine_nx_native_heap_free_estimate( size_t * );
+    unsigned long long free_bytes;
+    size_t lower_bound = 0;
     u64 value;
 
     *total = R_SUCCEEDED( svcGetInfo( &value, InfoType_TotalMemorySize, CUR_PROCESS_HANDLE, 0 ) ) ? value : 0;
-    *used = R_SUCCEEDED( svcGetInfo( &value, InfoType_UsedMemorySize, CUR_PROCESS_HANDLE, 0 ) ) ? value : 0;
-    if (*used > *total) *used = *total;
 
-    /* InfoType_UsedMemorySize counts the whole heap, which libnx claims from
-     * Horizon at startup, so it reports a few megabytes free however little the
-     * process has allocated. What a program can still get is what malloc holds
-     * unused plus what it has not taken from the heap, the same figure the
-     * runtime prints as heap_free_mb. Without this, GlobalMemoryStatusEx
-     * reported 4 MB of AvailPageFile and Fallout New Vegas, which wants 512 MB,
-     * quit with "Not enough memory to run application." */
-    heap = mallinfo();
-    heap_size = fake_heap_end > fake_heap_start ? (unsigned long long)(fake_heap_end - fake_heap_start) : 0;
-    heap_free = (unsigned long long)heap.fordblks +
-                (heap_size > (unsigned long long)heap.arena ? heap_size - (unsigned long long)heap.arena : 0);
-    /* mallinfo's fields are narrower than the heap on a 32-bit address space,
-     * so bound the result by the heap and by what Horizon reports. */
-    if (heap_free > heap_size) heap_free = heap_size;
-    if (heap_free > *total) heap_free = *total;
-    if (*total - heap_free < *used) *used = *total - heap_free;
+    /* What is free is what the allocator can still hand out, from its own
+     * books.  Horizon's two figures cannot answer it: UsedMemorySize counts
+     * the whole heap libnx claims at startup, so a program that has done
+     * nothing reads as "1907 MB of 2048 used", and GlobalMemoryStatusEx then
+     * offers it 140 MB.  A 2009 engine sizes its streaming caches from exactly
+     * that number -- Dark Athena read 19 MB of a level, stopped, and parked
+     * every thread with nothing in the log to say why.  (An earlier version of
+     * this function had the opposite failure: AvailPageFile at 4 MB, and
+     * Fallout New Vegas, which wants 512 MB, quit with "Not enough memory to
+     * run application.")  The allocator knows what it has given out and what it
+     * can still give, which is the number a program is asking for. */
+    free_bytes = wine_nx_native_heap_free_estimate( &lower_bound );
+    if (free_bytes > *total) free_bytes = *total;
+    *used = *total - free_bytes;
 }
 
 /* The pipe behind a descriptor from horizon_pipe, or NULL. */

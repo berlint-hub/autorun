@@ -372,8 +372,15 @@ static void cap_heap_pool_for_shared_data(void)
     if ((uintptr_t)fake_heap_end > end)
     {
         fake_heap_end = (char *)end;
-        log_line( "[INIT] heap pool ends at 0x%llx (region 0x%llx+0x%llx); 0x7ffe0000 stays out of the allocator",
-                  (unsigned long long)end, (unsigned long long)heap_base, (unsigned long long)heap_size );
+        /* The size as well as the ends: what a program may allocate is this
+         * pool, and every figure the memory report and the log give is drawn
+         * from it. */
+        log_line( "[INIT] heap pool 0x%llx..0x%llx = %llu MB (region 0x%llx+0x%llx); "
+                  "0x7ffe0000 stays out of the allocator",
+                  (unsigned long long)(uintptr_t)fake_heap_start, (unsigned long long)end,
+                  (unsigned long long)(uintptr_t)fake_heap_start < end ?
+                      (unsigned long long)(end - (uintptr_t)fake_heap_start) >> 20 : 0,
+                  (unsigned long long)heap_base, (unsigned long long)heap_size );
     }
 }
 

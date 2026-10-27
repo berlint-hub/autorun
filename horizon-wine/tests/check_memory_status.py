@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
-"""Run horizon_get_memory_info on made-up Horizon and heap figures, and derive
-what GlobalMemoryStatusEx would report from them.
+"""Run horizon_get_memory_info on made-up Horizon and allocator figures, and
+derive what GlobalMemoryStatusEx would report from them.
 
 libnx claims the whole heap from Horizon at startup, so InfoType_UsedMemorySize
 stays a few megabytes below InfoType_TotalMemorySize however little the process
-has allocated. Wine's ullAvailPageFile is exactly total - used, and Fallout New
-Vegas quits with "Not enough memory to run application." unless it is at least
-512 MB: it read 4 MB on build 109. What a program can still get is what malloc
-holds unused plus what it has not taken from the heap."""
+has allocated, and a report built from it is wrong in both directions. Wine's
+ullAvailPageFile is exactly total - used: Fallout New Vegas quits with "Not
+enough memory to run application." unless it is at least 512 MB, and it read
+4 MB on build 109; Dark Athena read 140 MB free before it had loaded anything
+and stopped reading its level after 19 MB. What a program can still get is what
+the allocator can hand out, and that is what the function asks for now."""
 from pathlib import Path
-import re
 import subprocess
 import tempfile
 
@@ -40,20 +41,23 @@ typedef unsigned long long u64;
 #define CUR_PROCESS_HANDLE 0xffff8001u
 enum {{ InfoType_TotalMemorySize = 6, InfoType_UsedMemorySize = 7 }};
 
-/* The fields newlib's mallinfo returns, which are narrower than a 3 GB heap. */
-struct mallinfo {{ int arena, ordblks, hblks, hblkhd, usmblks, fsmblks, uordblks, fordblks, keepcost; }};
-static struct mallinfo fake_mallinfo;
-static struct mallinfo mallinfo( void ) {{ return fake_mallinfo; }}
-char *fake_heap_start, *fake_heap_end;
-static u64 fake_total, fake_used;
+static u64 fake_total, fake_kernel_used;
+static unsigned long long fake_free;
 static int fake_rc;
 
 static int svcGetInfo( u64 *out, int id, unsigned int handle, u64 sub )
 {{
     (void)handle; (void)sub;
     if (fake_rc) return fake_rc;
-    *out = id == InfoType_TotalMemorySize ? fake_total : fake_used;
+    *out = id == InfoType_TotalMemorySize ? fake_total : fake_kernel_used;
     return 0;
+}}
+
+/* The allocator's own books, from horizon-wine/source/native_heap.c. */
+size_t wine_nx_native_heap_free_estimate( size_t *lower_bound )
+{{
+    if (lower_bound) *lower_bound = fake_free;
+    return fake_free;
 }}
 
 {block('void horizon_get_memory_info(')}
@@ -64,21 +68,18 @@ int main( int argc, char **argv )
 
     (void)argc;
     fake_total = strtoull( argv[1], NULL, 0 );
-    fake_used = strtoull( argv[2], NULL, 0 );
-    fake_heap_start = (char *)0x10000000;
-    fake_heap_end = fake_heap_start + strtoull( argv[3], NULL, 0 );
-    fake_mallinfo.arena = (int)strtoll( argv[4], NULL, 0 );
-    fake_mallinfo.fordblks = (int)strtoll( argv[5], NULL, 0 );
-    fake_rc = (int)strtol( argv[6], NULL, 0 );
+    fake_kernel_used = strtoull( argv[2], NULL, 0 );
+    fake_free = strtoull( argv[3], NULL, 0 );
+    fake_rc = (int)strtol( argv[4], NULL, 0 );
     horizon_get_memory_info( &total, &used );
-    printf( "%llu %llu\\n", total, used );
+    printf( "%llu %llu", total, used );
     return 0;
 }}
 '''
 
 
-def run(binary, total, used, heap_size, arena, fordblks, rc=0):
-    out = subprocess.run([str(binary), str(total), str(used), str(heap_size), str(arena), str(fordblks), str(rc)],
+def run(binary, total, kernel_used, free_bytes, rc=0):
+    out = subprocess.run([str(binary), str(total), str(kernel_used), str(free_bytes), str(rc)],
                          check=True, capture_output=True, text=True).stdout.split()
     total, used = int(out[0]), int(out[1])
     # kernelbase's GlobalMemoryStatusEx: AvailPageFile is TotalCommitLimit minus
@@ -95,28 +96,25 @@ with tempfile.TemporaryDirectory(prefix='wine-nx-memory-status-') as tmp:
                     str(tmp / 'test.c'), '-o', str(tmp / 'test')], check=True)
     test = tmp / 'test'
 
-    # The build 109 Fallout run: Horizon said 3189 MB total, 3185 MB used, while
-    # the runtime's own [PROGRESS] line had 249 MB of heap in use, 2883 MB free.
-    total, used, avail = run(test, 3189 * MB, 3185 * MB, 3132 * MB, 300 * MB, 51 * MB)
-    assert total == 3189 * MB, total
-    assert 2800 * MB < total - used < 2900 * MB, (total, used)
+    # A Dark Athena run: Horizon said 2048 MB total, 1907 MB used, while the
+    # allocator had 900 MB it could still hand out.
+    total, used, avail = run(test, 2048 * MB, 1907 * MB, 900 * MB)
+    assert total == 2048 * MB, total
+    assert total - used == 900 * MB, (total, used)
     assert avail >= NEEDED, avail
-    print(f'hardware figures: {(total - used) // MB} MB free, AvailPageFile {avail // MB} MB '
-          f'(the game needs {NEEDED // MB} MB)')
+    print(f'the run: {(total - used) // MB} MB free, AvailPageFile {avail // MB} MB '
+          f'(Fallout needs {NEEDED // MB} MB, Dark Athena stopped at 140 MB)')
 
-    # Without the heap, only Horizon's few megabytes are free, which is what the
-    # game saw and refused.
-    _, _, avail_old = run(test, 3189 * MB, 3185 * MB, 0, 0, 0)
-    assert avail_old < NEEDED, avail_old
+    # The build 109 Fallout run, which read 4 MB of AvailPageFile.
+    _, _, avail_old = run(test, 3189 * MB, 3185 * MB, 0)
+    assert avail_old <= PAGE, avail_old
 
-    # A full heap reports what Horizon does, and never more than it.
-    total, used, _ = run(test, 3189 * MB, 3185 * MB, 3132 * MB, 3132 * MB, 0)
-    assert used == 3185 * MB, used
-    # Fields that overflow int stay bounded by the heap and by the total.
-    total, used, _ = run(test, 3189 * MB, 3185 * MB, 512 * MB, -(1 << 30), -(1 << 30))
-    assert 0 <= used <= total and total - used <= 512 * MB, (total, used)
-    # Nothing mapped yet, and a failed svcGetInfo.
-    assert run(test, 3189 * MB, 3185 * MB, 0, 0, 0)[1] == 3185 * MB
-    assert run(test, 0, 0, 3132 * MB, 0, 0, rc=0xd401) == (0, 0, 0)
+    # The kernel's figure is not used at all: the same allocator state reports
+    # the same free memory whatever Horizon says about the heap.
+    assert run(test, 2048 * MB, 0, 900 * MB) == run(test, 2048 * MB, 2047 * MB, 900 * MB)
 
-print('Memory status: free memory follows the heap, so AvailPageFile passes a 512 MB check')
+    # A free figure larger than the grant, and nothing at all, stay bounded.
+    assert run(test, 2048 * MB, 1907 * MB, 4096 * MB)[1] == 0
+    assert run(test, 0, 0, 900 * MB) == (0, 0, 0)
+    # And a failed svcGetInfo leaves nothing to report.
+    assert run(test, 2048 * MB, 1907 * MB, 900 * MB, rc=0xd401) == (0, 0, 0)

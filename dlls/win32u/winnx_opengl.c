@@ -278,7 +278,11 @@ static __thread int nx_gl_last_ret[NX_GL_ENTRIES];
 static __thread int nx_gl_inside = -1;
 
 /* Which call each thread is inside now, for the stall report: a thread cannot
- * read another's thread-local storage, so the few words it needs are here. */
+ * read another's thread-local storage, so the few words it needs are here.
+ * The thread id is stored one above itself, so that a slot nobody has filled
+ * -- which reads as tid 0, entry 0 -- does not answer "thread 0 is inside
+ * wglSetPixelFormat".  Thread 0 is a real entry in the stall report, and it
+ * spent two reports being named after a call it had not made. */
 struct nx_gl_stage { unsigned int tid; int entry; };
 #define NX_GL_STAGES 64
 static struct nx_gl_stage nx_gl_stages[NX_GL_STAGES];
@@ -296,8 +300,8 @@ void wine_nx_gl_enter( unsigned int entry, int a, int b )
     if (entry >= NX_GL_ENTRIES || !&wine_nx_runtime_trace) return;
     nx_gl_inside = (int)entry;
     slot = &nx_gl_stages[tid % NX_GL_STAGES];
-    __atomic_store_n( &slot->tid, tid, __ATOMIC_RELAXED );
     __atomic_store_n( &slot->entry, (int)entry, __ATOMIC_RELAXED );
+    __atomic_store_n( &slot->tid, tid + 1, __ATOMIC_RELAXED );
 
     count = ++nx_gl_calls[entry];
     if (!nx_prof_counted_line( count )) return;
@@ -316,7 +320,7 @@ void wine_nx_gl_leave( unsigned int entry, int ret )
     nx_gl_inside = -1;
     tid = nx_gl_current_tid();
     slot = &nx_gl_stages[tid % NX_GL_STAGES];
-    if (__atomic_load_n( &slot->tid, __ATOMIC_RELAXED ) == tid)
+    if (__atomic_load_n( &slot->tid, __ATOMIC_RELAXED ) == tid + 1)
         __atomic_store_n( &slot->entry, -1, __ATOMIC_RELAXED );
 }
 
@@ -325,7 +329,7 @@ int wine_nx_gl_stage_of( unsigned int tid )
 {
     struct nx_gl_stage *slot = &nx_gl_stages[tid % NX_GL_STAGES];
 
-    if (__atomic_load_n( &slot->tid, __ATOMIC_RELAXED ) != tid) return -1;
+    if (__atomic_load_n( &slot->tid, __ATOMIC_RELAXED ) != tid + 1) return -1;
     return __atomic_load_n( &slot->entry, __ATOMIC_RELAXED );
 }
 
