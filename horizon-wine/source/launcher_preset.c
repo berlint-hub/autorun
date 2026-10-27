@@ -21,15 +21,12 @@ static const struct launcher_preset_fields launcher_presets[LAUNCHER_PRESET_COUN
     /* Balanced is exactly what launcher_preset_defaults() leaves behind, so a
      * game that has never been configured says so instead of "Custom". */
     { -1, 1, 0, 0, 0, 1, 0 },
-    /* Performance: the tuned translator and every fast path, uncapped --
-     * including the code cache, which is what makes a second run of a game
-     * start without translating everything again. */
-    { 2, 1, 1, 1, 1, 0, 0 },
+    /* Performance: the tuned translator and every fast path, uncapped. */
+    { 2, 1, 1, 0, 1, 0, 0 },
     /* Battery: the fast paths with a 30 fps cap, which is the frame rate a
      * handheld can hold for hours. */
-    { 2, 1, 1, 1, 1, 1, 1 },
-    /* Compatibility: slow and safe, with the translator left to the library
-     * and nothing experimental on. */
+    { 2, 1, 1, 0, 1, 1, 1 },
+    /* Compatibility: slow and safe, with the translator left to the library. */
     { -1, 0, 0, 0, 0, 1, 0 }
 };
 
@@ -41,22 +38,18 @@ static const char *const launcher_preset_labels[LAUNCHER_PRESET_COUNT] =
 static const char *const launcher_preset_helps[LAUNCHER_PRESET_COUNT] =
 {
     "What a game that has never been configured runs with: the translator the "
-    "library picks, 4-core support, standard synchronization, vsync and the "
-    "translator's code cache off.",
+    "library picks, 4-core support, standard synchronization and vsync.",
     "The tuned FEX when it is installed, 4-core support, fast file loading, "
-    "the translated code cache, Horizon synchronization, vsync off and no "
-    "frame cap.",
+    "Horizon synchronization, vsync off and no frame cap.",
     "The tuned FEX when it is installed, 4-core support, fast file loading, "
-    "the translated code cache, Horizon synchronization, vsync on and a 30 fps "
-    "cap: less power, longer play.",
+    "Horizon synchronization, vsync on and a 30 fps cap: less power, longer play.",
     "Standard synchronization, no fast file loading and no 4-core split, for a "
     "game that misbehaves with the fast paths."
 };
 
 static const char *const launcher_preset_custom_help =
     "This game's settings are its own. A preset sets the translator, the fast "
-    "paths, the translated code cache and frame pacing at once; the renderer "
-    "and upscaling stay as they are.";
+    "paths and frame pacing at once; the renderer and upscaling stay as they are.";
 
 /* What the wanted translator becomes on this card. Returns 0 when the program
  * has no translator to choose and the preset must leave the choice alone. */

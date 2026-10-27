@@ -101,7 +101,13 @@ runtime; the full package now ships the Mesa 26 one.
   one program -- the module keys it by its own configuration -- so its size is
   shown, and it is cleared, from the launcher's Settings tab rather than from a
   game's menu; `fex_cache_root()` names the directories both sides use, so the
-  runtime and the launcher cannot drift apart.
+  runtime and the launcher cannot drift apart. The database is read and written
+  plainly (`FEX_DISKCACHEFILEMAPPING=0`): the release maps a fixed, very large
+  window onto the file, which on a card is a copy of it page by page. A marker
+  in `program-settings/` names the start that is under way, so one that never
+  comes back — a program that could not start with the cache, a crash — has the
+  cache off for the next start rather than leaving its owner to find the switch
+  (`fex_cache_marker_*`).
 - **Audio.** `winenxaudio.drv` plays through audout, for mmdevapi and DirectSound.
 - **Input.** The touchscreen, the controller as a mouse or as a keyboard with
   per-game mappings, and XInput, which sees player 1 as an Xbox 360 controller.

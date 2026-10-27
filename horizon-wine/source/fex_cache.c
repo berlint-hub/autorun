@@ -188,6 +188,30 @@ int fex_cache_prune( const char *root, unsigned long long limit, unsigned long l
     return 1;
 }
 
+int fex_cache_marker_take( const char *path )
+{
+    if (!path || !path[0]) return 0;
+    return !unlink( path );
+}
+
+int fex_cache_marker_set( const char *path )
+{
+    FILE *file;
+
+    if (!path || !path[0]) return 0;
+    if (!(file = fopen( path, "w" ))) return 0;
+    /* Made as it is created: a marker a power cut left half written is still a
+     * marker. */
+    fputs( "a program is starting with the translated code cache on\n", file );
+    return !fclose( file );
+}
+
+int fex_cache_marker_clear( const char *path )
+{
+    if (!path || !path[0]) return 0;
+    return !unlink( path ) || errno == ENOENT;
+}
+
 int fex_cache_measure( const char *root, unsigned long long *bytes, unsigned int *buckets )
 {
     struct fex_cache_report report;

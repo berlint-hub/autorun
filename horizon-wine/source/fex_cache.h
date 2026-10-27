@@ -25,8 +25,10 @@
 #ifndef WINE_NX_FEX_CACHE_H
 #define WINE_NX_FEX_CACHE_H
 
+#include <ctype.h>
 #include <stddef.h>
 #include <stdio.h>
+#include <string.h>
 
 /* FEX 2610's own default, which the console's card has room for. */
 #define FEX_CACHE_LIMIT (1024ull * 1024 * 1024)
@@ -55,6 +57,40 @@ static inline int fex_cache_root( char *out, size_t size, const char *runtime_di
 
     return length > 0 && (size_t)length < size;
 }
+
+/* The marker of a start that is in progress with the cache on, one per
+ * program: the cache is experimental in the release this runtime ships, and a
+ * program that could not start with it must not need its owner to find the
+ * switch and turn it off by hand -- the next start turns it off itself. */
+static inline int fex_cache_marker_path( char *out, size_t size, const char *runtime_dir, const char *program )
+{
+    unsigned long long hash = 1469598103934665603ULL;
+    const unsigned char *p;
+    int length;
+
+    if (!runtime_dir || !runtime_dir[0] || !program || !program[0]) return 0;
+    for (p = (const unsigned char *)program; *p; p++)
+    {
+        unsigned char c = *p == '\\' ? '/' : (unsigned char)tolower( *p );
+
+        hash ^= c;
+        hash *= 1099511628211ULL;
+    }
+    length = snprintf( out, size, "%s%sprogram-settings/%016llx.fex-cache.txt", runtime_dir,
+                       runtime_dir[strlen( runtime_dir ) - 1] == '/' ? "" : "/", hash );
+    return length > 0 && (size_t)length < size;
+}
+
+/* Whether the previous start of this program left its marker behind -- it did
+ * not come back -- taking it away as it answers, so the next start is judged
+ * on its own. */
+int fex_cache_marker_take( const char *path );
+
+/* Says a start with the cache is under way; `return_to_launcher` takes it back
+ * when the program comes home. A marker that could not be written is only
+ * worth a line in the log: the run itself is not affected. */
+int fex_cache_marker_set( const char *path );
+int fex_cache_marker_clear( const char *path );
 
 /* Measures `root`/DiskCache and, when it holds more than `limit` bytes, takes
  * whole configurations away oldest first until `keep` bytes or less remain.

@@ -19,7 +19,9 @@ copies to the SD card and start them from Autorun's library.
   both x86 and x64 code; [Box64](https://github.com/ptitSeb/box64) is there as a
   second translator for 32-bit programs. A game can keep what FEX has
   translated on the card (**Translated code cache**), so a second start does
-  not translate the same blocks all over again.
+  not translate the same blocks all over again — experimental in the FEX
+  release the runtime ships, off by default, and a start that does not come
+  back turns it off for the next one.
 - **The Switch's GPU.** OpenGL and Vulkan come from Mesa 26
   ([mesa-switch](https://github.com/danfromtico/mesa-switch)), and Direct3D 8
   to 11 run through [DXVK](https://github.com/doitsujin/dxvk), Direct3D 12
@@ -184,9 +186,8 @@ played**.
   its own controls, including whether its translated code is kept on the card
   between runs;
 - pick a **preset** — **Balanced**, **Performance**, **Battery** or
-  **Compatibility** — which sets the translator, the fast paths (the translated
-  code cache included, in **Performance** and **Battery**), vsync and the frame
-  cap in one go, or put the game back to its defaults with **Reset
+  **Compatibility** — which sets the translator, the fast paths, vsync and the
+  frame cap in one go, or put the game back to its defaults with **Reset
   settings**. A preset never changes the renderer, the upscaling or frame
   generation, and one that asks for the tuned FEX falls back to the stock
   modules when they are not installed;

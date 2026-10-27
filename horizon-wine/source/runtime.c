@@ -2365,7 +2365,11 @@ static size_t runtime_fex_environment( const char *target, char *buffer, size_t 
     }
     if (runtime_fex_disk_cache)
     {
-        static const char disk_cache[] = "FEX_DISKCACHE=1";
+        /* The database is read and written with plain reads and writes rather
+         * than mapped into the process: the release maps a fixed, very large
+         * window onto the file, and a window over a file on a card is at best a
+         * copy of it every page. */
+        static const char disk_cache[] = "FEX_DISKCACHE=1\0FEX_DISKCACHEFILEMAPPING=0";
 
         if (sizeof(disk_cache) > size - used) return 0;
         memcpy( buffer + used, disk_cache, sizeof(disk_cache) );
@@ -4316,6 +4320,15 @@ static int return_to_launcher( void )
 {
     int i, still_lent = 0;
 
+    /* The program came back, so the cache did not keep it from starting: the
+     * next start with it is judged on its own. */
+    {
+        char marker[520];
+
+        if (fex_cache_marker_path( marker, sizeof(marker), RUNTIME_DIR, runtime_program ))
+            fex_cache_marker_clear( marker );
+    }
+
     /* Hand FPSlocked back before the game's processes are gone: the panel rate
      * belongs to the game, and the launcher draws at the console's own. What
      * the bridge decided is written down first -- the one place a session's
@@ -5208,7 +5221,30 @@ int main( int argc, char **argv )
     {
         unsigned long long kept = 0;
         unsigned int configurations = 0, removed = 0;
+        char marker[520];
+        int marking = 0;
         int roaming;
+
+        /* A marker left behind means the last start with the cache never came
+         * back -- it crashed, or the program did not start at all. The cache is
+         * the newest and most experimental thing here, so it is what is given
+         * up: this start runs without it, and says so. */
+        if (fex_cache_marker_path( marker, sizeof(marker), RUNTIME_DIR, target ))
+        {
+            if (fex_cache_marker_take( marker ))
+            {
+                log_line( "[FEX] the last start of this program with the code cache did not come back; "
+                          "it is off for this one" );
+                runtime_fex_disk_cache = 0;
+            }
+            else
+            {
+                mkdir( RUNTIME_DIR "/program-settings", 0777 );
+                marking = fex_cache_marker_set( marker );
+                if (!marking) log_line( "[FEX] %s could not be written; a start that does not come "
+                                        "back will not be noticed", marker );
+            }
+        }
 
         for (roaming = 0; roaming < 2; roaming++)
         {
@@ -5225,8 +5261,9 @@ int main( int argc, char **argv )
             configurations += report.buckets;
             removed += report.buckets_removed;
         }
-        log_line( "[FEX] code cache %llu MiB in %u configuration(s), %u given back to the card",
-                  kept >> 20, configurations, removed );
+        log_line( "[FEX] code cache %llu MiB in %u configuration(s), %u given back to the card%s",
+                  kept >> 20, configurations, removed,
+                  runtime_fex_disk_cache ? "" : " (this start runs without it)" );
     }
 
     /* Views of files read on demand (horizon.c, horizon_lazy_file_view_wanted):

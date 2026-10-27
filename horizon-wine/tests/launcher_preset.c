@@ -71,7 +71,9 @@ static void test_apply_leaves_what_it_does_not_own(void)
 
     /* What it does own, and what Performance is. */
     assert( settings.fex == 2 && settings.four_cores == 1 && settings.lazy_file_views == 1 );
-    assert( settings.fex_disk_cache == 1 );
+    /* The code cache is not a preset's: it stays where the game's owner put
+     * it, off unless they turned it on. */
+    assert( settings.fex_disk_cache == 0 );
     assert( settings.fast_sync == 1 && settings.vsync == 0 && settings.frame_limit == 0 );
 
     /* Applying it again is not a change any more. */
@@ -97,7 +99,7 @@ static void test_each_bundle(void)
     /* Battery is Performance with a 30 fps cap and vsync on. */
     assert( launcher_preset_apply( &settings, LAUNCHER_PRESET_BATTERY, LAUNCHER_TRANSLATOR_ANY ) );
     assert( settings.fex == 2 && settings.four_cores == 1 && settings.lazy_file_views == 1 );
-    assert( settings.fex_disk_cache == 1 );
+    assert( settings.fex_disk_cache == 0 );
     assert( settings.fast_sync == 1 && settings.vsync == 1 && settings.frame_limit == 1 );
     assert( !strcmp( launcher_frame_limit_labels[settings.frame_limit], "30" ) );
     assert( launcher_preset_match( &settings, LAUNCHER_TRANSLATOR_ANY ) == LAUNCHER_PRESET_BATTERY );

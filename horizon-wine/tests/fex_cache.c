@@ -279,6 +279,45 @@ int main( void )
         CHECK( !strcmp( path, "sdmc:/switch/wine/drive_c/users/steamuser/AppData/Roaming/fex-emu" ) );
     }
 
+    /* The marker of a start that is under way: two programs have two markers,
+     * a start that comes back takes its own away, and one that does not come
+     * back is found again -- which is what turns the cache off next time. */
+    {
+        char one[FEX_CACHE_PATH_TEST * 2], two[FEX_CACHE_PATH_TEST * 2];
+        char other[FEX_CACHE_PATH_TEST * 2];
+
+        CHECK( fex_cache_marker_path( one, sizeof(one), "sdmc:/switch/wine", "sdmc:/switch/wine/drive_c/Games/A/game.exe" ) );
+        CHECK( fex_cache_marker_path( two, sizeof(two), "sdmc:/switch/wine", "sdmc:/switch/wine/drive_c/Games/A/game.exe" ) );
+        CHECK( !strcmp( one, two ) );
+        CHECK( fex_cache_marker_path( other, sizeof(other), "sdmc:/switch/wine", "sdmc:/switch/wine/drive_c/Games/B/game.exe" ) );
+        CHECK( strcmp( one, other ) );
+        /* The same program named with the other slash is the same program. */
+        CHECK( fex_cache_marker_path( two, sizeof(two), "sdmc:/switch/wine", "sdmc:\\switch\\wine\\drive_c\\Games\\A\\game.exe" ) );
+        CHECK( !strcmp( one, two ) );
+        /* Nowhere to put it, nothing to write. */
+        CHECK( !fex_cache_marker_path( one, sizeof(one), "", "x.exe" ) );
+        CHECK( !fex_cache_marker_path( one, 8, "sdmc:/switch/wine", "x.exe" ) );
+
+        /* A start that comes back leaves nothing behind. The runtime makes
+         * program-settings before it writes a marker; here it is made too. */
+        {
+            char folder[700];
+
+            snprintf( folder, sizeof(folder), "%s/program-settings", root );
+            CHECK( !mkdir( folder, 0777 ) );
+        }
+        CHECK( fex_cache_marker_path( one, sizeof(one), root, "game.exe" ) );
+        CHECK( fex_cache_marker_clear( one ) );           /* nothing there yet */
+        CHECK( fex_cache_marker_set( one ) );
+        CHECK( fex_cache_marker_clear( one ) );
+        CHECK( !fex_cache_marker_take( one ) );
+
+        /* A start that does not come back is found by the next one, once. */
+        CHECK( fex_cache_marker_set( one ) );
+        CHECK( fex_cache_marker_take( one ) );
+        CHECK( !fex_cache_marker_take( one ) );
+    }
+
     /* A root that is not there is not a fault; the cache is simply not made
      * yet, which is what every first run looks like. */
     CHECK( fex_cache_prune( "/nonexistent/wine-nx", 400, 100, &report ) );
