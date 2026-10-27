@@ -13,6 +13,8 @@
 /* More configurations than this on one card is beyond what the cache is worth
  * reasoning about: what was found is pruned, the rest is left for next time. */
 #define FEX_CACHE_BUCKETS 256
+/* What one directory may hold before a removal gives up. */
+#define FEX_CACHE_ATTEMPTS 4096
 
 struct fex_cache_bucket
 {
@@ -54,22 +56,48 @@ static void fex_cache_measure( struct fex_cache_bucket *bucket )
     closedir( dir );
 }
 
+/* Gives back what is inside one directory. The listing is read, closed and
+ * asked for again after each entry: taking an entry away while a listing is
+ * being walked can make the next one be skipped, which on a card would leave
+ * that file behind and the directory unable to go. */
+static int fex_cache_empty( const char *path )
+{
+    unsigned int attempts = 0;
+
+    while (attempts++ < FEX_CACHE_ATTEMPTS)
+    {
+        char name[256], child[FEX_CACHE_PATH];
+        struct dirent *entry;
+        struct stat st;
+        int is_dir;
+        DIR *dir;
+
+        if (!(dir = opendir( path ))) return 0;
+        name[0] = 0;
+        while ((entry = readdir( dir )))
+        {
+            if (fex_cache_skip( entry->d_name )) continue;
+            snprintf( name, sizeof(name), "%s", entry->d_name );
+            break;
+        }
+        closedir( dir );
+        if (!name[0]) return 1;                      /* nothing left */
+        if (!fex_cache_join( child, sizeof(child), path, name )) return 0;
+        is_dir = !lstat( child, &st ) && S_ISDIR( st.st_mode );
+        if (is_dir)
+        {
+            if (!fex_cache_empty( child ) || rmdir( child )) return 0;
+        }
+        else if (unlink( child )) return 0;
+    }
+    return 0;
+}
+
 /* Takes a whole configuration away. Half of one is worth nothing: an index
  * without its database cannot be read, and the next run writes both again. */
 static int fex_cache_remove( const char *path )
 {
-    struct dirent *entry;
-    char file[FEX_CACHE_PATH];
-    DIR *dir;
-
-    if (!(dir = opendir( path ))) return 0;
-    while ((entry = readdir( dir )))
-    {
-        if (fex_cache_skip( entry->d_name )) continue;
-        if (fex_cache_join( file, sizeof(file), path, entry->d_name )) unlink( file );
-    }
-    closedir( dir );
-    return !rmdir( path );
+    return fex_cache_empty( path ) && !rmdir( path );
 }
 
 int fex_cache_prune( const char *root, unsigned long long limit, unsigned long long keep,

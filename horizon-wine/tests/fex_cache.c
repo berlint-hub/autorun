@@ -65,28 +65,37 @@ static int cache_exists( void )
     return !access( dir, F_OK );
 }
 
-/* Deepest first, so the tree can be made again between cases. */
+/* The listing is closed and asked for again after each entry: removing one
+ * while a listing is being walked can make the next be skipped, which is the
+ * sort of thing the prune itself has to cope with on a card. */
 static void remove_tree( const char *path )
 {
-    char child[700];
-    struct stat st;
-    struct dirent *entry;
-    DIR *dir;
-
-    if (lstat( path, &st )) return;
-    if (S_ISDIR( st.st_mode ) && (dir = opendir( path )))
+    for (;;)
     {
+        char name[256], child[700];
+        struct stat st;
+        struct dirent *entry;
+        DIR *dir;
+
+        if (lstat( path, &st )) return;
+        if (!S_ISDIR( st.st_mode ) || !(dir = opendir( path )))
+        {
+            unlink( path );
+            return;
+        }
+        name[0] = 0;
         while ((entry = readdir( dir )))
         {
             if (!strcmp( entry->d_name, "." ) || !strcmp( entry->d_name, ".." )) continue;
-            snprintf( child, sizeof(child), "%s/%s", path, entry->d_name );
-            remove_tree( child );
+            snprintf( name, sizeof(name), "%s", entry->d_name );
+            break;
         }
         closedir( dir );
-        rmdir( path );
-        return;
+        if (!name[0]) break;
+        snprintf( child, sizeof(child), "%s/%s", path, name );
+        remove_tree( child );
     }
-    unlink( path );
+    rmdir( path );
 }
 
 /* A card before the translator has run: the runtime's directory, with no cache
