@@ -855,8 +855,12 @@ void wine_nx_threads_report_stalled( void )
                 MemoryInfo info;
                 unsigned int guest_frames = 0;
 
+                /* The address itself as well as its name: a name is the
+                 * nearest export below the address, so it can be a function
+                 * that merely sits before it, and only the address settles
+                 * which one the program is really in. */
                 name_address( eip, where, sizeof(where) );
-                len = appendf( line, len, " | x86 at %s", where );
+                len = appendf( line, len, " | x86 at %#x %s", eip, where );
                 if (readable( esp, &info ))
                 {
                     guest_frames = nx_prof_x86_callers( esp, ebp, info.addr, info.addr + info.size,

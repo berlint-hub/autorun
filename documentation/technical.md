@@ -182,7 +182,9 @@ runtime; the full package now ships the Mesa 26 one.
   its TEB's CPU area, so the report reads the program's own `Eip`, `Esp` and
   `Ebp` out of it (Wine's i386 `CONTEXT`, whose offsets are fixed by winnt.h
   and asserted by `tests/thread_profile.c`) and appends the guest's position
-  and its x86 frame chain: `| x86 at DarkAthena.exe+0x1a2b3c < RndrGL.DLL+0x…`.
+  and its x86 frame chain: `| x86 at 0x4a2b3c DarkAthena.exe+0x1a2b3c < RndrGL.DLL+0x…`.
+  The address comes first because an export name is only the nearest one
+  below it; the address is what can be checked against a map file.
   The same address is appended to a first-chance fault (`x86=0x…`), so a fault
   in translated code names a function of the program rather than a translated
   address that names nothing. A thread is sampled three times a millisecond
