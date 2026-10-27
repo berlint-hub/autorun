@@ -581,7 +581,9 @@ static void stall_watch( void *arg )
         {
             extern const char *wine_nx_gl_program_version( void ) __attribute__((weak));
 
-            log_line( "[STALL] no frame drawn for %u s; where the threads are standing", quiet * 5 );
+            log_line( "[STALL] no new frame for %u s; the screen has been presented %u times in all "
+                      "(%u by the program's OpenGL, the rest by the compositor); where the threads are standing",
+                      quiet * 5, frames, &wine_nx_gl_swaps ? __atomic_load_n( &wine_nx_gl_swaps, __ATOMIC_RELAXED ) : 0 );
             /* A program that has never swapped is a different case from one
              * that stopped: either it has no usable OpenGL at all, or it never
              * reached its first frame. What its context is says which. */

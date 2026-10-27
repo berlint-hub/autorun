@@ -733,9 +733,12 @@ void wine_nx_threads_report_stalled( void )
             name_address( callers[f], where, sizeof(where) );
             len = appendf( line, len, " < %s", where );
         }
-        /* A thread stopped inside ntdll is only half the story: what the
-         * program was doing is on its x86 stack, in its TEB. */
-        if (registry[i].teb && strstr( line, " ntdll.dll+" ))
+        /* Where the thread is natively is only half the story: a thread parked
+         * in a system call has its x86 state saved, so what the *program* was
+         * doing can be read out of its TEB and named. The native frames of a
+         * waiting thread are all the same few dispatcher addresses; the guest
+         * ones are the program's own call tree. */
+        if (registry[i].teb)
         {
             uint32_t eip = 0, esp = 0, ebp = 0;
 
