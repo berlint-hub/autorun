@@ -121,6 +121,15 @@ u32 __nx_exception_ignoredebug = 1;
 #define MAX_RUNTIME_MODULES 64
 #define MAX_IMPORT_DEPTH 16
 
+/* Mesa prunes the multi-file shader cache to the size it is told, but not the
+ * single-file one the Vulkan driver on the console fills (mesa_shader_cache_sf
+ * under the cache directory, a directory per driver version): that one grows
+ * as long as the driver meets pipelines it has not stored, and on a card the
+ * card is what runs out. The numbers are the ones the driver is told above. */
+#define MESA_SHADER_CACHE_LIMIT (512ull * 1024 * 1024)
+#define MESA_SHADER_CACHE_KEEP  (384ull * 1024 * 1024)
+#define MESA_SHADER_CACHE_TREE  RUNTIME_DIR "/cache/mesa_shader_cache_sf"
+
 extern void wine_nx_runtime_platform_init(void);
 extern void wine_nx_runtime_network_init(void);
 extern void wine_nx_runtime_network_fast( int fast );
@@ -5432,6 +5441,20 @@ int main( int argc, char **argv )
     setenv( "MESA_GLSL_CACHE_MAX_SIZE", "512M", 1 );
     setenv( "MESA_GLSL_CACHE_DISABLE", "0", 1 );
     log_line( "[MESA] shaders are cached in " RUNTIME_DIR "/cache, up to 512 MB" );
+    /* The single-file half of that cache is given its size here, because Mesa
+     * only keeps the limit for the multi-file one. Whole driver versions are
+     * given back oldest first, the same way the translator's cache is. */
+    {
+        struct fex_cache_report shaders;
+
+        if (!fex_cache_prune_tree( MESA_SHADER_CACHE_TREE, MESA_SHADER_CACHE_LIMIT, MESA_SHADER_CACHE_KEEP,
+                                   &shaders ))
+            log_line( "[MESA] %s could not be read; the compiled shaders are left alone",
+                      MESA_SHADER_CACHE_TREE );
+        else if (shaders.buckets)
+            log_line( "[MESA] compiled shaders take %llu MiB in %u driver version(s), %u given back to the card",
+                      shaders.kept >> 20, shaders.buckets, shaders.buckets_removed );
+    }
     /* The program's own two OpenGL switches. glthread is a DRI option, so its
      * name is the lower case one Mesa's driver reads, not the MESA_* form,
      * and it has to be here rather than in the program's environment: the

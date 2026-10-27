@@ -90,7 +90,13 @@ runtime; the full package now ships the Mesa 26 one.
   its own, `sdmc:/switch/wine/cache`, and a 512 MB cap through
   `MESA_SHADER_CACHE_*` (and the `MESA_GLSL_*` names Mesa 20.1 reads), so a
   game's shaders are compiled once rather than at every start: left alone the
-  drivers look under `$HOME/.cache`, which the console does not have. FEX's
+  drivers look under `$HOME/.cache`, which the console does not have. That cap
+  covers the multi-file cache only: the single-file one the Vulkan driver fills
+  (`mesa_shader_cache_sf/`, a directory per driver version and the driver's own
+  below it) does not read `MESA_SHADER_CACHE_MAX_SIZE` at all, so the runtime
+  measures it and gives whole driver versions back oldest first at 512 MB,
+  keeping 384 MB (`fex_cache_prune_tree`, the measurement the translator's cache
+  uses). FEX's
   translated-code cache (2609's `FEX_DISKCACHE`) is the per-program
   **Translated code cache**, off unless asked for because 2609 calls it
   experimental. With it on, the module is told where to keep it

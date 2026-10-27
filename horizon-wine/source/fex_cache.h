@@ -129,6 +129,16 @@ int fex_cache_marker_clear( const char *path );
 int fex_cache_prune( const char *root, unsigned long long limit, unsigned long long keep,
                      struct fex_cache_report *report );
 
+/* The same, over any directory whose subdirectories are whole caches of their
+ * own. Mesa's shader cache has that shape too: a directory named after the
+ * driver that filled it, holding one or more below it. Its size limit is not
+ * one Mesa keeps for the single-file cache -- the one the Vulkan driver on the
+ * console uses -- so the runtime applies it here. */
+int fex_cache_prune_tree( const char *tree, unsigned long long limit, unsigned long long keep,
+                          struct fex_cache_report *report );
+int fex_cache_measure_tree( const char *tree, unsigned long long *bytes, unsigned int *buckets );
+int fex_cache_clear_tree( const char *tree );
+
 /* What the cache holds, without touching it: the launcher's line about it, and
  * the same measurement the prune starts from. 0 is returned only when the
  * cache is there and cannot be read. */

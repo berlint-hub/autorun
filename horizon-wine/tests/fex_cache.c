@@ -268,6 +268,59 @@ int main( void )
     CHECK( fex_cache_clear( root ) );
     CHECK( fex_cache_clear( "/nonexistent/wine-nx" ) );
 
+    /* A tree of the shape Mesa's shader cache has on the card: a directory per
+     * driver version, the driver's own one below it. The same limit applies,
+     * files two levels down are what a version costs, and a version goes back
+     * whole. */
+    {
+        char tree[600], version[700], driver[800];
+        struct fex_cache_report shaders;
+        unsigned long long bytes;
+        unsigned int versions;
+
+        snprintf( tree, sizeof(tree), "%s/mesa_shader_cache_sf", root );
+        CHECK( !mkdir( tree, 0777 ) );
+        /* The older version is the bigger one, so a prune that went by size
+         * instead of age would give up the one still being written. */
+        snprintf( version, sizeof(version), "%s/6e766b2d3236", tree );
+        CHECK( !mkdir( version, 0777 ) );
+        snprintf( driver, sizeof(driver), "%s/nvk_012b", version );
+        CHECK( !mkdir( driver, 0777 ) );
+        make_file( driver, "foz_cache.foz", 400, now - 3000 );
+        make_file( driver, "foz_cache_idx.foz", 1, now - 3000 );
+        snprintf( version, sizeof(version), "%s/6e766b2d3237", tree );
+        CHECK( !mkdir( version, 0777 ) );
+        snprintf( driver, sizeof(driver), "%s/nvk_012b", version );
+        CHECK( !mkdir( driver, 0777 ) );
+        make_file( driver, "foz_cache.foz", 100, now - 1000 );
+
+        CHECK( fex_cache_measure_tree( tree, &bytes, &versions ) );
+        CHECK( bytes == 501 && versions == 2 );
+        CHECK( fex_cache_prune_tree( tree, 1000, 500, &shaders ) );
+        note_report( &shaders );
+        CHECK( !shaders.pruned && shaders.kept == 501 && shaders.buckets_removed == 0 );
+
+        CHECK( fex_cache_prune_tree( tree, 450, 350, &shaders ) );
+        note_report( &shaders );
+        CHECK( shaders.pruned && shaders.buckets_removed == 1 && shaders.kept == 100 );
+        /* One driver version is gone whole, the other is untouched. */
+        CHECK( !access( tree, F_OK ) );
+        snprintf( driver, sizeof(driver), "%s/6e766b2d3236/nvk_012b/foz_cache.foz", tree );
+        CHECK( access( driver, F_OK ) );
+        snprintf( driver, sizeof(driver), "%s/6e766b2d3237/nvk_012b/foz_cache.foz", tree );
+        CHECK( !access( driver, F_OK ) );
+
+        /* Everything given back, the directory left for the driver. */
+        CHECK( fex_cache_clear_tree( tree ) );
+        CHECK( fex_cache_measure_tree( tree, &bytes, &versions ) );
+        CHECK( !bytes && !versions && !access( tree, F_OK ) );
+
+        /* A cache the driver has not filled yet is not a fault. */
+        CHECK( fex_cache_prune_tree( "/nonexistent/wine-nx/mesa_shader_cache_sf", 400, 100, &shaders ) );
+        note_report( &shaders );
+        CHECK( !shaders.failed && !shaders.buckets );
+    }
+
     /* The path the runtime and the launcher both name: the module's database
      * is under the user profile, local or roaming. */
     {

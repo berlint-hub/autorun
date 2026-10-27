@@ -31,7 +31,9 @@ copies to the SD card and start them from Autorun's library.
   it in one go.
 - **Shaders compiled once.** Mesa's on-disk shader cache lives in
   `sdmc:/switch/wine/cache`, up to 512 MB: an effect a game has already met is
-  read back instead of being compiled again at every start.
+  read back instead of being compiled again at every start. The Vulkan driver's
+  half of it keeps no limit of its own — the runtime gives back the versions of
+  it nothing has used for a while, so a card does not fill up with shaders.
 - **Frame generation** with [LSFG-VK](https://git.lsfg-vk.dev/lsfg-vk-archive.git),
   for Vulkan games, with your own copy of Lossless Scaling.
 - **A panel that follows the game**: a game that cannot hold 60 fps runs the

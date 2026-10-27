@@ -15,6 +15,8 @@
 #define FEX_CACHE_BUCKETS 256
 /* What one directory may hold before a removal gives up. */
 #define FEX_CACHE_ATTEMPTS 4096
+/* How far below a configuration the files that make it up are looked for. */
+#define FEX_CACHE_DEPTH 4
 
 struct fex_cache_bucket
 {
@@ -35,25 +37,39 @@ static int fex_cache_skip( const char *name )
     return name[0] == '.' && (!name[1] || (name[1] == '.' && !name[2]));
 }
 
-/* What one configuration holds and when it was last written. A directory whose
- * files cannot be read counts as empty: it is not worth pruning. */
-static void fex_cache_weigh( struct fex_cache_bucket *bucket )
+/* What one configuration holds and when it was last written, everything below
+ * it counted: the translator keeps its database directly in its directory, and
+ * a driver keeps one more directory of its own below the version it belongs
+ * to. A directory whose files cannot be read counts as empty: it is not worth
+ * pruning. */
+static void fex_cache_weigh_into( struct fex_cache_bucket *bucket, const char *path, unsigned int depth )
 {
     struct dirent *entry;
     struct stat st;
-    char path[FEX_CACHE_PATH];
+    char child[FEX_CACHE_PATH];
     DIR *dir;
 
-    if (!(dir = opendir( bucket->path ))) return;
+    if (!(dir = opendir( path ))) return;
     while ((entry = readdir( dir )))
     {
         if (fex_cache_skip( entry->d_name )) continue;
-        if (!fex_cache_join( path, sizeof(path), bucket->path, entry->d_name )) continue;
-        if (stat( path, &st ) || !S_ISREG( st.st_mode )) continue;
+        if (!fex_cache_join( child, sizeof(child), path, entry->d_name )) continue;
+        if (stat( child, &st )) continue;
+        if (S_ISDIR( st.st_mode ))
+        {
+            if (depth < FEX_CACHE_DEPTH) fex_cache_weigh_into( bucket, child, depth + 1 );
+            continue;
+        }
+        if (!S_ISREG( st.st_mode )) continue;
         bucket->bytes += (unsigned long long)st.st_size;
         if ((long long)st.st_mtime > bucket->mtime) bucket->mtime = (long long)st.st_mtime;
     }
     closedir( dir );
+}
+
+static void fex_cache_weigh( struct fex_cache_bucket *bucket )
+{
+    fex_cache_weigh_into( bucket, bucket->path, 0 );
 }
 
 /* Gives back what is inside one directory. The listing is read, closed and
@@ -107,21 +123,20 @@ static int fex_cache_older( const struct fex_cache_bucket *bucket, const struct 
     return strcmp( bucket->path, than->path ) < 0;
 }
 
-int fex_cache_prune( const char *root, unsigned long long limit, unsigned long long keep,
-                     struct fex_cache_report *report )
+int fex_cache_prune_tree( const char *tree, unsigned long long limit, unsigned long long keep,
+                          struct fex_cache_report *report )
 {
     struct fex_cache_bucket *buckets = NULL;
     unsigned int count = 0, room = 0, i, j;
     unsigned long long total = 0;
-    char cache[FEX_CACHE_PATH];
     struct dirent *entry;
     struct stat st;
     int stop = 0;
     DIR *dir;
 
     memset( report, 0, sizeof(*report) );
-    if (!root || !root[0] || !fex_cache_join( cache, sizeof(cache), root, "DiskCache" )) return 1;
-    if (!(dir = opendir( cache )))
+    if (!tree || !tree[0]) return 1;
+    if (!(dir = opendir( tree )))
     {
         report->failed = errno != ENOENT;
         return !report->failed;
@@ -132,13 +147,13 @@ int fex_cache_prune( const char *root, unsigned long long limit, unsigned long l
 
         if (fex_cache_skip( entry->d_name )) continue;
         memset( &bucket, 0, sizeof(bucket) );
-        if (!fex_cache_join( bucket.path, sizeof(bucket.path), cache, entry->d_name )) continue;
+        if (!fex_cache_join( bucket.path, sizeof(bucket.path), tree, entry->d_name )) continue;
         if (stat( bucket.path, &st ) || !S_ISDIR( st.st_mode )) continue;
         /* The age is the newest file the configuration holds, not the
          * directory's own time: a directory's time is when something in it
          * last changed, which for a cache that is being written is now. */
         fex_cache_weigh( &bucket );
-        if (!bucket.bytes) continue;   /* a directory the translator has not filled yet */
+        if (!bucket.bytes) continue;   /* a directory nothing has been written to yet */
         if (count == room)
         {
             unsigned int grown = room ? room * 2 : 8;
@@ -188,6 +203,19 @@ int fex_cache_prune( const char *root, unsigned long long limit, unsigned long l
     return 1;
 }
 
+int fex_cache_prune( const char *root, unsigned long long limit, unsigned long long keep,
+                     struct fex_cache_report *report )
+{
+    char cache[FEX_CACHE_PATH];
+
+    if (!root || !root[0] || !fex_cache_join( cache, sizeof(cache), root, "DiskCache" ))
+    {
+        memset( report, 0, sizeof(*report) );
+        return 1;
+    }
+    return fex_cache_prune_tree( cache, limit, keep, report );
+}
+
 int fex_cache_marker_take( const char *path )
 {
     if (!path || !path[0]) return 0;
@@ -212,20 +240,41 @@ int fex_cache_marker_clear( const char *path )
     return !unlink( path ) || errno == ENOENT;
 }
 
-int fex_cache_measure( const char *root, unsigned long long *bytes, unsigned int *buckets )
+int fex_cache_measure_tree( const char *tree, unsigned long long *bytes, unsigned int *buckets )
 {
     struct fex_cache_report report;
-    int ok = fex_cache_prune( root, ~0ull, 0, &report );
+    int ok = fex_cache_prune_tree( tree, ~0ull, 0, &report );
 
     *bytes = report.bytes;
     *buckets = report.buckets;
     return ok;
 }
 
-int fex_cache_clear( const char *root )
+int fex_cache_clear_tree( const char *tree )
 {
     struct fex_cache_report report;
 
-    if (!fex_cache_prune( root, 0, 0, &report )) return 0;
+    if (!fex_cache_prune_tree( tree, 0, 0, &report )) return 0;
     return !report.pruned || report.kept == 0;
+}
+
+int fex_cache_measure( const char *root, unsigned long long *bytes, unsigned int *buckets )
+{
+    char cache[FEX_CACHE_PATH];
+
+    if (!root || !root[0] || !fex_cache_join( cache, sizeof(cache), root, "DiskCache" ))
+    {
+        *bytes = 0;
+        *buckets = 0;
+        return 1;
+    }
+    return fex_cache_measure_tree( cache, bytes, buckets );
+}
+
+int fex_cache_clear( const char *root )
+{
+    char cache[FEX_CACHE_PATH];
+
+    if (!root || !root[0] || !fex_cache_join( cache, sizeof(cache), root, "DiskCache" )) return 1;
+    return fex_cache_clear_tree( cache );
 }
