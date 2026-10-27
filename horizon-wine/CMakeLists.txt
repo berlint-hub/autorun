@@ -629,6 +629,7 @@ add_executable(wine-nx-runtime
     source/dxvk_releases.c
     source/runtime_platform.c
     source/sd_cache.c
+    source/fex_cache.c
     source/wow64_box64_bridge.c
     source/ntdll_pe_compat.c
     source/ws2_32_unix_stub.c
