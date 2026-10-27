@@ -21141,10 +21141,13 @@ extern Result __real_svcCreateThread( Handle *handle, ThreadFunc entry, void *ar
 
 Result __wrap_svcCreateThread( Handle *handle, ThreadFunc entry, void *arg, void *stack, s32 priority, s32 core )
 {
+    extern int wine_nx_release_thread_local_placeholders( void ) __attribute__((weak));
     Result rc = 0;
     unsigned int retries = 0;
+    int released = 0;
     u64 conflict = 0;
 
+retry:
     /* Kernel TLS placement does not consult libnx's virtual reservations. */
     pthread_mutex_lock( &mapping_mutex );
     for (;;)
@@ -21170,11 +21173,24 @@ Result __wrap_svcCreateThread( Handle *handle, ThreadFunc entry, void *arg, void
         }
     }
     pthread_mutex_unlock( &mapping_mutex );
+
+    /* The runtime holds placeholder threads to keep the kernel's thread-local
+     * pages out of the program's memory, and each one is a slot the program
+     * cannot have. When the kernel refuses a thread, those slots are worth
+     * more to the program than the promise: give them back and ask once more.
+     * A program refused a thread at this point usually fails outright -- a
+     * std::thread constructor throws, a loader stops -- so the trade is one
+     * lost guarantee against the thread. */
+    if (R_FAILED(rc) && !released && &wine_nx_release_thread_local_placeholders)
+    {
+        released = wine_nx_release_thread_local_placeholders();
+        if (released > 0) goto retry;
+    }
     if (R_FAILED(rc))
     {
         u64 resource = 0;
         s64 used = -1, limit = -1;
-        char message[160];
+        char message[192];
 
         if (R_SUCCEEDED(svcGetInfo( &resource, InfoType_ResourceLimit, INVALID_HANDLE, 0 )))
         {
@@ -21184,6 +21200,22 @@ Result __wrap_svcCreateThread( Handle *handle, ThreadFunc entry, void *arg, void
         }
         snprintf( message, sizeof(message), "[THREAD] create failed rc=%#x threads=%lld/%lld tls_retries=%u",
                   rc, (long long)used, (long long)limit, retries );
+        wine_nx_runtime_trace( message );
+        if (released)
+        {
+            snprintf( message, sizeof(message),
+                      "[THREAD] the runtime's %d placeholder threads were released for it and the kernel still "
+                      "refused: the program is at Horizon's thread limit", released );
+            wine_nx_runtime_trace( message );
+        }
+    }
+    else if (released)
+    {
+        char message[192];
+
+        snprintf( message, sizeof(message),
+                  "[THREAD] the kernel refused a thread; the runtime's %d placeholder threads were released and "
+                  "the next attempt made it", released );
         wine_nx_runtime_trace( message );
     }
     return rc;

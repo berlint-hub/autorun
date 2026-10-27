@@ -4271,6 +4271,8 @@ static Thread tls_threads[TLS_PLACEHOLDERS_MAX];
 static unsigned long long tls_page[TLS_PLACEHOLDERS_MAX];
 static unsigned char tls_keep[TLS_PLACEHOLDERS_MAX];
 static unsigned int tls_count;
+static int tls_ready;                    /* the trim is over: a release will not wait */
+static pthread_mutex_t tls_mutex = PTHREAD_MUTEX_INITIALIZER;
 static UEvent tls_trimmed, tls_released;
 
 static void tls_placeholder( void *arg )
@@ -4287,7 +4289,7 @@ static void tls_placeholder( void *arg )
 static void hold_thread_local_pages( void )
 {
     extern unsigned int horizon_drop_thread_local_pages( unsigned int *found );
-    unsigned int i, j, kept = 0, found = 0, dropped;
+    unsigned int i, j, kept = 0, above = 0, found = 0, dropped;
     Result rc = 0;
 
     ueventCreate( &tls_trimmed, false );
@@ -4312,11 +4314,17 @@ static void hold_thread_local_pages( void )
     {
         for (j = 0; j < i; j++)
             if (tls_keep[j] && tls_page[j] == tls_page[i]) break;
-        if (j == i)
+        /* One thread per page, and only for a page the program could ever
+         * have: a 32-bit program's memory ends at 4 GB, and the drop below
+         * looks no higher either. A page above it can never be in the way,
+         * so a thread held for one is a slot the program cannot use -- 13 of
+         * the 96 were held for pages the drop does not even look at. */
+        if (j == i && tls_page[i] < 0x100000000ULL)
         {
             tls_keep[i] = 1;
             kept++;
         }
+        else if (j == i) above++;
     }
     ueventSignal( &tls_trimmed );
     for (i = 0; i < tls_count; i++)
@@ -4326,26 +4334,64 @@ static void hold_thread_local_pages( void )
         threadClose( &tls_threads[i] );
     }
     dropped = horizon_drop_thread_local_pages( &found );
+    __atomic_store_n( &tls_ready, 1, __ATOMIC_RELEASE );
     log_line( "[TLS] %u placeholder threads (the next refused: rc=%#x), %u kept to hold a thread-local page "
-              "each; of %u such pages below 4 GB, %u were inside the program's reserved memory and were taken "
-              "out of it", tls_count, rc, kept, found, dropped );
+              "each and %u let go because their pages are above 4 GB; of %u such pages below 4 GB, %u were "
+              "inside the program's reserved memory and were taken out of it",
+              tls_count, rc, kept, above, found, dropped );
 }
 
-/* Before the loader takes the process back: the placeholders' stacks are on
- * the heap it resets. */
-static void release_thread_local_pages( void )
-{
-    unsigned int i;
+static int tls_release( int only_after_trim );
 
-    if (!tls_count) return;
+/* The placeholder threads give their slots back. Two callers want that: the
+ * exit path, because their stacks are on the heap the loader resets, and
+ * ntdll, when the kernel refuses the program a thread while the runtime is
+ * holding up to a dozen slots for pages that may not even be in the way
+ * (__wrap_svcCreateThread). Being refused a thread is a hard failure in most
+ * programs -- a std::thread constructor throws, a loader gives up -- so a slot
+ * held by the runtime is worth less than the thread the program asked for.
+ * Their pages stay the kernel's; what is lost is only the promise that no new
+ * thread-local page is placed later. */
+int wine_nx_release_thread_local_placeholders( void )
+{
+    return tls_release( 1 );
+}
+
+static int tls_release( int only_after_trim )
+{
+    unsigned int i, released = 0;
+
+    if (only_after_trim && !__atomic_load_n( &tls_ready, __ATOMIC_ACQUIRE )) return 0;
+    pthread_mutex_lock( &tls_mutex );
+    if (!tls_count)
+    {
+        pthread_mutex_unlock( &tls_mutex );
+        return 0;
+    }
+    /* The exit path can arrive before the trim has signalled its own event, so
+     * it signals both: a placeholder waiting on the trim then decides like it
+     * would have and comes to the release like the rest. */
+    if (!only_after_trim) ueventSignal( &tls_trimmed );
     ueventSignal( &tls_released );
     for (i = 0; i < tls_count; i++)
     {
         if (!tls_keep[i]) continue;
         threadWaitForExit( &tls_threads[i] );
         threadClose( &tls_threads[i] );
+        tls_keep[i] = 0;
+        released++;
     }
     tls_count = 0;
+    __atomic_store_n( &tls_ready, 0, __ATOMIC_RELEASE );
+    pthread_mutex_unlock( &tls_mutex );
+    return (int)released;
+}
+
+/* Before the loader takes the process back: the placeholders' stacks are on
+ * the heap it resets. */
+static void release_thread_local_pages( void )
+{
+    tls_release( 0 );
 }
 
 /* Autorun's components setup (tools/autorun_setup.c): what wineboot registers

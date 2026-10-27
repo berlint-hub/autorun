@@ -139,6 +139,19 @@ runtime; the full package now ships the Mesa 26 one.
   (`[CLOCK] the console's calendar clock says …` or `this program has no
   calendar clock to read`), and every stall report carries what both clocks
   did since the previous one (`[STALL] the clocks moved: …`).
+- **A thread the runtime is holding.** To keep the kernel's thread-local pages
+  out of the program's memory, the runtime creates placeholder threads before
+  the program starts and leaves one behind per page worth pinning. Each of
+  those is one of the 96 slots an application may have, so a program that wants
+  many threads has fewer than it should -- and a page above 4 GB, which a
+  32-bit program's memory can never touch, is pinned for nothing. Only pages
+  under 4 GB are held now, and when the kernel refuses the program a thread
+  anyway, the placeholders are released and the create is tried once more
+  (`[THREAD] the kernel refused a thread; the runtime's N placeholder threads
+  were released and the next attempt made it`). The promise that no new
+  thread-local page is placed later is what is given up, and only after the
+  program has run out of slots, where a failed create is usually fatal --
+  a `std::thread` constructor throws, a loader stops.
 - **A memory report a program can size its caches by.** Every program that
   streams -- and a game of the 2000s streams everything -- asks Windows how
   much memory it may use before deciding how large its level cache is. The
