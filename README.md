@@ -184,8 +184,9 @@ played**.
   its own controls, including whether its translated code is kept on the card
   between runs;
 - pick a **preset** — **Balanced**, **Performance**, **Battery** or
-  **Compatibility** — which sets the translator, the fast paths, vsync and the
-  frame cap in one go, or put the game back to its defaults with **Reset
+  **Compatibility** — which sets the translator, the fast paths (the translated
+  code cache included, in **Performance** and **Battery**), vsync and the frame
+  cap in one go, or put the game back to its defaults with **Reset
   settings**. A preset never changes the renderer, the upscaling or frame
   generation, and one that asks for the tuned FEX falls back to the stock
   modules when they are not installed;
