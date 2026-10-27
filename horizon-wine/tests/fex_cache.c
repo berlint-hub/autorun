@@ -277,6 +277,24 @@ int main( void )
         CHECK( !strcmp( path, "sdmc:/switch/wine/drive_c/users/steamuser/AppData/Local/fex-emu" ) );
         CHECK( fex_cache_root( path, sizeof(path), "sdmc:/switch/wine", 1 ) );
         CHECK( !strcmp( path, "sdmc:/switch/wine/drive_c/users/steamuser/AppData/Roaming/fex-emu" ) );
+
+        /* What the module is told (FEX_DISKCACHEPATH): a directory of its own
+         * under the local root, named after the build and ending in a slash
+         * because the module appends its database's names to it. */
+        CHECK( fex_cache_database_path( path, sizeof(path), "sdmc:/switch/wine", "nx-amd64-fex-2640" ) );
+        CHECK( !strcmp( path, "sdmc:/switch/wine/drive_c/users/steamuser/AppData/Local/fex-emu"
+                              "/DiskCache/nx-amd64-fex-2640/" ) );
+        /* Two builds do not read each other's translations. */
+        CHECK( fex_cache_database_path( path, sizeof(path), "sdmc:/switch/wine", "nx-amd64-fex-2610" ) );
+        CHECK( !strcmp( path, "sdmc:/switch/wine/drive_c/users/steamuser/AppData/Local/fex-emu"
+                              "/DiskCache/nx-amd64-fex-2610/" ) );
+        /* A build string is not a path. */
+        CHECK( fex_cache_database_path( path, sizeof(path), "sdmc:/switch/wine", "x86/../y z" ) );
+        CHECK( !strcmp( path, "sdmc:/switch/wine/drive_c/users/steamuser/AppData/Local/fex-emu"
+                              "/DiskCache/x86_.._y_z/" ) );
+        /* Nothing to name it after, nowhere to put it. */
+        CHECK( !fex_cache_database_path( path, sizeof(path), "sdmc:/switch/wine", "" ) );
+        CHECK( !fex_cache_database_path( path, 16, "sdmc:/switch/wine", "nx-amd64-fex-2640" ) );
     }
 
     /* The marker of a start that is under way: two programs have two markers,
