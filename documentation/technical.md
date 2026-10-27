@@ -166,6 +166,16 @@ runtime; the full package now ships the Mesa 26 one.
   does one whose window is hidden, and one that loses the screen to a Vulkan
   surface), a swap on it succeeds without presenting anything, and the log says
   once per doubling how often that happened.
+- **The message loop's clock is not free.** Every message loop turn asks for a
+  performance counter tick to decide whether to poll the driver, and on Horizon
+  a read of that counter is the one system call the runtime deliberately makes
+  expensive: a thread it has caught pacing itself is rested 0.1 ms inside the
+  read. Two reads per turn -- one to compare, one to store -- therefore cost a
+  program a quarter of a millisecond before it looked at its own messages, and
+  a program already held back by a refused OpenGL call paid it in the same
+  loop. The frequency is now asked for once, the tick comes from a divide by a
+  constant, and the check stores the tick it compared against instead of
+  reading the clock again.
 - **A stall that names the program's own function.** ntdll+0x40130 is where a
   thread is only because it is inside a system call, and every waiting thread
   reports the same thing. A thread stopped there has its x86 context saved in

@@ -3438,22 +3438,47 @@ void check_for_events( UINT flags )
     if (!process_driver_events( flags, 0, 0 ) && !(flags & QS_PAINT)) flush_window_surfaces( TRUE );
 }
 
-/* monotonic timer tick for throttling driver event checks */
+/* Monotonic timer tick for throttling driver event checks.  This is on the
+ * message loop of every program, once per turn -- and on Horizon a
+ * performance counter read is not free: a thread the runtime has caught
+ * pacing itself is rested 0.1 ms inside every read (dlls/ntdll/unix/sync.c),
+ * so the old two reads per check could cost the program a quarter of a
+ * millisecond before it looked at its own messages.  The frequency is asked
+ * for once, it never changes, and the divide is by a constant, so the tick
+ * counts are cheap even where a 64-bit divide is not a single instruction. */
 static inline LONGLONG get_driver_check_time(void)
 {
-    LARGE_INTEGER counter, freq;
-    NtQueryPerformanceCounter( &counter, &freq );
+    static LONGLONG freq;
+    LARGE_INTEGER counter;
+
+    if (!freq)
+    {
+        LARGE_INTEGER queried;
+
+        NtQueryPerformanceCounter( &counter, &queried );
+        freq = queried.QuadPart ? queried.QuadPart : 1;
 #ifdef __SWITCH__
-    return counter.QuadPart * 120 / freq.QuadPart;
+        /* Horizon counts in 100 ns units: 120 ticks a second. */
+        if (freq == 10000000) return counter.QuadPart / (10000000 / 120);
 #else
-    return counter.QuadPart * 8000 / freq.QuadPart; /* 8kHz */
+        if (freq == 10000000) return counter.QuadPart / (10000000 / 8000);
+#endif
+    }
+    else NtQueryPerformanceCounter( &counter, NULL );
+
+#ifdef __SWITCH__
+    return counter.QuadPart * 120 / freq;
+#else
+    return counter.QuadPart * 8000 / freq; /* 8kHz */
 #endif
 }
 
 /* check for driver events if we detect that the app is not properly consuming messages */
 static inline void check_for_driver_events(void)
 {
-    if (get_user_thread_info()->last_driver_time != get_driver_check_time())
+    LONGLONG now = get_driver_check_time();
+
+    if (get_user_thread_info()->last_driver_time != now)
     {
         flush_window_surfaces( FALSE );
 #ifdef __SWITCH__
@@ -3463,7 +3488,10 @@ static inline void check_for_driver_events(void)
 #else
         process_driver_events( QS_ALLINPUT, 0, 0 );
 #endif
-        get_user_thread_info()->last_driver_time = get_driver_check_time();
+        /* The time the check was made, not a second read of it: the events
+         * were asked for at this tick, and a second read only says how long
+         * they took. */
+        get_user_thread_info()->last_driver_time = now;
     }
 }
 
