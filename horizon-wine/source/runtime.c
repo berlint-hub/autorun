@@ -680,14 +680,15 @@ static int wine_nx_desktop_wanted_w, wine_nx_desktop_wanted_h;
  * any: it outranks the size a surface pretends while it holds the screen. */
 static int wine_nx_desktop_mode_w, wine_nx_desktop_mode_h;
 
-/* 1: present the central 4:3 of every picture stretched over the whole
- * screen (the classic "widescreen hack" look). Set per game. */
-int wine_nx_fit_stretch43;
+/* How every present is placed on the panel (screen_fit.h): stretched to fill,
+ * kept in proportion with bars, by whole steps, or the central 4:3 stretched.
+ * The launcher's Scaling setting, per game. */
+static int wine_nx_scaling_mode = SCREEN_SCALING_ASPECT;
 
 /* The transform the last present used: panel = screen * scale + offset.
- * The scales differ per axis: presents fill the panel like the Switch
- * display compositor does, so a 4:3 game window becomes the widescreen look
- * and input maps through the very same stretch. */
+ * screen_fit_rect() says where the picture lands, so the scales can differ per
+ * axis (stretched) or be equal with a centred offset (bars at the sides), and
+ * input maps through the very same rectangle. */
 static pthread_mutex_t wine_nx_fit_mutex = PTHREAD_MUTEX_INITIALIZER;
 static double wine_nx_fit_scale_x = 1.0, wine_nx_fit_scale_y = 1.0;
 static double wine_nx_fit_off_x, wine_nx_fit_off_y;
@@ -778,17 +779,20 @@ void wine_nx_desktop_size( int *width, int *height )
     if (height) *height = wine_nx_desktop_h;
 }
 
-/* Where a src_w x src_h picture lands on the panel: stretched to fill it,
- * exactly like the display compositor scales a layer's buffer.  The picture
- * goes to the whole panel (dst_x/dst_y are 0); src_x/src_y are the presented
- * window's origin in desktop coordinates, and together with the scales this
- * is the desktop -> panel transform that input maps through. */
-void wine_nx_present_fit( int src_w, int src_h, int src_x, int src_y,
-                          int *dst_x, int *dst_y, int *dst_w, int *dst_h )
+/* Where a src_w x src_h picture lands on the panel for a Scaling mode
+ * (screen_fit.h): the rectangle it is drawn in, and the desktop -> panel
+ * transform input maps through -- scale plus offset from the rectangle, so a
+ * picture with bars at the sides is touched where it is drawn.  src_x/src_y are
+ * the presented window's origin in desktop coordinates. */
+static void wine_nx_present_fit_mode( int mode, int src_w, int src_h, int src_x, int src_y,
+                                      int *dst_x, int *dst_y, int *dst_w, int *dst_h )
 {
     double scale_x, scale_y;
+    int rect_x, rect_y, rect_w, rect_h;
 
-    if (wine_nx_fit_stretch43)
+    if (src_w < 1) src_w = 1;
+    if (src_h < 1) src_h = 1;
+    if (screen_scaling_crops_4_3( mode ))
     {
         int crop_w = src_w, crop_h = src_h;
 
@@ -798,37 +802,69 @@ void wine_nx_present_fit( int src_w, int src_h, int src_x, int src_y,
         src_w = crop_w;
         src_h = crop_h;
     }
-    screen_fill_scales( src_w, src_h, WINE_NX_FB_W, WINE_NX_FB_H, &scale_x, &scale_y );
+    screen_fit_rect( mode, src_w, src_h, WINE_NX_FB_W, WINE_NX_FB_H,
+                     &rect_x, &rect_y, &rect_w, &rect_h );
+    scale_x = (double)rect_w / src_w;
+    scale_y = (double)rect_h / src_h;
 
     pthread_mutex_lock( &wine_nx_fit_mutex );
     wine_nx_fit_scale_x = scale_x;
     wine_nx_fit_scale_y = scale_y;
-    wine_nx_fit_off_x = -(double)src_x * scale_x;
-    wine_nx_fit_off_y = -(double)src_y * scale_y;
+    wine_nx_fit_off_x = (double)rect_x - (double)src_x * scale_x;
+    wine_nx_fit_off_y = (double)rect_y - (double)src_y * scale_y;
     wine_nx_fit_ready = 1;
     pthread_mutex_unlock( &wine_nx_fit_mutex );
 
-    if (dst_x) *dst_x = 0;
-    if (dst_y) *dst_y = 0;
-    if (dst_w) *dst_w = WINE_NX_FB_W;
-    if (dst_h) *dst_h = WINE_NX_FB_H;
+    if (dst_x) *dst_x = rect_x;
+    if (dst_y) *dst_y = rect_y;
+    if (dst_w) *dst_w = rect_w;
+    if (dst_h) *dst_h = rect_h;
+}
+
+void wine_nx_present_fit( int src_w, int src_h, int src_x, int src_y,
+                          int *dst_x, int *dst_y, int *dst_w, int *dst_h )
+{
+    wine_nx_present_fit_mode( wine_nx_scaling_mode, src_w, src_h, src_x, src_y,
+                              dst_x, dst_y, dst_w, dst_h );
+}
+
+/* An OpenGL drawable presents a buffer of its own and the display's scaler
+ * stretches that over the panel, so whatever the Scaling setting says, the
+ * picture on the glass is the stretched one and input has to map through it. */
+void wine_nx_present_fit_stretched( int src_w, int src_h, int src_x, int src_y )
+{
+    wine_nx_present_fit_mode( SCREEN_SCALING_FULL, src_w, src_h, src_x, src_y,
+                              NULL, NULL, NULL, NULL );
+}
+
+/* The transform before any present has set one: the whole desktop placed on
+ * the panel by the same Scaling setting. */
+static void wine_nx_desktop_fit( double *scale_x, double *scale_y, double *off_x, double *off_y )
+{
+    int desktop_w = wine_nx_desktop_w > 0 ? wine_nx_desktop_w : WINE_NX_FB_W;
+    int desktop_h = wine_nx_desktop_h > 0 ? wine_nx_desktop_h : WINE_NX_FB_H;
+    int rect_x, rect_y, rect_w, rect_h;
+
+    screen_fit_rect( wine_nx_scaling_mode, desktop_w, desktop_h, WINE_NX_FB_W, WINE_NX_FB_H,
+                     &rect_x, &rect_y, &rect_w, &rect_h );
+    *scale_x = (double)rect_w / desktop_w;
+    *scale_y = (double)rect_h / desktop_h;
+    *off_x = (double)rect_x;
+    *off_y = (double)rect_y;
 }
 
 /* The present's scale, so stick speeds can mean panel pixels per second no
  * matter how large the desktop is. */
 double wine_nx_fit_scale_now( void )
 {
-    double scale_x, scale_y;
+    double scale_x, scale_y, off_x = 0, off_y = 0;
 
     pthread_mutex_lock( &wine_nx_fit_mutex );
     scale_x = wine_nx_fit_ready ? wine_nx_fit_scale_x : 0.0;
     scale_y = wine_nx_fit_ready ? wine_nx_fit_scale_y : 0.0;
     pthread_mutex_unlock( &wine_nx_fit_mutex );
     if (scale_x <= 0 || scale_y <= 0)
-    {
-        screen_fill_scales( wine_nx_desktop_w, wine_nx_desktop_h, WINE_NX_FB_W, WINE_NX_FB_H,
-                            &scale_x, &scale_y );
-    }
+        wine_nx_desktop_fit( &scale_x, &scale_y, &off_x, &off_y );
     return (scale_x + scale_y) / 2.0 > 0 ? (scale_x + scale_y) / 2.0 : 1.0;
 }
 
@@ -850,8 +886,7 @@ void wine_nx_screen_to_panel( double x, double y, int *px, int *py )
     else
     {
         /* No present yet: the default map of the whole desktop. */
-        screen_fill_scales( wine_nx_desktop_w, wine_nx_desktop_h, WINE_NX_FB_W, WINE_NX_FB_H,
-                            &scale_x, &scale_y );
+        wine_nx_desktop_fit( &scale_x, &scale_y, &off_x, &off_y );
     }
     pthread_mutex_unlock( &wine_nx_fit_mutex );
     if (px) *px = (int)(x * scale_x + off_x + 0.5);
@@ -872,8 +907,7 @@ void wine_nx_panel_to_screen( int px, int py, double *x, double *y )
     }
     else
     {
-        screen_fill_scales( wine_nx_desktop_w, wine_nx_desktop_h, WINE_NX_FB_W, WINE_NX_FB_H,
-                            &scale_x, &scale_y );
+        wine_nx_desktop_fit( &scale_x, &scale_y, &off_x, &off_y );
     }
     pthread_mutex_unlock( &wine_nx_fit_mutex );
     if (scale_x <= 0) scale_x = 1.0;
@@ -1127,7 +1161,7 @@ static void *wine_nx_screen_acquire( int width, int height, int vulkan )
     if (window) nwindowSetDimensions( window, width, height );
     if (window && vulkan)
         nwindowSetCrop( window, 0, 0, 0, 0 );  /* the Vulkan buffers carry their own crop */
-    else if (window && wine_nx_fit_stretch43)
+    else if (window && screen_scaling_crops_4_3( wine_nx_scaling_mode ))
     {
         int crop_w = width, crop_h = height, left, top;
 
@@ -4281,9 +4315,9 @@ static int return_to_launcher( void )
     }
     wine_nx_display_sync_shutdown();
 
-    /* The widescreen hack belongs to the game: the launcher's own screen comes
-     * back through the plain fill-the-panel transform again. */
-    wine_nx_fit_stretch43 = 0;
+    /* The scaling belongs to the game: the launcher's own screen comes back
+     * through the plain transform again. */
+    wine_nx_scaling_mode = SCREEN_SCALING_ASPECT;
     log_repeat_flush_now();
 
     /* Only reached with the program's threads already gone. Both of these wait
@@ -4960,13 +4994,13 @@ int main( int argc, char **argv )
 #endif
         runtime_four_cores = 1;
         horizon_fast_sync_enabled = 0;
-        wine_nx_fit_stretch43 = 0;
+        wine_nx_scaling_mode = SCREEN_SCALING_ASPECT;
 #ifdef WINE_NX_MESA_SWITCH
         wine_nx_graphics_configure( 0, 1 );
         /* Off until the program's own settings say otherwise. */
         wine_nx_display_sync_configure( 0 );
         wine_nx_upscaling_configure( 0, 0.4f );
-        wine_nx_aspect_configure( 0 );
+        wine_nx_scaling_configure( SCREEN_SCALING_ASPECT );
 #endif
 #ifdef WINE_NX_LSFG
         wine_nx_lsfg_configure( 0, 1, 1 );
@@ -5000,7 +5034,7 @@ int main( int argc, char **argv )
             wine_nx_graphics_configure( settings.frame_limit_sync ? 0 :
                                         launcher_frame_limits[settings.frame_limit], settings.vsync );
             wine_nx_upscaling_configure( settings.upscaling, launcher_sharpness_values[settings.upscaling_sharpness] );
-            wine_nx_aspect_configure( settings.aspect_stretch );
+            wine_nx_scaling_configure( settings.scaling );
 #ifdef WINE_NX_LSFG
             wine_nx_lsfg_configure( settings.lsfg_enabled, settings.lsfg_performance, settings.lsfg_flow );
             /* LSFG fills in the frames between the game's own, so what the panel
@@ -5058,7 +5092,7 @@ int main( int argc, char **argv )
                           settings.vsync ? "on" : "off" );
             }
 #endif
-            wine_nx_fit_stretch43 = settings.aspect_stretch;
+            wine_nx_scaling_mode = settings.scaling;
             /* Resolution: the screen the program starts with. The panel
              * (the default) is left to the built-in default above. */
             if (settings.resolution)

@@ -16,6 +16,7 @@
 #include <string.h>
 #include <strings.h>
 #include "dxvk_releases.h"
+#include "screen_fit.h"   /* enum screen_scaling: the Scaling setting's values */
 
 #define LAUNCHER_KV_MAX 8192
 
@@ -189,7 +190,7 @@ struct launcher_settings
     int four_cores;
     int lazy_file_views;  /* views of files read from the card on demand */
     int framebuffer;  /* 1: windows go to the framebuffer, 0: through the compositor */
-    int aspect_stretch; /* 1: the central 4:3 of the picture fills the screen, 0: the whole window */
+    int scaling;      /* how the picture is placed on the panel: launcher_scaling_values */
     enum launcher_d3d_renderer d3d;
     enum dxvk_source dxvk_source;
     char vkd3d_version[32];
@@ -215,6 +216,7 @@ enum {
     LAUNCHER_FRAME_LIMIT_COUNT = 8,
     LAUNCHER_HUD_COUNT = 4,
     LAUNCHER_UPSCALING_COUNT = 3,
+    LAUNCHER_SCALING_COUNT = 4,
     LAUNCHER_SHARPNESS_COUNT = 6,
     LAUNCHER_RESOLUTION_COUNT = 5,
     LAUNCHER_VOODOO_API_COUNT = 6,
@@ -230,8 +232,15 @@ static const char *const launcher_hud_values[] =
     { "0", "fps", "api,fps,frametimes", "version,api,devinfo,fps,memory,frametimes,compiler" };
 static const char *const launcher_lsfg_flow_labels[] = { "12.5%", "25%", "50%" };
 static const char *const launcher_lsfg_flow_values[] = { "0.125", "0.25", "0.5" };
-static const char *const launcher_upscaling_labels[] = { "Off (Bilinear)", "FSR 1.0", "Integer" };
+static const char *const launcher_upscaling_labels[] = { "Off (Bilinear)", "FSR 1.0", "Nearest" };
 static const char *const launcher_upscaling_values[] = { "off", "fsr", "integer" };
+/* The Scaling setting: screen_fit.h turns each of these into the rectangle the
+ * picture is drawn in. Whole steps live here rather than in the filter, so a
+ * game can have bars (or not) and its filter chosen separately. */
+static const char *const launcher_scaling_labels[] =
+    { "Full screen", "Aspect ratio", "Integer", "Stretch 4:3" };
+static const char *const launcher_scaling_values[] =
+    { "full", "aspect", "integer", "stretch_4_3" };
 static const char *const launcher_sharpness_labels[] = { "0%", "20%", "40%", "60%", "80%", "100%" };
 static const float launcher_sharpness_values[] = { 0.0f, 0.2f, 0.4f, 0.6f, 0.8f, 1.0f };
 /* The screen a program starts with. The first is the panel, and the default. */
@@ -476,8 +485,17 @@ static inline void launcher_settings_read( const struct launcher_kv *kv, struct 
     settings->four_cores = launcher_setting_state( kv, "four-cores" ) != 0;
     settings->lazy_file_views = launcher_setting_state( kv, "lazy-file-views" ) == 1;
     settings->framebuffer = -1;
-    settings->aspect_stretch = launcher_kv_get( kv, "aspect", value, sizeof(value) ) &&
-                               !strcasecmp( value, "stretch" );
+    /* Aspect ratio is what the old two-way Aspect setting meant for anything
+     * drawn through Vulkan; "stretch" was its widescreen hack. The key changed
+     * name, the old one is still read so a saved program keeps its look. */
+    settings->scaling = SCREEN_SCALING_ASPECT;
+    if (launcher_kv_get( kv, "scaling", value, sizeof(value) ))
+    {
+        for (int i = 0; i < LAUNCHER_SCALING_COUNT; i++)
+            if (!strcasecmp( value, launcher_scaling_values[i] )) settings->scaling = i;
+    }
+    else if (launcher_kv_get( kv, "aspect", value, sizeof(value) ) && !strcasecmp( value, "stretch" ))
+        settings->scaling = SCREEN_SCALING_STRETCH_43;
     if (launcher_kv_get( kv, "windows", value, sizeof(value) ))
     {
         if (!strcasecmp( value, "framebuffer" )) settings->framebuffer = 1;
@@ -598,6 +616,7 @@ static inline int launcher_settings_write( struct launcher_kv *kv, const struct 
         settings->voodoo_msaa < 0 || settings->voodoo_msaa >= LAUNCHER_VOODOO_MSAA_COUNT ||
         settings->lsfg_flow < 0 || settings->lsfg_flow >= 3 ||
         settings->upscaling < 0 || settings->upscaling >= LAUNCHER_UPSCALING_COUNT ||
+        settings->scaling < 0 || settings->scaling >= LAUNCHER_SCALING_COUNT ||
         settings->upscaling_sharpness < 0 || settings->upscaling_sharpness >= LAUNCHER_SHARPNESS_COUNT) return 0;
     return launcher_kv_set( kv, "title", settings->title[0] ? settings->title : NULL ) &&
            launcher_kv_set( kv, "hidden", settings->hidden ? "1" : NULL ) &&
@@ -611,7 +630,9 @@ static inline int launcher_settings_write( struct launcher_kv *kv, const struct 
            launcher_kv_set( kv, "lazy-file-views", settings->lazy_file_views ? "1" : NULL ) &&
            launcher_kv_set( kv, "windows", settings->framebuffer < 0 ? NULL :
                                            settings->framebuffer ? "framebuffer" : "compositor" ) &&
-           launcher_kv_set( kv, "aspect", settings->aspect_stretch ? "stretch" : NULL ) &&
+           launcher_kv_set( kv, "aspect", NULL ) &&
+           launcher_kv_set( kv, "scaling", settings->scaling == SCREEN_SCALING_ASPECT ? NULL :
+                                             launcher_scaling_values[settings->scaling] ) &&
            launcher_kv_set( kv, "d3d9", NULL ) &&
            launcher_kv_set( kv, "d3d", settings->d3d == LAUNCHER_D3D_WINE ? "wine" :
                             settings->d3d == LAUNCHER_D3D_DXVK_VKD3D ? "dxvk+vkd3d" : NULL ) &&

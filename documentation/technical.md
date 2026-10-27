@@ -66,9 +66,13 @@ runtime; the full package now ships the Mesa 26 one.
   [mesa-switch](https://github.com/danfromtico/mesa-switch): OpenGL through
   nvc0 and Vulkan through NVK, with Wine's winevulkan on top. Direct3D runs
   through wined3d on OpenGL, or through architecture-specific DXVK payloads on
-  Vulkan for programs set to use it; frames of another size than the screen's
-  (800x600 or 640x480 in full
-  screen) are scaled to it, keeping the aspect ratio. The earlier runtime on
+  Vulkan for programs set to use it. Frames of another size than the screen's
+  (800x600 or 640x480 in full screen) are scaled to it by the runtime's own
+  compute blit, and the **Scaling** setting decides where they land: stretched
+  over the screen, kept in proportion with bars, by whole pixel steps, or with
+  the central 4:3 stretched (`source/screen_fit.h`). The same rectangle places
+  the compositor's windows and maps input, so what is shown and what is touched
+  agree. The earlier runtime on
   Mesa 20.1's nouveau driver, patched for pinned 32-bit buffers
   (`horizon-wine/mesa`), can still be built.
 - **Audio.** `winenxaudio.drv` plays through audout, for mmdevapi and DirectSound.
@@ -159,7 +163,7 @@ its executable, named after it:
 
 | File | Content |
 |---|---|
-| `NAME.wine-nx.txt` | Title, hidden from the library, verbose traces, profiler, `windows` (compositor or framebuffer), the CPU translator and its fast paths, `d3d` and which DXVK or VKD3D-Proton is used, the HUD, the frame limit and vsync, frame generation, upscaling and dgVoodoo |
+| `NAME.wine-nx.txt` | Title, hidden from the library, verbose traces, profiler, `windows` (compositor or framebuffer), the CPU translator and its fast paths, `d3d` and which DXVK or VKD3D-Proton is used, the HUD, the frame limit and vsync, frame generation, `scaling` and upscaling, and dgVoodoo |
 | `NAME.args.txt` | Its command-line arguments |
 | `NAME.keys.txt` | Its own controls, over `config/keys.txt` |
 | `NAME.box64.txt` | Box64 code generation options, one `BOX64_DYNAREC_*=value` per line |

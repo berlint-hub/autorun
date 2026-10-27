@@ -12,6 +12,8 @@ enum wine_nx_screenshot_format
 
 void wine_nx_graphics_configure(int frame_limit, int vsync);
 void wine_nx_upscaling_configure(int mode, float sharpness);
-void wine_nx_aspect_configure(int stretch43);
+/* The Scaling setting (enum screen_scaling): how the picture is placed on the
+ * panel. The Vulkan blit and the runtime's own map both go through it. */
+void wine_nx_scaling_configure(int mode);
 
 #endif

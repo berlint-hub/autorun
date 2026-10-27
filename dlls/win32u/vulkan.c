@@ -56,16 +56,29 @@ static pthread_mutex_t present_lock = PTHREAD_MUTEX_INITIALIZER;
 #endif
 #ifdef __SWITCH__
 #include "../../horizon-wine/source/osk.h"
-#include "../../horizon-wine/source/screen_fit.h"
 #include "../../horizon-wine/source/graphics_config.h"
 #endif
+/* Header-only, and the Scaling setting's numbers are needed whatever this file
+ * is built for: a host build simply never changes the mode. */
+#include "../../horizon-wine/source/screen_fit.h"
 
 /* The Upscaling setting a scaled swapchain is made with: 0 bilinear, 1 FSR 1.0
- * (EASU then RCAS, tools/fshack_*.comp), 2 whole-pixel steps with nearest
- * sampling. sharpness is 0 to 1 of RCAS's range. Only the Switch runtime sets
- * them (wine_nx_upscaling_configure). */
+ * (EASU then RCAS, tools/fshack_*.comp), 2 nearest sampling. sharpness is 0 to
+ * 1 of RCAS's range. Only the Switch runtime sets them
+ * (wine_nx_upscaling_configure). */
 static int nx_upscaling_mode;
 static float nx_upscaling_sharpness = 0.4f;
+
+/* The Scaling setting: where the picture lands on the screen (screen_fit.h).
+ * The runtime's own pictures -- the compositor, the input map, the OpenGL
+ * crop -- go through the same numbers, so what the screen shows and where a
+ * touch lands cannot drift apart. */
+static int nx_scaling_mode = SCREEN_SCALING_ASPECT;
+
+void wine_nx_scaling_configure( int mode )
+{
+    nx_scaling_mode = mode;
+}
 
 #if defined(__SWITCH__) && defined(WINE_NX_MESA_SWITCH)
 /* mesa-switch's loaderless NVK (build-mesa-switch.sh) is linked into the Switch
@@ -94,16 +107,6 @@ void wine_nx_upscaling_configure( int mode, float sharpness )
 }
 
 #ifdef __SWITCH__
-/* The per-game Aspect setting (horizon-wine's wine_nx_aspect_configure):
- * 1 presents the central 4:3 of the picture stretched over the whole
- * screen. Input maps through the same rectangle. */
-static int nx_stretch43;
-
-void wine_nx_aspect_configure( int stretch43 )
-{
-    nx_stretch43 = !!stretch43;
-}
-
 extern void wine_nx_present_fit( int src_w, int src_h, int src_x, int src_y,
                                  int *dst_x, int *dst_y, int *dst_w, int *dst_h ) __attribute__((weak));
 extern int wine_nx_screenshot_requested( void ) __attribute__((weak));
@@ -2665,7 +2668,11 @@ static VkResult init_blit_images( struct vulkan_device *device, struct swapchain
     uint32_t i;
 
     samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
-    samplerInfo.magFilter = samplerInfo.minFilter = fs_hack_is_integer() ? VK_FILTER_NEAREST : VK_FILTER_LINEAR;
+    /* Whole steps are square pixels: nearest, or the blocks would be
+     * blurred at their edges again. */
+    samplerInfo.magFilter = samplerInfo.minFilter =
+        fs_hack_is_integer() || nx_scaling_mode == SCREEN_SCALING_INTEGER ?
+        VK_FILTER_NEAREST : VK_FILTER_LINEAR;
     /* The blit's bars are the border; EASU draws its own, and its taps past
      * the image's edge must see the edge, not black. */
     samplerInfo.addressModeU = samplerInfo.addressModeV = samplerInfo.addressModeW =
@@ -3287,7 +3294,9 @@ static VkResult win32u_vkCreateSwapchainKHR( VkDevice client_device, const VkSwa
     {
         /* EASU is made for enlarging; a game drawing more than the screen
          * holds is scaled down by the blit as before. */
-        swapchain->fsr = nx_upscaling_mode == 1 && !nx_stretch43 &&
+        /* EASU is made for enlarging, uniformly: a stretched picture is not
+         * what it is for, and a whole-step one leaves nothing to enlarge. */
+        swapchain->fsr = nx_upscaling_mode == 1 && nx_scaling_mode == SCREEN_SCALING_ASPECT &&
                          swapchain->host_extents.width >= swapchain->extents.width &&
                          swapchain->host_extents.height >= swapchain->extents.height;
         if ((res = init_fs_hack_images( device, swapchain, create_info )))
@@ -3595,54 +3604,36 @@ static VkResult record_compute_cmd( struct vulkan_device *device, struct swapcha
     {
         /* texcoord = (id + 0.5 - offset) / extents: the shader samples the
          * picture with normalized coordinates, so offset and extents say which
-         * rectangle of the picture lands where on the screen. */
-        if (nx_stretch43)
-        {
-            /* The widescreen hack: the central 4:3 of the picture is stretched
-             * over the whole screen, so its bars stay out of the picture. */
-            int crop_w = swapchain->extents.width, crop_h = swapchain->extents.height;
+         * rectangle of the picture lands where on the screen. screen_fit_rect()
+         * is where the Scaling setting becomes numbers -- the same ones the
+         * runtime puts its compositor and its input map through. */
+        int src_w = swapchain->extents.width, src_h = swapchain->extents.height;
+        int crop_w = src_w, crop_h = src_h;
+        int rect_x, rect_y, rect_w, rect_h;
+        float scale_x, scale_y;
 
-            screen_crop_4_3( &crop_w, &crop_h );
-            constants.extents[0] = (float)swapchain->host_extents.width * swapchain->extents.width / crop_w;
-            constants.extents[1] = (float)swapchain->host_extents.height * swapchain->extents.height / crop_h;
-            constants.offset[0] = -(float)swapchain->host_extents.width *
-                                  (swapchain->extents.width - crop_w) / (2.0f * crop_w) - 0.5f;
-            constants.offset[1] = -(float)swapchain->host_extents.height *
-                                  (swapchain->extents.height - crop_h) / (2.0f * crop_h) - 0.5f;
-        }
-        else
+        if (screen_scaling_crops_4_3( nx_scaling_mode )) screen_crop_4_3( &crop_w, &crop_h );
+        screen_fit_rect( nx_scaling_mode, crop_w, crop_h,
+                         swapchain->host_extents.width, swapchain->host_extents.height,
+                         &rect_x, &rect_y, &rect_w, &rect_h );
+        /* The shader always samples the whole picture, so it is drawn at the
+         * scale the rectangle asks for and moved so that the crop -- which is
+         * the whole picture but for the 4:3 mode -- lands in it. A stretched
+         * rectangle has a scale of its own per axis, which is the stretch. */
+        scale_x = (float)rect_w / crop_w;
+        scale_y = (float)rect_h / crop_h;
+        constants.extents[0] = src_w * scale_x;
+        constants.extents[1] = src_h * scale_y;
+        constants.offset[0] = rect_x - ( src_w - crop_w ) * 0.5f * scale_x;
+        constants.offset[1] = rect_y - ( src_h - crop_h ) * 0.5f * scale_y;
+        if (!swapchain->fsr)
         {
-            /* Keep the aspect ratio: the image is centred, and the sampler's
-             * black border fills the bars. Integer scaling takes the largest
-             * whole multiple that fits, and FSR a rectangle of whole pixels,
-             * both on whole-pixel bars. */
-            float scale = min( (float)swapchain->host_extents.width / swapchain->extents.width,
-                               (float)swapchain->host_extents.height / swapchain->extents.height );
-            float width, height;
-
-            if (!swapchain->fsr && fs_hack_is_integer() && scale >= 1.0f) scale = floorf( scale );
-            width = swapchain->extents.width * scale;
-            height = swapchain->extents.height * scale;
-            if (swapchain->fsr || fs_hack_is_integer())
-            {
-                width = min( floorf( width + 0.5f ), swapchain->host_extents.width );
-                height = min( floorf( height + 0.5f ), swapchain->host_extents.height );
-                constants.offset[0] = floorf( (swapchain->host_extents.width - width) / 2 );
-                constants.offset[1] = floorf( (swapchain->host_extents.height - height) / 2 );
-            }
-            else
-            {
-                constants.offset[0] = (swapchain->host_extents.width - width) / 2;
-                constants.offset[1] = (swapchain->host_extents.height - height) / 2;
-            }
-            if (!swapchain->fsr)
-            {
-                constants.offset[0] -= 0.5f;
-                constants.offset[1] -= 0.5f;
-            }
-            constants.extents[0] = width;
-            constants.extents[1] = height;
+            /* half a pixel: the sampler's border is where the bars are */
+            constants.offset[0] -= 0.5f;
+            constants.offset[1] -= 0.5f;
         }
+        TRACE( "scaling mode %d: %dx%d of %dx%d at %d,%d in %dx%d\n", nx_scaling_mode,
+               crop_w, crop_h, src_w, src_h, rect_x, rect_y, rect_w, rect_h );
     }
 #else
     if (swapchain->fsr)

@@ -234,7 +234,8 @@ static void upscale( const uint8_t *src, uint32_t w, uint32_t h, uint8_t *out, u
     easu = make_pipeline( layout, easu_comp_spv, sizeof(easu_comp_spv) );
     rcas = make_pipeline( layout, rcas_comp_spv, sizeof(rcas_comp_spv) );
 
-    /* vulkan.c's rectangle for FSR on the Switch: aspect kept, whole pixels. */
+    /* The aspect rectangle the Scaling setting gives (source/screen_fit.h):
+     * whole pixels, the picture centred. */
     scale = fminf( (float)W / w, (float)H / h );
     width = fminf( floorf( w * scale + 0.5f ), W );
     height = fminf( floorf( h * scale + 0.5f ), H );

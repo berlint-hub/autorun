@@ -1832,7 +1832,7 @@ enum program_row
 {
     ROW_START, ROW_PRESET, ROW_COPY, ROW_FAVORITE, ROW_ARTWORK, ROW_FORWARDER, ROW_LOCATE, ROW_PLAYED, ROW_TITLE,
     ROW_ARGS, ROW_RESET, ROW_VERBOSE, ROW_PROFILE,
-    ROW_WINDOWS, ROW_ASPECT, ROW_RESOLUTION, ROW_D3D9, ROW_VKD3D_VERSION, ROW_DXVK_VERSION, ROW_DXVK_OPTIONS, ROW_DXVK_HUD, ROW_FRAME_LIMIT, ROW_FRAME_LIMIT_SYNC, ROW_VSYNC,
+    ROW_WINDOWS, ROW_SCALING, ROW_RESOLUTION, ROW_D3D9, ROW_VKD3D_VERSION, ROW_DXVK_VERSION, ROW_DXVK_OPTIONS, ROW_DXVK_HUD, ROW_FRAME_LIMIT, ROW_FRAME_LIMIT_SYNC, ROW_VSYNC,
     ROW_VOODOO,
     ROW_LSFG, ROW_LSFG_DLL, ROW_LSFG_PERFORMANCE, ROW_LSFG_FLOW,
     ROW_UPSCALING, ROW_UPSCALING_SHARPNESS,
@@ -2699,12 +2699,16 @@ static int program_menu_run( struct launcher *l, struct program *p, char *target
                   state_text( p->settings.framebuffer, l->options->framebuffer, "Framebuffer", "Compositor",
                               buffer, sizeof(buffer) ) );
 
-        ADD_ROW( ROW_ASPECT, SECTION_GRAPHICS, "Aspect",
-                 "Fit keeps the program's own proportions, with bars at the sides when it is 4:3. "
-                 "Stretch 4:3 fills the screen: the central 4:3 of the picture is stretched "
-                 "widescreen, like a classic console TV look." );
-        row->adjustable = 1;
-        snprintf( row->value, sizeof(row->value), "%s", p->settings.aspect_stretch ? "Stretch 4:3" : "Fit" );
+        ADD_ROW( ROW_SCALING, SECTION_GRAPHICS, "Scaling",
+                 "How the picture is placed on the 1280x720 screen. Aspect ratio keeps the program's own "
+                 "proportions, with black bars on the two sides left over. Full screen stretches it over "
+                 "the whole screen. Integer enlarges by whole steps only, so every picture pixel is a "
+                 "square block of screen pixels -- pixel art and low resolutions. Stretch 4:3 fills the "
+                 "screen with the central 4:3 of the picture, the classic console TV look. The "
+                 "Upscaling setting decides how the picture is filtered inside that rectangle." );
+        row->kind = UI_ROW_DROPDOWN;
+        row->choices = LAUNCHER_SCALING_COUNT;
+        snprintf( row->value, sizeof(row->value), "%s", launcher_scaling_labels[p->settings.scaling] );
 
         ADD_ROW( ROW_RESOLUTION, SECTION_GRAPHICS, "Resolution",
                  "The screen a game starts with. 1280x720 is the panel itself, the fewest pixels to draw. "
@@ -3131,12 +3135,30 @@ static int program_menu_run( struct launcher *l, struct program *p, char *target
             ui_toast( ui, line[0] ? "Arguments saved" : "Arguments removed", 1500 );
             break;
 
-        case ROW_ASPECT:
-            if (action == UI_ACTION_RESET) p->settings.aspect_stretch = 0;
-            else if (action == UI_ACTION_CHOOSE) p->settings.aspect_stretch = !p->settings.aspect_stretch;
-            else p->settings.aspect_stretch = action == UI_ACTION_RIGHT;
+        case ROW_SCALING:
+        {
+            struct ui_row items[LAUNCHER_SCALING_COUNT] = {0};
+            int selected, i;
+
+            if (action == UI_ACTION_RESET) p->settings.scaling = SCREEN_SCALING_ASPECT;
+            else if (action == UI_ACTION_CHOOSE)
+            {
+                for (i = 0; i < LAUNCHER_SCALING_COUNT; i++)
+                    snprintf( items[i].label, sizeof(items[i].label), "%s", launcher_scaling_labels[i] );
+                selected = ui_settings_dropdown( ui, &list, items, LAUNCHER_SCALING_COUNT, p->settings.scaling );
+                if (selected < 0) break;
+                p->settings.scaling = selected;
+            }
+            else
+            {
+                int step = action == UI_ACTION_LEFT ? -1 : 1;
+
+                if (action != UI_ACTION_LEFT && action != UI_ACTION_RIGHT) break;
+                p->settings.scaling = (p->settings.scaling + step + LAUNCHER_SCALING_COUNT) % LAUNCHER_SCALING_COUNT;
+            }
             save_program_settings( l, p );
             break;
+        }
 
         case ROW_RESOLUTION:
         {

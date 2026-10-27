@@ -888,6 +888,7 @@ static void framebuffer_surface_destroy( struct opengl_drawable *drawable )
  * the picture goes to the drawable's own rectangle, as on desktops. */
 extern void wine_nx_present_fit( int src_w, int src_h, int src_x, int src_y,
                                  int *dst_x, int *dst_y, int *dst_w, int *dst_h ) __attribute__((weak));
+extern void wine_nx_present_fit_stretched( int src_w, int src_h, int src_x, int src_y ) __attribute__((weak));
 
 static void blit_framebuffer_surface( struct opengl_drawable *drawable )
 {
@@ -898,9 +899,11 @@ static void blit_framebuffer_surface( struct opengl_drawable *drawable )
     int fit_x = 0, fit_y = 0, fit_w = dst.cx, fit_h = dst.cy;
     float ramp_data[GAMMA_RAMP_SIZE * 4];
 
-    if (&wine_nx_present_fit && drawable->client)
-        wine_nx_present_fit( src.cx, src.cy, drawable->client->virtual_rect.left,
-                             drawable->client->virtual_rect.top, &fit_x, &fit_y, &fit_w, &fit_h );
+    /* The drawable's buffer is stretched over the panel by the display's own
+     * scaler, so the fit is the stretched one and input follows it. */
+    if (&wine_nx_present_fit_stretched && drawable->client)
+        wine_nx_present_fit_stretched( src.cx, src.cy, drawable->client->virtual_rect.left,
+                                       drawable->client->virtual_rect.top );
 
     TRACE( "%s src %s dst %s fbo %u\n", debugstr_opengl_drawable( drawable ), wine_dbgstr_point( (POINT *)&src ),
            wine_dbgstr_point( (POINT *)&dst ), drawable->read_fbo );

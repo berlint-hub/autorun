@@ -25,7 +25,7 @@ static void test_defaults_match_an_empty_file(void)
     assert( read.profile == defaults.profile && read.fast_sync == defaults.fast_sync );
     assert( read.fex == defaults.fex && read.four_cores == defaults.four_cores );
     assert( read.lazy_file_views == defaults.lazy_file_views );
-    assert( read.framebuffer == defaults.framebuffer && read.aspect_stretch == defaults.aspect_stretch );
+    assert( read.framebuffer == defaults.framebuffer && read.scaling == defaults.scaling );
     assert( read.d3d == defaults.d3d && read.dxvk_source == defaults.dxvk_source );
     assert( read.dxvk_hud == defaults.dxvk_hud && read.frame_limit == defaults.frame_limit );
     assert( read.vsync == defaults.vsync && read.resolution == defaults.resolution );

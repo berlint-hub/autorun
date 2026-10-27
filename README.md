@@ -165,9 +165,10 @@ played**.
 - mark it as a favorite or hide it, change its title, give it command-line
   arguments, and download its artwork;
 - make a HOME menu shortcut that starts it directly;
-- pick how its graphics are drawn (Wine's Direct3D or DXVK), how a picture
-  smaller than the screen is enlarged (FSR 1.0, or whole-pixel steps for pixel
-  art), and **Frame Generation**;
+- pick how its graphics are drawn (Wine's Direct3D or DXVK), how the picture
+  is fitted to the 1280x720 screen (**Aspect ratio**, **Full screen**,
+  **Integer** or **Stretch 4:3**) and filtered inside that rectangle (FSR 1.0,
+  bilinear or nearest), and **Frame Generation**;
 - pick the CPU translator (Box64, FEX, or the Switch-tuned FEX), and give it
   its own controls;
 - pick a **preset** — **Balanced**, **Performance**, **Battery** or
@@ -180,8 +181,10 @@ played**.
   engine where every game wants the same ones. The title, whether it is hidden,
   the arguments, the controls and the artwork stay with each game.
 
-A window smaller than the desktop — an FMV movie player, say — stretches over
-the whole screen the same way, with no side bars.
+A window smaller than the desktop — an FMV movie player, say — is placed on the
+screen by the same **Scaling** setting as the game itself: stretched over the
+whole screen with **Full screen**, kept in proportion with bars at the sides with
+**Aspect ratio**.
 
 **Settings (−)**: show hidden games, the controls every game uses by default,
 a [SteamGridDB](https://www.steamgriddb.com) API key for artwork, returning to
@@ -198,6 +201,29 @@ another copy, so a restore can be undone the same way. The library itself --
 the games, their artwork and their play time -- is not part of a copy.
 **Remove missing games** does the same for a USB drive that was renamed or
 unplugged for good, and leaves their settings on the card.
+
+### How the picture fits the screen
+
+1280x720 is 16:9, and not every game is: a 4:3 game, or one that draws
+1024x768, leaves something over. **Scaling**, in a game's **Graphics** options,
+says what happens to it:
+
+- **Aspect ratio** (the default) enlarges the picture as far as it goes with
+  its proportions kept, so a 4:3 game stays 4:3 with black bars at the sides;
+- **Full screen** stretches it over the whole screen, bars and all, which is a
+  little wider than the game drew it;
+- **Integer** enlarges by whole steps only: every pixel the game draws becomes
+  a square block of screen pixels, and the bars are wider. For pixel art and
+  low resolutions — a fractional scale makes such a picture shimmer as it moves;
+- **Stretch 4:3** fills the screen with the central 4:3 of the picture, the
+  classic console-on-a-widescreen-TV look.
+
+**Upscaling** decides how the picture is filtered inside that rectangle:
+bilinear, FSR 1.0 with its own sharpness setting, or nearest for the square
+blocks. Scaling reaches Vulkan and DXVK games through the runtime's own scaled
+blit, and input follows the picture where it is drawn, bars included. An OpenGL
+game hands the screen its own buffer, which the display stretches, so it keeps
+the stretched look; **Stretch 4:3** reaches it through the display's crop.
 
 ### Frame generation
 

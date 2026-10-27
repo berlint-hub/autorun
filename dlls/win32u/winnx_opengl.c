@@ -40,6 +40,7 @@ extern void wine_nx_gl_release_window( void );
 extern int wine_nx_vulkan_owns_screen( void ) __attribute__((weak));
 extern void wine_nx_present_fit( int src_w, int src_h, int src_x, int src_y,
                                  int *dst_x, int *dst_y, int *dst_w, int *dst_h ) __attribute__((weak));
+extern void wine_nx_present_fit_stretched( int src_w, int src_h, int src_x, int src_y ) __attribute__((weak));
 extern void wine_nx_desktop_size( int *width, int *height ) __attribute__((weak));
 extern void wine_nx_runtime_trace( const char *msg ) __attribute__((weak));
 extern int wine_nx_screenshot_requested( void ) __attribute__((weak));
@@ -403,14 +404,17 @@ static BOOL nx_drawable_swap( struct opengl_drawable *base )
         }
         return TRUE;
     }
-    if (&wine_nx_present_fit && base->client)
+    /* The drawable's own buffer, which the display's scaler stretches over the
+     * panel: input maps through that stretch, not through the Scaling setting
+     * the Vulkan blit and the compositor follow. */
+    if (&wine_nx_present_fit_stretched && base->client)
     {
         EGLint width = 0, height = 0;
 
         if (funcs->p_eglQuerySurface( egl->display, base->surface, EGL_WIDTH, &width ) &&
             funcs->p_eglQuerySurface( egl->display, base->surface, EGL_HEIGHT, &height ))
-            wine_nx_present_fit( width, height, base->client->virtual_rect.left,
-                                 base->client->virtual_rect.top, NULL, NULL, NULL, NULL );
+            wine_nx_present_fit_stretched( width, height, base->client->virtual_rect.left,
+                                           base->client->virtual_rect.top );
     }
     nx_osk_draw( base );
     nx_drawable_screenshot( base );

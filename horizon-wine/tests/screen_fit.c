@@ -75,6 +75,89 @@ int main(void)
     /* Null outputs are allowed. */
     screen_fill_scales( 1920, 1080, 1280, 720, NULL, NULL );
 
+    /* The Scaling setting: where the picture lands on the 1280x720 panel. */
+    {
+        struct { int mode, src_w, src_h, x, y, w, h; int line; } cases[] =
+        {
+            { SCREEN_SCALING_FULL,     640, 480,    0,   0, 1280, 720, __LINE__ }, /* stretched */
+            { SCREEN_SCALING_FULL,    1920, 1080,   0,   0, 1280, 720, __LINE__ },
+            { SCREEN_SCALING_ASPECT,   640, 480,  160,   0,  960, 720, __LINE__ }, /* 4:3, bars at the sides */
+            { SCREEN_SCALING_ASPECT,   800, 600,  160,   0,  960, 720, __LINE__ },
+            { SCREEN_SCALING_ASPECT,  1024, 768,  160,   0,  960, 720, __LINE__ },
+            { SCREEN_SCALING_ASPECT,  1920, 1080,   0,   0, 1280, 720, __LINE__ }, /* 16:9: no bars */
+            { SCREEN_SCALING_ASPECT,  1000, 1000, 280,   0,  720, 720, __LINE__ }, /* square: bars left and right */
+            { SCREEN_SCALING_ASPECT,  1920, 800,    0,  93, 1280, 533, __LINE__ }, /* wider than 16:9: bars above and below */
+            { SCREEN_SCALING_INTEGER,  640, 480,  320, 120,  640, 480, __LINE__ }, /* one whole step fits */
+            { SCREEN_SCALING_INTEGER,  640, 360,    0,   0, 1280, 720, __LINE__ }, /* the panel's half: 2 steps */
+            { SCREEN_SCALING_INTEGER,  320, 180,    0,   0, 1280, 720, __LINE__ }, /* 4 steps */
+            { SCREEN_SCALING_INTEGER,  800, 600,  240,  60,  800, 600, __LINE__ },
+            { SCREEN_SCALING_INTEGER, 1920, 1080,   0,   0, 1280, 720, __LINE__ }, /* larger: scaled down, aspect kept */
+            { SCREEN_SCALING_INTEGER, 1000, 1000, 280,   0,  720, 720, __LINE__ }, /* taller than the panel: aspect kept */
+            { SCREEN_SCALING_STRETCH_43, 640, 480, 0,   0, 1280, 720, __LINE__ }, /* the caller cropped: stretched */
+            { SCREEN_SCALING_STRETCH_43, 960, 720, 0,   0, 1280, 720, __LINE__ },
+        };
+        size_t i;
+
+        for (i = 0; i < sizeof(cases) / sizeof(cases[0]); i++)
+        {
+            int x, y, w, h;
+
+            screen_fit_rect( cases[i].mode, cases[i].src_w, cases[i].src_h, 1280, 720, &x, &y, &w, &h );
+            if (x == cases[i].x && y == cases[i].y && w == cases[i].w && h == cases[i].h) continue;
+            fprintf( stderr, "FAIL rect mode %d %dx%d: got %d,%d %dx%d want %d,%d %dx%d\n",
+                     cases[i].mode, cases[i].src_w, cases[i].src_h, x, y, w, h,
+                     cases[i].x, cases[i].y, cases[i].w, cases[i].h );
+            failures++;
+        }
+    }
+
+    /* Whatever the mode and the size, the picture stays inside the panel and
+     * is centred in it: a bar is never wider on one side than on the other. */
+    {
+        static const int modes[] = { SCREEN_SCALING_FULL, SCREEN_SCALING_ASPECT, SCREEN_SCALING_INTEGER };
+        int w, h, m;
+
+        for (m = 0; m < 3; m++)
+        for (w = 1; w <= 2048; w += 7)
+        for (h = 1; h <= 2048; h += 11)
+        {
+            int x, y, rw, rh;
+
+            screen_fit_rect( modes[m], w, h, 1280, 720, &x, &y, &rw, &rh );
+            /* a leftover pixel of an odd difference goes to the far side */
+            if (x < 0 || y < 0 || rw < 1 || rh < 1 || x + rw > 1280 || y + rh > 720 ||
+                abs( x - (1280 - (x + rw)) ) > 1 || abs( y - (720 - (y + rh)) ) > 1)
+            {
+                fprintf( stderr, "FAIL rect bounds mode %d %dx%d: %d,%d %dx%d\n",
+                         modes[m], w, h, x, y, rw, rh );
+                failures++;
+                m = 3;
+                break;
+            }
+        }
+    }
+
+    /* Whole steps are whole: no bars of a fraction of a pixel, and the picture
+     * is an exact multiple of the source both ways. */
+    {
+        int w, h;
+
+        for (w = 1; w <= 640; w += 13)
+        for (h = 1; h <= 360; h += 7)
+        {
+            int x, y, rw, rh;
+
+            screen_fit_rect( SCREEN_SCALING_INTEGER, w, h, 1280, 720, &x, &y, &rw, &rh );
+            if (rw % w || rh % h || rw / w != rh / h)
+            {
+                fprintf( stderr, "FAIL integer steps %dx%d: %dx%d\n", w, h, rw, rh );
+                failures++;
+                w = 641;
+                break;
+            }
+        }
+    }
+
     if (failures) return 1;
     printf( "screen_fit: all cases pass\n" );
     return 0;

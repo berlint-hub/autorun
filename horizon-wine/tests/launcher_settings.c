@@ -251,6 +251,27 @@ static void test_settings( const char *dir )
     assert( launcher_settings_write( &kv, &settings ) );
     assert( !strstr( kv.text, "upscaling=" ) && !strstr( kv.text, "upscaling-sharpness=" ) );
 
+    /* The Scaling setting, by its own key; the old two-way "aspect" one still
+     * reads as the widescreen hack it was. */
+    load_text( &kv, "scaling=integer\n" );
+    launcher_settings_read( &kv, &settings );
+    assert( settings.scaling == SCREEN_SCALING_INTEGER );
+    load_text( &kv, "scaling=full\n" );
+    launcher_settings_read( &kv, &settings );
+    assert( settings.scaling == SCREEN_SCALING_FULL );
+    load_text( &kv, "aspect=stretch\n" );
+    launcher_settings_read( &kv, &settings );
+    assert( settings.scaling == SCREEN_SCALING_STRETCH_43 );
+    load_text( &kv, "" );
+    launcher_settings_read( &kv, &settings );
+    assert( settings.scaling == SCREEN_SCALING_ASPECT );
+    settings.scaling = SCREEN_SCALING_STRETCH_43;
+    assert( launcher_settings_write( &kv, &settings ) );
+    assert( strstr( kv.text, "scaling=stretch_4_3" ) && !strstr( kv.text, "aspect=" ) );
+    settings.scaling = SCREEN_SCALING_ASPECT;
+    assert( launcher_settings_write( &kv, &settings ) );
+    assert( !strstr( kv.text, "scaling=" ) );
+
     snprintf( path, sizeof(path), "%s/game.wine-nx.txt", dir );
     load_text( &kv, "# written by hand\n" );
     memset( &settings, 0, sizeof(settings) );
@@ -262,6 +283,7 @@ static void test_settings( const char *dir )
     settings.verbose = -1;
     settings.profile = 1;
     settings.framebuffer = 0;
+    settings.scaling = SCREEN_SCALING_ASPECT;
     settings.d3d = LAUNCHER_D3D_DXVK;
     strcpy( settings.dxvk_version, "2.7.1" );
     assert( launcher_settings_write( &kv, &settings ) && launcher_kv_save( &kv, path ) );
@@ -276,6 +298,7 @@ static void test_settings( const char *dir )
     settings.fex = -1;
     settings.four_cores = 1;
     settings.d3d = LAUNCHER_D3D_DXVK;
+    settings.scaling = SCREEN_SCALING_ASPECT;
     settings.verbose = settings.profile = settings.framebuffer = -1;
     settings.vsync = settings.lsfg_performance = settings.lsfg_flow = 1;
     assert( launcher_settings_write( &kv, &settings ) && !strcmp( kv.text, "# written by hand\n" ) );

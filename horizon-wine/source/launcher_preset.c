@@ -103,6 +103,7 @@ void launcher_preset_defaults( struct launcher_settings *settings )
     settings->lsfg_performance = 1;
     settings->lsfg_flow = 1;
     settings->upscaling_sharpness = 2;
+    settings->scaling = SCREEN_SCALING_ASPECT;
 }
 
 int launcher_preset_apply( struct launcher_settings *settings, int preset, int translators )
