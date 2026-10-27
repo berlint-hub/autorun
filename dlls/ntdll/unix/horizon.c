@@ -18019,14 +18019,25 @@ static void horizon_trace_program_fault( const ThreadExceptionDump *ctx, const E
         __atomic_store_n( &burst[kind], 0, __ATOMIC_RELAXED );
     count = __atomic_add_fetch( &burst[kind], 1, __ATOMIC_RELAXED );
     if (count > (kind ? 2 : 8) && (count & (count - 1))) return;
-    snprintf( buf, sizeof(buf),
-              "[EXC] fault %u to the program: tid=%04x code=0x%08x %s 0x%llx pc=0x%llx sp=0x%llx lr=0x%llx fp=0x%llx",
-              count, (unsigned)HandleToULong( teb->ClientId.UniqueThread ), (unsigned)rec->ExceptionCode,
-              rec->NumberParameters < 2 ? "at" :
-              rec->ExceptionInformation[0] == EXCEPTION_EXECUTE_FAULT ? "executing" :
-              rec->ExceptionInformation[0] == EXCEPTION_WRITE_FAULT ? "writing" : "reading",
-              (unsigned long long)ctx->far.x, (unsigned long long)ctx->pc.x, (unsigned long long)ctx->sp.x,
-              (unsigned long long)ctx->lr.x, (unsigned long long)ctx->fp.x );
+    {
+        /* The program's own address, where the runtime can read it: a fault in
+         * translated code is reported with a native PC, which names no
+         * function of any program. */
+        extern uint32_t wine_nx_guest_pc( void *teb ) __attribute__((weak));
+        uint32_t guest = &wine_nx_guest_pc ? wine_nx_guest_pc( teb ) : 0;
+        int len;
+
+        len = snprintf( buf, sizeof(buf),
+                        "[EXC] fault %u to the program: tid=%04x code=0x%08x %s 0x%llx pc=0x%llx sp=0x%llx lr=0x%llx fp=0x%llx",
+                        count, (unsigned)HandleToULong( teb->ClientId.UniqueThread ), (unsigned)rec->ExceptionCode,
+                        rec->NumberParameters < 2 ? "at" :
+                        rec->ExceptionInformation[0] == EXCEPTION_EXECUTE_FAULT ? "executing" :
+                        rec->ExceptionInformation[0] == EXCEPTION_WRITE_FAULT ? "writing" : "reading",
+                        (unsigned long long)ctx->far.x, (unsigned long long)ctx->pc.x, (unsigned long long)ctx->sp.x,
+                        (unsigned long long)ctx->lr.x, (unsigned long long)ctx->fp.x );
+        if (guest && len > 0 && len < (int)sizeof(buf))
+            snprintf( buf + len, sizeof(buf) - len, " x86=0x%08x", guest );
+    }
     wine_nx_runtime_trace( buf );
 }
 #endif

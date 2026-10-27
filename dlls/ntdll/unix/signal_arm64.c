@@ -551,7 +551,7 @@ unsigned int wine_nx_syscalls;
  * only "ntdll", so the number is kept here, where every call passes, and the
  * stall report reads it back by thread id. Two relaxed stores per call. */
 #define NX_SYSCALL_LAST_SLOTS 64
-struct nx_syscall_last { unsigned int tid, id; };
+struct nx_syscall_last { unsigned int tid, id, calls; };
 static struct nx_syscall_last wine_nx_syscall_last[NX_SYSCALL_LAST_SLOTS];
 
 static inline void nx_syscall_note( unsigned int id )
@@ -560,19 +560,30 @@ static inline void nx_syscall_note( unsigned int id )
     struct nx_syscall_last *slot = &wine_nx_syscall_last[tid % NX_SYSCALL_LAST_SLOTS];
 
     __atomic_store_n( &slot->tid, tid, __ATOMIC_RELAXED );
-    __atomic_store_n( &slot->id, id, __ATOMIC_RELAXED );
+    if (__atomic_load_n( &slot->id, __ATOMIC_RELAXED ) == id)
+        __atomic_add_fetch( &slot->calls, 1, __ATOMIC_RELAXED );
+    else
+    {
+        __atomic_store_n( &slot->calls, 1, __ATOMIC_RELAXED );
+        __atomic_store_n( &slot->id, id, __ATOMIC_RELAXED );
+    }
 }
 
-/* What the thread with this id was last doing, for the stall report. */
-unsigned int wine_nx_syscall_last_of( unsigned int tid )
+/* What the thread with this id was last doing and how often it has asked for
+ * it since this was last read, for the stall report: one call repeated a
+ * thousand times a second and one call in a loop of its own read very
+ * differently, and the number is the difference. */
+unsigned int wine_nx_syscall_last_of( unsigned int tid, unsigned int *calls )
 {
     unsigned int i;
 
+    if (calls) *calls = 0;
     for (i = 0; i < NX_SYSCALL_LAST_SLOTS; i++)
     {
         struct nx_syscall_last *slot = &wine_nx_syscall_last[i];
 
         if (__atomic_load_n( &slot->tid, __ATOMIC_RELAXED ) != tid) continue;
+        if (calls) *calls = __atomic_exchange_n( &slot->calls, 0, __ATOMIC_RELAXED );
         return __atomic_load_n( &slot->id, __ATOMIC_RELAXED );
     }
     return 0;

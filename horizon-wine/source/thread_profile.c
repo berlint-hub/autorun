@@ -443,6 +443,35 @@ static unsigned int walk_x86( uint64_t teb, uint32_t *callers )
                                 info.addr, info.addr + info.size, read_word32, callers, NX_PROF_DEPTH );
 }
 
+/* Where the program itself is, as opposed to where its thread is: a thread at
+ * a system call has its x86 context saved in the TEB's CPU area, and that is
+ * the only place an x86 program's position can be read. The native stack says
+ * "ntdll", which is where every waiting thread is; the guest PC says which
+ * function of the program is waiting. */
+static int guest_state( uint64_t teb, uint32_t *eip, uint32_t *esp, uint32_t *ebp )
+{
+    MemoryInfo info;
+    uint64_t cpu, context;
+
+    if (!teb || !readable_size( teb + NX_PROF_TEB_CPU_AREA, 8, &info )) return 0;
+    if (!(cpu = read_word( teb + NX_PROF_TEB_CPU_AREA ))) return 0;
+    context = cpu + NX_PROF_CPU_CONTEXT;
+    if (!readable( context + NX_PROF_I386_EIP, &info )) return 0;
+    *eip = read_word32( context + NX_PROF_I386_EIP );
+    *esp = read_word32( context + NX_PROF_I386_ESP );
+    *ebp = read_word32( context + NX_PROF_I386_EBP );
+    return *eip != 0 && *eip != 0xffffffff;
+}
+
+/* The guest PC of a thread, for the exception report: a fault says little
+ * without the program's own address for it. Hands back the x86 EIP, or 0. */
+uint32_t wine_nx_guest_pc( void *teb )
+{
+    uint32_t eip = 0, esp = 0, ebp = 0;
+
+    return guest_state( (uint64_t)(uintptr_t)teb, &eip, &esp, &ebp ) ? eip : 0;
+}
+
 /* Inside translated code, the x86 frame chain from the guest's EBP and ESP. */
 static unsigned int walk_x86_frames( const ThreadContext *ctx, uint32_t *callers )
 {
@@ -688,17 +717,47 @@ void wine_nx_threads_report_stalled( void )
         /* A thread stopped inside a system call is waiting or spinning, and
          * which call it is says which of the two. */
         {
-            extern unsigned int wine_nx_syscall_last_of( unsigned int ) __attribute__((weak));
+            extern unsigned int wine_nx_syscall_last_of( unsigned int, unsigned int * ) __attribute__((weak));
             extern const char *wine_nx_syscall_name( unsigned int ) __attribute__((weak));
-            unsigned int call = &wine_nx_syscall_last_of ? wine_nx_syscall_last_of( tid ) : 0;
+            unsigned int calls = 0;
+            unsigned int call = &wine_nx_syscall_last_of ? wine_nx_syscall_last_of( tid, &calls ) : 0;
             const char *name = call && &wine_nx_syscall_name ? wine_nx_syscall_name( call ) : NULL;
 
-            if (call) len = appendf( line, len, " %s(%#x)", name ? name : "syscall", call );
+            if (!call) calls = 0;
+            else if (calls > 1)
+                len = appendf( line, len, " %s(%#x) x%u", name ? name : "syscall", call, calls );
+            else len = appendf( line, len, " %s(%#x)", name ? name : "syscall", call );
         }
         for (f = 0; f < frames; f++)
         {
             name_address( callers[f], where, sizeof(where) );
             len = appendf( line, len, " < %s", where );
+        }
+        /* A thread stopped inside ntdll is only half the story: what the
+         * program was doing is on its x86 stack, in its TEB. */
+        if (registry[i].teb && strstr( line, " ntdll.dll+" ))
+        {
+            uint32_t eip = 0, esp = 0, ebp = 0;
+
+            if (guest_state( registry[i].teb, &eip, &esp, &ebp ))
+            {
+                uint32_t guest[NX_PROF_DEPTH];
+                MemoryInfo info;
+                unsigned int guest_frames = 0;
+
+                name_address( eip, where, sizeof(where) );
+                len = appendf( line, len, " | x86 at %s", where );
+                if (readable( esp, &info ))
+                {
+                    guest_frames = nx_prof_x86_callers( esp, ebp, info.addr, info.addr + info.size,
+                                                        read_word32, guest, 4 );
+                    for (f = 0; f < guest_frames; f++)
+                    {
+                        name_address( guest[f], where, sizeof(where) );
+                        len = appendf( line, len, " < %s", where );
+                    }
+                }
+            }
         }
         wine_nx_runtime_trace( line );
         reported++;

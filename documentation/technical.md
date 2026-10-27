@@ -115,7 +115,9 @@ runtime; the full package now ships the Mesa 26 one.
   all: `gettimeofday` then fails or answers the same value every time, and a
   program waiting for a deadline that never arrives looks exactly like one
   waiting for an event nobody sets. (Dark Athena was this: its main thread on a
-  full core of `NtQuerySystemTime` calls, not one frame in three minutes.)
+  full core of `NtQuerySystemTime` calls, not one frame in three minutes. Its
+  clock moves now and the frame still does not come, so the cause is further
+  in — which is what the two reports below are for.)
   Windows itself keeps the system time as the calendar clock read once at boot
   plus interrupt time, never re-reading the RTC, so that is what the Switch
   build does now: one read of the calendar clock, cached, plus time since boot.
@@ -131,11 +133,22 @@ runtime; the full package now ships the Mesa 26 one.
   dispatcher therefore keeps, per thread, the number of the call it was last
   in (`wine_nx_syscall_last`), and the report names it from Wine's own call
   tables -- `thread 4w at ntdll.dll+0x6d024 … NtUserMsgWaitForMultipleObjectsEx
-  (0x11d4)`, name and number as the tables have them. Waiting, spinning and
-  locked out all look the same from outside and each needs a different fix;
-  the call is what tells them apart. It comes with a line about the program's
-  OpenGL (`has not swapped a frame yet; its OpenGL is 4.3 (Core Profile) …`),
-  which separates "no usable context" from "never reached the first frame".
+  (0x11d4) x1234`, name, number and how often it was asked for since the last
+  report. Waiting, spinning and locked out all look the same from outside and
+  each needs a different fix; the call and its rate are what tell them apart.
+  It comes with a line about the program's OpenGL (`has not swapped a frame
+  yet; its OpenGL is 4.3 (Core Profile) …`), which separates "no usable
+  context" from "never reached the first frame".
+- **A stall that names the program's own function.** ntdll+0x40130 is where a
+  thread is only because it is inside a system call, and every waiting thread
+  reports the same thing. A thread stopped there has its x86 context saved in
+  its TEB's CPU area, so the report reads the program's own `Eip`, `Esp` and
+  `Ebp` out of it (Wine's i386 `CONTEXT`, whose offsets are fixed by winnt.h
+  and asserted by `tests/thread_profile.c`) and appends the guest's position
+  and its x86 frame chain: `| x86 at DarkAthena.exe+0x1a2b3c < RndrGL.DLL+0x…`.
+  The same address is appended to a first-chance fault (`x86=0x…`), so a fault
+  in translated code names a function of the program rather than a translated
+  address that names nothing.
 - **Caches on the card.** Mesa's on-disk shader cache is given a directory of
   its own, `sdmc:/switch/wine/cache`, and a 512 MB cap through
   `MESA_SHADER_CACHE_*` (and the `MESA_GLSL_*` names Mesa 20.1 reads), so a

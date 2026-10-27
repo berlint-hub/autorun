@@ -1,5 +1,6 @@
 /* Host test for the thread profiler's sample handling (source/thread_profile.h). */
 #include <assert.h>
+#include <stddef.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -23,11 +24,29 @@ static uint32_t read_stack32( uint64_t address )
     return stack32[(address - 0x2000) / 4];
 }
 
+/* Wine's i386 CONTEXT, laid out as winnt.h lays it out: the flags, six debug
+ * registers, the 112-byte floating point save area, four segment registers, the
+ * general registers, then Ebp, Eip, Cs, EFlags, Esp. A stall report reads a
+ * program's own registers through these offsets, and one that is off by a word
+ * still reads a plausible address -- which is worse than reading nothing. */
+struct i386_context_layout
+{
+    uint32_t context_flags;
+    uint32_t debug_registers[6];
+    uint8_t  float_save[112];
+    uint32_t segments[4];
+    uint32_t edi, esi, ebx, edx, ecx, eax, ebp, eip, seg_cs, eflags, esp, seg_ss;
+};
+
 int main(void)
 {
     uint64_t callers[8];
     uint32_t x86[8];
     unsigned int top[8], n, i;
+
+    assert( offsetof( struct i386_context_layout, ebp ) == NX_PROF_I386_EBP );
+    assert( offsetof( struct i386_context_layout, eip ) == NX_PROF_I386_EIP );
+    assert( offsetof( struct i386_context_layout, esp ) == NX_PROF_I386_ESP );
 
     /* At a gate: esp 0x2000 holds the return into the stub and its caller's return;
      * ebp 0x2010 -> 0x2020, whose saved ebp points down. */

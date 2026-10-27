@@ -2693,7 +2693,9 @@ NTSTATUS WINAPI NtQueryPerformanceCounter( LARGE_INTEGER *counter, LARGE_INTEGER
  * takes a deadline from that clock -- Sleep(), a frame pacer, a timeout around
  * a load -- waits for a moment that never arrives, and looks exactly like one
  * waiting for an event nobody sets. Dark Athena's main thread did that: a full
- * core of NtQuerySystemTime calls and not one frame drawn.
+ * core of NtQuerySystemTime calls and not one frame drawn. (Its clock now
+ * moves; the frame still does not come, and the stall report names the x86
+ * function it is standing in -- see the thread profiler.)
  *
  * Time since boot always moves, so the system time is the calendar clock read
  * once, at the first call, plus time since boot. It never goes backwards, it

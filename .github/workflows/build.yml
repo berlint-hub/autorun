@@ -71,6 +71,15 @@ jobs:
             horizon-wine/tests/log_repeat.c -o log_repeat
           ./log_repeat
 
+      # The profiler's sample handling, and the i386 CONTEXT offsets the stall
+      # report reads a program's own registers through.
+      - name: Thread profiler
+        run: |
+          cc -std=gnu11 -Wall -Wextra -Werror -O1 -g \
+            -I horizon-wine/source \
+            horizon-wine/tests/thread_profile.c -o thread_profile
+          ./thread_profile
+
       # The translator's code cache on the card: what one configuration is,
       # which one is given back first when the card has no room for another,
       # and that a card without a cache is left alone.
