@@ -100,6 +100,13 @@ static int fex_cache_remove( const char *path )
     return fex_cache_empty( path ) && !rmdir( path );
 }
 
+/* Whether `bucket` should be given up before `than`. */
+static int fex_cache_older( const struct fex_cache_bucket *bucket, const struct fex_cache_bucket *than )
+{
+    if (bucket->mtime != than->mtime) return bucket->mtime < than->mtime;
+    return strcmp( bucket->path, than->path ) < 0;
+}
+
 int fex_cache_prune( const char *root, unsigned long long limit, unsigned long long keep,
                      struct fex_cache_report *report )
 {
@@ -127,7 +134,9 @@ int fex_cache_prune( const char *root, unsigned long long limit, unsigned long l
         memset( &bucket, 0, sizeof(bucket) );
         if (!fex_cache_join( bucket.path, sizeof(bucket.path), cache, entry->d_name )) continue;
         if (stat( bucket.path, &st ) || !S_ISDIR( st.st_mode )) continue;
-        bucket.mtime = (long long)st.st_mtime;
+        /* The age is the newest file the configuration holds, not the
+         * directory's own time: a directory's time is when something in it
+         * last changed, which for a cache that is being written is now. */
         fex_cache_measure( &bucket );
         if (!bucket.bytes) continue;   /* a directory the translator has not filled yet */
         if (count == room)
@@ -158,9 +167,10 @@ int fex_cache_prune( const char *root, unsigned long long limit, unsigned long l
         return 1;
     }
     /* Oldest first: the configuration nobody has run for months is the one to
-     * give up, whatever it is called. */
+     * give up. Two written in the same second are ordered by name, so the same
+     * card gives up the same ones twice. */
     for (i = 1; i < count; i++)
-        for (j = i; j && buckets[j - 1].mtime > buckets[j].mtime; j--)
+        for (j = i; j && fex_cache_older( buckets + j, buckets + j - 1 ); j--)
         {
             struct fex_cache_bucket move = buckets[j];
 

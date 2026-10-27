@@ -1,0 +1,1 @@
+line 187: report.buckets_removed == 2 && report.kept == 301 [buckets 3, bytes 603, kept 201, removed 2, pruned 1, failed 0]

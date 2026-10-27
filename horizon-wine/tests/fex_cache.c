@@ -211,6 +211,35 @@ int main( void )
     CHECK( report.buckets == 2 && report.bytes == 802 && report.buckets_removed == 1 );
     CHECK( report.kept == 201 && !bucket_exists( "aa" ) && bucket_exists( "zz" ) );
 
+    /* A configuration's age is the newest file it holds, not the directory it
+     * is in: writing anything into a directory makes the directory look as if
+     * it had just been written, and a prune that believed that would never
+     * find the oldest configuration on a card. */
+    reset_tree( 1 );
+    make_bucket( "zz", 100, now - 3000 );              /* 101 bytes, old */
+    make_bucket( "aa", 200, now - 1000 );              /* 201 bytes, newer */
+    {
+        char dir[600];
+        struct utimbuf stamp = { now, now };
+
+        path_of( dir, sizeof(dir), "zz" );
+        CHECK( !utime( dir, &stamp ) );                /* the directory is "now" */
+    }
+    CHECK( fex_cache_prune( root, 250, 250, &report ) );
+    note_report( &report );
+    CHECK( report.buckets == 2 && report.bytes == 302 && report.buckets_removed == 1 );
+    CHECK( report.kept == 201 && !bucket_exists( "zz" ) && bucket_exists( "aa" ) );
+
+    /* Two written in the same second go in the order their names sort, so the
+     * same card gives up the same ones twice whatever its listing says. */
+    reset_tree( 1 );
+    make_bucket( "bb", 100, now - 2000 );              /* 101 bytes, made first */
+    make_bucket( "aa", 100, now - 2000 );              /* 101 bytes, same second */
+    CHECK( fex_cache_prune( root, 150, 150, &report ) );
+    note_report( &report );
+    CHECK( report.buckets == 2 && report.bytes == 202 && report.buckets_removed == 1 );
+    CHECK( report.kept == 101 && !bucket_exists( "aa" ) && bucket_exists( "bb" ) );
+
     /* A root that is not there is not a fault; the cache is simply not made
      * yet, which is what every first run looks like. */
     CHECK( fex_cache_prune( "/nonexistent/wine-nx", 400, 100, &report ) );
