@@ -159,6 +159,20 @@ jobs:
           python3 horizon-wine/tests/check_raw_mouse.py
           python3 horizon-wine/tests/check_ll_hooks.py
 
+      # The screen and input driver, its OpenGL surfaces and the server's
+      # thread and file objects: real functions sliced out of the driver, run
+      # against stubs under ASan and UBSan.  The host compiler is gcc here, and
+      # the two that default to clang are told so.
+      - name: Screen, input and server host tests
+        run: |
+          export WINE_NX_HOST_CC=cc
+          for t in check_pointer_events check_popup_restore check_gl_surfaces \
+                   check_render_overhead check_horizon_thread_fds \
+                   check_capture_context check_wow64_unix_tables \
+                   check_horizon_thread_handles; do
+            python3 "horizon-wine/tests/$t.py"
+          done
+
       - name: Floating keyboard and controls overlay
         run: |
           cc -std=gnu11 -Wall -Wextra -Werror -O1 -g $(sdl2-config --cflags) \
