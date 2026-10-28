@@ -5055,6 +5055,25 @@ static void set_large_address_space(void)
             reserve_area( (void *)0xfff00000, (void *)0xffff0000 );
         }
         else user_space_wow_limit = limit_2g - 1;
+
+#ifdef __SWITCH__
+        /* A 32-bit program that runs out of address space fails a long way
+         * from here, and the ceiling it was given is the first thing worth
+         * knowing: an image without IMAGE_FILE_LARGE_ADDRESS_AWARE may only
+         * use 2 GB even though the host has more, and the flag in its header
+         * is what lifts that to 4 GB. Said once, where the limit is decided. */
+        if (is_wow64() && &wine_nx_runtime_trace)
+        {
+            char msg[192];
+            const int large = (main_image_info.ImageCharacteristics & IMAGE_FILE_LARGE_ADDRESS_AWARE) != 0;
+
+            snprintf( msg, sizeof(msg), "[VA] 32-bit program: address space up to %p (%s)",
+                      (void *)(ULONG_PTR)user_space_wow_limit,
+                      large ? "the image is Large Address Aware"
+                            : "the image is not Large Address Aware, so 2 GB; setting that bit lifts it to 4 GB" );
+            wine_nx_runtime_trace( msg );
+        }
+#endif
     }
     else
     {

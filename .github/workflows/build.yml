@@ -35,6 +35,12 @@ jobs:
       - name: FEX 2610 memory patch
         run: python3 horizon-wine/tests/check_fex_2610_patch.py
 
+      # The flag that decides 2 GiB or 4 GiB for a 32-bit program: the tool
+      # edits one bit and the checksum, and the test is what says it does not
+      # edit the rest of the image.
+      - name: Large Address Aware tool
+        run: python3 horizon-wine/tests/check_large_address_aware.py
+
       - name: Input profiles
         run: |
           cc -std=gnu11 -Wall -Wextra -Werror -O1 -g \

@@ -323,6 +323,18 @@ runtime; the full package now ships the Mesa 26 one.
   Wine reserves the program's low address space early, keeps its allocations
   clear of the memory Horizon hands to libnx, and leaves 32-bit programs'
   Vulkan memory in the driver's own mappings.
+  Within that space Wine gives a 32-bit program the ceiling its own PE header
+  asks for: 2 GiB of user addresses unless the image is
+  `IMAGE_FILE_LARGE_ADDRESS_AWARE`, 4 GiB when it is
+  (`set_large_address_space()`, `dlls/ntdll/unix/virtual.c`; the same bit
+  caps `HeapCreate` in `dlls/kernel32/heap.c`). The runtime names the ceiling
+  it chose, `[VA] 32-bit program: address space up to ...`, because a program
+  that runs out fails a long way from the decision.
+  `horizon-wine/tools/large-address-aware.py` reports and sets that bit on a
+  game's executable from the host -- the well-known patchers are Windows GUI
+  programs, and a card's game is a file on the host's disk anyway. It is not
+  a way past the launcher's "Address space unavailable" dialog: that one is
+  about the forwarder's own address space, and no bit in a game changes it.
 - **Launcher.** An SDL2 launcher with a Home and a Library view, per-game
   options, a controls editor, SteamGridDB artwork, and forwarder installation
   (`horizon-wine/source/launcher*.c`, `forwarder.c`). Add Game begins with an
@@ -568,8 +580,9 @@ changes, and fails if the pinned text moves.
   the DirectShow and DMO DLLs, which lay out their own filter data. The
   program waits in `run-next.txt` and starts when the runtime starts again; the
   mark is `registry/components-1.done`, so a reset registry runs it again.
-- A 32-bit address space leaves a program about 2 GiB of addresses and caps the
-  whole process at 2 GiB of memory.
+- A 32-bit address space leaves a program about 2 GiB of addresses, and Wine
+  gives a 32-bit program the 2 GiB its own header asks for unless the image is
+  Large Address Aware, which lifts it to 4 GiB.
 - AMD64 programs require the 39-bit application forwarder and remain
   experimental.
 - One program at a time; one controller.
