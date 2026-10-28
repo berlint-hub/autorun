@@ -957,6 +957,11 @@ static void wine_nx_desktop_init( void )
               WINE_NX_FB_W, WINE_NX_FB_H );
 }
 
+/* The stick's cursor lives on the desktop (runtime.c, wine_nx_pointer): when
+ * the desktop changes size the arrow has to be able to reach the new edges. */
+static void wine_nx_pointer_rebound( int width, int height );
+static void wine_nx_cursor_move( int x, int y );
+
 /* A program setting a display mode (ddraw/Direct3D SetDisplayMode) switches
  * the screen to its resolution: win32u re-registers the display devices right
  * after, and both the physical and current mode must then be the program's,
@@ -976,6 +981,9 @@ void wine_nx_desktop_set( int width, int height )
                   width, height, wine_nx_desktop_w, wine_nx_desktop_h );
         wine_nx_desktop_w = width;
         wine_nx_desktop_h = height;
+        /* The arrow followed the pointer in the old mode's pixels; in the new
+         * one it keeps the place in the picture, and can reach the last one. */
+        wine_nx_pointer_rebound( width, height );
     }
     wine_nx_desktop_mode_w = width;
     wine_nx_desktop_mode_h = height;
@@ -1000,6 +1008,7 @@ void wine_nx_desktop_start_size( int width, int height )
                       width, height, wine_nx_desktop_w, wine_nx_desktop_h );
             wine_nx_desktop_w = width;
             wine_nx_desktop_h = height;
+            wine_nx_pointer_rebound( width, height );
         }
     }
 }
@@ -1174,9 +1183,16 @@ void wine_nx_panel_to_screen( int px, int py, double *x, double *y )
     if (y) *y = (py - off_y) / scale_y;
 }
 
-/* The drawn cursor, guarded by wine_nx_fb_mutex. */
+/* The drawn cursor, guarded by wine_nx_fb_mutex.  x,y are panel pixels: the
+ * arrow is painted on the panel, while the pointer it follows (wine_nx_pointer)
+ * lives in the desktop's own coordinates. */
 static struct pointer_cursor wine_nx_cursor =
     { .x = WINE_NX_FB_W / 2, .y = WINE_NX_FB_H / 2, .width = WINE_NX_FB_W, .height = WINE_NX_FB_H };
+/* Where the pointer was in desktop coordinates, so the panel point can be
+ * worked out again when the fit changes (a display mode, a surface taking the
+ * screen) and by a picture the compositor does not draw. */
+static double wine_nx_cursor_screen_x = WINE_NX_FB_W / 2.0;
+static double wine_nx_cursor_screen_y = WINE_NX_FB_H / 2.0;
 static int wine_nx_cursor_moved;
 static int wine_nx_cursor_visible = 1;  /* 0 while the program hides the mouse cursor */
 
@@ -1232,6 +1248,34 @@ static void wine_nx_pointer_setup_cb( void )
 static void wine_nx_pointer_setup( void )
 {
     pthread_once( &wine_nx_pointer_once, wine_nx_pointer_setup_cb );
+}
+
+/* The desktop changed size under the cursor: a program's display mode, a
+ * surface that takes the screen at its own resolution, or the way back to the
+ * default desktop.  The arrow keeps the place it had in the picture, and it can
+ * reach the new last pixel -- left at the old size it stopped a third of the
+ * way across a larger screen with nothing to tell the player why.  What Wine
+ * was last told stays as it is: the next poll or take sends the position the
+ * program is to read, and the motion still waiting in the pointer's count is
+ * the stick's own and does not move with the screen. */
+static void wine_nx_pointer_rebound( int width, int height )
+{
+    int x, y;
+
+    if (width < 1 || height < 1) return;
+    wine_nx_pointer_setup();
+    pthread_mutex_lock( &wine_nx_pointer_mutex );
+    pointer_cursor_resize( &wine_nx_pointer, width, height );
+    x = (int)wine_nx_pointer.x;
+    y = (int)wine_nx_pointer.y;
+    /* The program is about to be told a place in the new screen, not the old
+     * one's count: an unpumped move would otherwise go out as a jump back. */
+    wine_nx_pointer_moved = 1;
+    pthread_mutex_unlock( &wine_nx_pointer_mutex );
+    /* The arrow follows it, in the new screen's pixels, and the compositor
+     * draws the frame that shows it there (outside the pointer's lock, as the
+     * poll does). */
+    wine_nx_cursor_move( x, y );
 }
 
 /* Take the screen from the text console and bring up a linear framebuffer. */
@@ -1406,6 +1450,7 @@ static void *wine_nx_screen_acquire( int width, int height, int vulkan )
                   width, height, wine_nx_desktop_w, wine_nx_desktop_h );
         wine_nx_desktop_w = width;
         wine_nx_desktop_h = height;
+        wine_nx_pointer_rebound( width, height );
     }
     else if (width < 1 && wine_nx_desktop_mode_w &&
              (wine_nx_desktop_w != wine_nx_desktop_mode_w || wine_nx_desktop_h != wine_nx_desktop_mode_h))
@@ -1417,6 +1462,7 @@ static void *wine_nx_screen_acquire( int width, int height, int vulkan )
                   wine_nx_desktop_mode_w, wine_nx_desktop_mode_h, wine_nx_desktop_w, wine_nx_desktop_h );
         wine_nx_desktop_w = wine_nx_desktop_mode_w;
         wine_nx_desktop_h = wine_nx_desktop_mode_h;
+        wine_nx_pointer_rebound( wine_nx_desktop_w, wine_nx_desktop_h );
     }
 
     pthread_mutex_lock( &wine_nx_fb_mutex );
@@ -1568,6 +1614,7 @@ static void wine_nx_screen_return( void )
                   wine_nx_desktop_default_w, wine_nx_desktop_default_h );
         wine_nx_desktop_w = wine_nx_desktop_default_w;
         wine_nx_desktop_h = wine_nx_desktop_default_h;
+        wine_nx_pointer_rebound( wine_nx_desktop_w, wine_nx_desktop_h );
     }
     log_line( "[NXGL] screen returned to the %s", compositor ? "compositor" : "framebuffer" );
     /* The program's surface is gone by now (wine_nx_gl_release_window), so
@@ -1728,23 +1775,61 @@ void wine_nx_fb_present(void)
 
 static void wine_nx_cursor_move( int x, int y )
 {
+    double screen_x = x, screen_y = y;
+    int px, py, visible, old_x, old_y;
+
     /* x,y are desktop coordinates; the arrow is painted on the panel. */
-    wine_nx_screen_to_panel( x, y, &x, &y );
+    wine_nx_screen_to_panel( x, y, &px, &py );
     pthread_mutex_lock( &wine_nx_fb_mutex );
-    if (x != (int)wine_nx_cursor.x || y != (int)wine_nx_cursor.y)
+    /* The desktop point is kept too: the fit can change under a still cursor
+     * (a display mode, the surface holding the screen), and then the panel
+     * point and every picture the compositor maps are worked out from it
+     * again rather than left where the old fit put them. */
+    wine_nx_cursor_screen_x = screen_x;
+    wine_nx_cursor_screen_y = screen_y;
+    old_x = (int)wine_nx_cursor.x;
+    old_y = (int)wine_nx_cursor.y;
+    pointer_cursor_place( &wine_nx_cursor, px, py );
+    if (wine_nx_cursor_visible &&
+        ((int)wine_nx_cursor.x != old_x || (int)wine_nx_cursor.y != old_y))
     {
-        pointer_cursor_place( &wine_nx_cursor, x, y );
-        if (wine_nx_cursor_visible)
-        {
-            wine_nx_cursor_moved = 1;
-            wine_nx_fb_update_present_hint();
-        }
+        wine_nx_cursor_moved = 1;
+        wine_nx_fb_update_present_hint();
     }
     x = (int)wine_nx_cursor.x;
     y = (int)wine_nx_cursor.y;
-    int visible = wine_nx_cursor_visible;
+    visible = wine_nx_cursor_visible;
     pthread_mutex_unlock( &wine_nx_fb_mutex );
     wine_nx_compositor_cursor( x, y, visible );
+}
+
+/* Where the arrow goes on the panel, for a picture the compositor does not
+ * draw: a program's own OpenGL or Vulkan frame has no compositor over it, so
+ * the arrow is copied into that picture just before it is shown
+ * (dlls/win32u/winnx_opengl.c and vulkan.c).  Worked out from the desktop
+ * point and the fit in force now, so the arrow is where the compositor would
+ * have drawn it; 0 when the program hid it. */
+int wine_nx_cursor_panel( int *x, int *y )
+{
+    double screen_x, screen_y;
+    int visible, px, py;
+
+    pthread_mutex_lock( &wine_nx_fb_mutex );
+    visible = wine_nx_cursor_visible;
+    screen_x = wine_nx_cursor_screen_x;
+    screen_y = wine_nx_cursor_screen_y;
+    pthread_mutex_unlock( &wine_nx_fb_mutex );
+    if (!visible) return 0;
+    wine_nx_screen_to_panel( screen_x, screen_y, &px, &py );
+    /* The arrow's tip is a pixel of the panel: a picture mapped onto the panel
+     * cannot put it past the last one. */
+    if (px > WINE_NX_FB_W - 1) px = WINE_NX_FB_W - 1;
+    if (py > WINE_NX_FB_H - 1) py = WINE_NX_FB_H - 1;
+    if (px < 0) px = 0;
+    if (py < 0) py = 0;
+    if (x) *x = px;
+    if (y) *y = py;
+    return 1;
 }
 
 /* The program showed or hid the mouse cursor. Programs that draw their own,

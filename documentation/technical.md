@@ -61,6 +61,23 @@ runtime; the full package now ships the Mesa 26 one.
   completion rules of wineserver's `async_set_result`. Horizon has only IPv4:
   an AF_INET6 socket is IPv4 underneath, reaching `::`, `::ffff:a.b.c.d` and
   `::1`.
+- **The mouse cursor.** Horizon has no hardware cursor, so the arrow is drawn
+  by us, the classic 12x19 Windows sprite in `horizon-wine/source/
+  pointer_cursor.h`. Where it is drawn depends on who has the screen: the
+  compositor draws it over the window layers, the framebuffer path paints it
+  into the back buffer just before the frame is queued, and while a program's
+  own OpenGL or Vulkan surface holds the display -- where there is no
+  compositor to draw it -- it is copied into that picture just before it is
+  shown, the same place the on-screen keyboard goes (`winnx_opengl.c`,
+  `vulkan.c`). That copy overwrites whole pixels without blending, so it goes
+  in a run of opaque sprite pixels at a time
+  (`horizon-wine/source/pointer_overlay.h`, `horizon-wine/tests/
+  pointer_overlay.c`); the runs are the panel's own arrow scaled onto the
+  picture, so it lands where the compositor would have put it. The arrow
+  follows the pointer in the desktop's coordinates and is mapped through the
+  present's fit every time it is drawn, so a display mode or a surface that
+  changes the screen moves it with the picture, and the stick's cursor keeps
+  the same place in the new screen and can reach its edges.
 - **Graphics.** Windows are drawn as layers of one OpenGL compositor, or
   straight to the framebuffer. The two are not two speeds of the same thing:
   the framebuffer receives *window pixels*, so it shows what is painted with

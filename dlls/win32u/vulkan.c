@@ -61,6 +61,7 @@ static pthread_mutex_t present_lock = PTHREAD_MUTEX_INITIALIZER;
 /* Header-only, and the Scaling setting's numbers are needed whatever this file
  * is built for: a host build simply never changes the mode. */
 #include "../../horizon-wine/source/screen_fit.h"
+#include "../../horizon-wine/source/pointer_overlay.h"
 
 /* The Upscaling setting a scaled swapchain is made with: 0 bilinear, 1 FSR 1.0
  * (EASU then RCAS, tools/fshack_*.comp), 2 nearest sampling. sharpness is 0 to
@@ -111,6 +112,9 @@ extern void wine_nx_present_fit( int src_w, int src_h, int src_x, int src_y,
                                  int *dst_x, int *dst_y, int *dst_w, int *dst_h ) __attribute__((weak));
 extern int wine_nx_screenshot_requested( void ) __attribute__((weak));
 extern int wine_nx_screenshot_take( const void *pixels, int width, int height, int stride_px, int format ) __attribute__((weak));
+/* The arrow whose tip is at this panel pixel (pointer_cursor.h): the compositor
+ * has stepped aside for this program's surface, so nothing else draws it. */
+extern int wine_nx_cursor_panel( int *x, int *y ) __attribute__((weak));
 #endif
 
 /* The per-game "panel follows the game" bridge (horizon-wine/source/
@@ -357,11 +361,14 @@ struct swapchain
 {
     struct vulkan_swapchain obj;
 #ifdef __SWITCH__
-    /* The floating keyboard's copy into the host images (nx_osk_present). */
+    /* The floating keyboard's copy into the host images (nx_osk_present), and
+     * the mouse arrow's (nx_cursor_present): both go into the picture just
+     * before it is shown. */
     VkFormat nx_format;
     VkExtent2D nx_extent;
     BOOL nx_osk_usable;
     struct nx_osk_overlay *nx_osk;
+    struct nx_cursor_overlay *nx_cursor;
 #endif
 #ifdef WINE_NX_MESA_SWITCH
     uint64_t nx_last_present;
@@ -392,6 +399,7 @@ struct swapchain
 
 #ifdef __SWITCH__
 static void nx_osk_free( struct vulkan_device *device, struct nx_osk_overlay *osk );
+static void nx_cursor_free( struct vulkan_device *device, struct nx_cursor_overlay *cursor );
 #endif
 
 static struct swapchain *swapchain_from_handle( VkSwapchainKHR handle )
@@ -3373,11 +3381,10 @@ void win32u_vkDestroySwapchainKHR( VkDevice client_device, VkSwapchainKHR client
     }
 
 #ifdef __SWITCH__
-    if (swapchain->nx_osk)
-    {
+    if (swapchain->nx_osk || swapchain->nx_cursor)
         device->p_vkDeviceWaitIdle( device->host.device );
-        nx_osk_free( device, swapchain->nx_osk );
-    }
+    if (swapchain->nx_osk) nx_osk_free( device, swapchain->nx_osk );
+    if (swapchain->nx_cursor) nx_cursor_free( device, swapchain->nx_cursor );
 #endif
     device->p_vkDestroySwapchainKHR( device->host.device, swapchain->obj.host.swapchain, NULL );
     instance->p_remove_object( instance, &swapchain->obj.obj );
@@ -4165,6 +4172,297 @@ static void nx_osk_present( struct vulkan_queue *queue, VkPresentInfoKHR *presen
     present_info->waitSemaphoreCount = 1;
     present_info->pWaitSemaphores = &per->done;
 }
+
+/* The mouse arrow (horizon-wine/source/pointer_cursor.h), copied into the image
+ * about to be shown.
+ *
+ * While a program's own Vulkan surface has the screen -- a D3D game behind
+ * DXVK is what this is -- the compositor has stepped aside and nothing draws
+ * the arrow: the mouse moved and the pause menu could not be clicked, with no
+ * cursor to say where the click would land.  The keyboard above is copied in
+ * the same place and the same way; this is the arrow, and it goes in after the
+ * keyboard because it goes on top of it.
+ *
+ * The sprite is opaque only where the arrow has a shape, and a buffer-image
+ * copy overwrites whole pixels without blending, so the arrow goes in a run of
+ * opaque pixels at a time (horizon-wine/source/pointer_overlay.h): a
+ * transparent pixel copied whole would be a black one on the glass.  The
+ * picture covers the panel, so the runs are the panel's own 12x19 arrow scaled
+ * onto the image, and it lands where the compositor would have put it.
+ *
+ * The arrow moves every frame a stick is held, so the command buffer is the
+ * one thing recorded again: the buffers, semaphores and command pool are made
+ * once per swapchain and image, and only the image offsets change.  An image
+ * comes back to the program only once it has been shown, which is after the
+ * copy into it finished, so its command buffer is free to record again.
+ */
+struct nx_cursor_image
+{
+    VkCommandBuffer cmd;
+    VkSemaphore done;
+    VkBuffer buffer;          /* the arrow's own pixels, its runs read from here */
+    VkDeviceMemory memory;
+    void *pixels;
+    int recorded;             /* the command buffer holds these runs */
+    int recorded_px, recorded_py, recorded_count;
+};
+
+struct nx_cursor_overlay
+{
+    uint32_t count, family;
+    VkImage *images;
+    struct nx_cursor_image *per;
+    VkCommandPool pool;
+    int width, height;        /* the arrow's own rectangle in the picture */
+    BOOL failed;
+};
+
+static void nx_cursor_release( struct vulkan_device *device, struct nx_cursor_overlay *cursor )
+{
+    uint32_t i;
+
+    for (i = 0; cursor->per && i < cursor->count; i++)
+    {
+        struct nx_cursor_image *per = &cursor->per[i];
+
+        device->p_vkDestroySemaphore( device->host.device, per->done, NULL );
+        device->p_vkDestroyBuffer( device->host.device, per->buffer, NULL );
+        device->p_vkFreeMemory( device->host.device, per->memory, NULL );
+    }
+    if (cursor->pool) device->p_vkDestroyCommandPool( device->host.device, cursor->pool, NULL );
+    cursor->pool = VK_NULL_HANDLE;
+    if (cursor->per) memset( cursor->per, 0, cursor->count * sizeof(*cursor->per) );
+    cursor->width = cursor->height = 0;
+}
+
+static void nx_cursor_free( struct vulkan_device *device, struct nx_cursor_overlay *cursor )
+{
+    nx_cursor_release( device, cursor );
+    free( cursor->per );
+    free( cursor->images );
+    free( cursor );
+}
+
+/* The runs, in the image: each one copied from the arrow's own buffer. */
+static VkResult nx_cursor_record( struct vulkan_device *device, struct swapchain *swapchain, uint32_t i,
+                                  const struct pointer_overlay_run *runs, int count, int px, int py,
+                                  int origin_x, int origin_y, struct mempool *pool )
+{
+    struct nx_cursor_overlay *cursor = swapchain->nx_cursor;
+    struct nx_cursor_image *per = &cursor->per[i];
+    VkCommandBufferBeginInfo begin = {.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
+    VkImageMemoryBarrier barrier = {.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
+    VkBufferImageCopy *regions;
+    VkCommandBuffer cmd = per->cmd;
+    VkResult res;
+    int r;
+
+    if (!(regions = mem_alloc( pool, count * sizeof(*regions) ))) return VK_ERROR_OUT_OF_HOST_MEMORY;
+
+    /* Not pending: this image was shown before it came back to the program,
+     * and this copy went out ahead of that present. */
+    device->p_vkResetCommandBuffer( cmd, 0 );
+    device->p_vkBeginCommandBuffer( cmd, &begin );
+    /* Whatever wrote the image before, in this queue or waited for, is done:
+     * the program's frame stays, the arrow goes over it. */
+    barrier.oldLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+    barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    barrier.srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT;
+    barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    barrier.srcQueueFamilyIndex = barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.image = cursor->images[i];
+    barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    barrier.subresourceRange.levelCount = barrier.subresourceRange.layerCount = 1;
+    device->p_vkCmdPipelineBarrier( cmd, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                                    0, 0, NULL, 0, NULL, 1, &barrier );
+    for (r = 0; r < count && r < POINTER_OVERLAY_MAX_RUNS; r++)
+    {
+        const struct pointer_overlay_run *run = &runs[r];
+        int bx = run->x0 - origin_x, by = run->y0 - origin_y;
+
+        memset( &regions[r], 0, sizeof(regions[r]) );
+        regions[r].bufferOffset = (VkDeviceSize)((size_t)by * cursor->width + bx) * 4;
+        regions[r].bufferRowLength = cursor->width;
+        regions[r].bufferImageHeight = cursor->height;
+        regions[r].imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        regions[r].imageSubresource.layerCount = 1;
+        regions[r].imageOffset.x = run->x0;
+        regions[r].imageOffset.y = run->y0;
+        regions[r].imageExtent.width = run->x1 - run->x0;
+        regions[r].imageExtent.height = run->y1 - run->y0;
+        regions[r].imageExtent.depth = 1;
+    }
+    device->p_vkCmdCopyBufferToImage( cmd, per->buffer, cursor->images[i],
+                                      VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, count, regions );
+    barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    barrier.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+    barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    barrier.dstAccessMask = 0;
+    device->p_vkCmdPipelineBarrier( cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
+                                    0, 0, NULL, 0, NULL, 1, &barrier );
+    if ((res = device->p_vkEndCommandBuffer( cmd ))) return res;
+    per->recorded = 1;
+    per->recorded_px = px;
+    per->recorded_py = py;
+    per->recorded_count = count;
+    return VK_SUCCESS;
+}
+
+/* Buffers, command buffers and semaphores for an arrow of that size, made again
+ * when the picture's scale changes it (or the queue family does). */
+static BOOL nx_cursor_prepare( struct vulkan_device *device, struct swapchain *swapchain, uint32_t family,
+                               int width, int height )
+{
+    struct vulkan_physical_device *physical_device = device->physical_device;
+    struct nx_cursor_overlay *cursor = swapchain->nx_cursor;
+    VkPhysicalDeviceMemoryProperties props;
+    uint32_t i, t;
+
+    if (!cursor)
+    {
+        if (!(cursor = swapchain->nx_cursor = calloc( 1, sizeof(*cursor) ))) return FALSE;
+        if (device->p_vkGetSwapchainImagesKHR( device->host.device, swapchain->obj.host.swapchain, &cursor->count, NULL ) ||
+            !(cursor->images = calloc( cursor->count, sizeof(*cursor->images) )) ||
+            !(cursor->per = calloc( cursor->count, sizeof(*cursor->per) )) ||
+            device->p_vkGetSwapchainImagesKHR( device->host.device, swapchain->obj.host.swapchain, &cursor->count, cursor->images ))
+            cursor->failed = TRUE;
+    }
+    if (cursor->failed) return FALSE;
+    if (cursor->pool && cursor->family == family && cursor->width == width && cursor->height == height) return TRUE;
+
+    if (cursor->pool) device->p_vkDeviceWaitIdle( device->host.device );
+    nx_cursor_release( device, cursor );
+    physical_device->instance->p_vkGetPhysicalDeviceMemoryProperties( physical_device->host.physical_device, &props );
+    {
+        VkCommandPoolCreateInfo pool_info = {.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};
+
+        pool_info.queueFamilyIndex = family;
+        if (device->p_vkCreateCommandPool( device->host.device, &pool_info, NULL, &cursor->pool )) goto failed;
+    }
+    cursor->family = family;
+    cursor->width = width;
+    cursor->height = height;
+    for (i = 0; i < cursor->count; i++)
+    {
+        struct nx_cursor_image *per = &cursor->per[i];
+        VkBufferCreateInfo buffer_info = {.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
+        VkMemoryAllocateInfo alloc = {.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
+        VkCommandBufferAllocateInfo cmd_info = {.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
+        VkSemaphoreCreateInfo semaphore_info = {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
+        VkMemoryRequirements req;
+
+        buffer_info.size = (VkDeviceSize)width * height * 4;
+        buffer_info.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+        if (device->p_vkCreateBuffer( device->host.device, &buffer_info, NULL, &per->buffer )) goto failed;
+        device->p_vkGetBufferMemoryRequirements( device->host.device, per->buffer, &req );
+        for (t = 0; t < props.memoryTypeCount; t++)
+            if ((req.memoryTypeBits & (1u << t)) &&
+                (props.memoryTypes[t].propertyFlags & (VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)) ==
+                    (VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT))
+                break;
+        if (t == props.memoryTypeCount) goto failed;
+        alloc.allocationSize = req.size;
+        alloc.memoryTypeIndex = t;
+        if (device->p_vkAllocateMemory( device->host.device, &alloc, NULL, &per->memory ) ||
+            device->p_vkBindBufferMemory( device->host.device, per->buffer, per->memory, 0 ) ||
+            device->p_vkMapMemory( device->host.device, per->memory, 0, buffer_info.size, 0, &per->pixels ) ||
+            device->p_vkCreateSemaphore( device->host.device, &semaphore_info, NULL, &per->done ))
+            goto failed;
+        cmd_info.commandPool = cursor->pool;
+        cmd_info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+        cmd_info.commandBufferCount = 1;
+        if (device->p_vkAllocateCommandBuffers( device->host.device, &cmd_info, &per->cmd )) goto failed;
+    }
+    nx_vk_trace( "[NXVK] the mouse arrow is %dx%d pixels of the picture, on %u images", width, height,
+                 cursor->count );
+    return TRUE;
+
+failed:
+    ERR( "could not set up the mouse arrow's copy\n" );
+    nx_vk_trace( "[NXVK] mouse arrow: could not set up its copy into the swapchain images" );
+    nx_cursor_release( device, cursor );
+    cursor->failed = TRUE;
+    return FALSE;
+}
+
+/* The arrow over the image this present shows, when it is up.  The present then
+ * waits for the copy, which waits for what the present waited for -- after the
+ * keyboard's copy, so the arrow is over it. */
+static void nx_cursor_present( struct vulkan_queue *queue, VkPresentInfoKHR *present_info,
+                               const VkSwapchainKHR *client_swapchains, struct mempool *pool )
+{
+    struct pointer_overlay_run runs[POINTER_OVERLAY_MAX_RUNS];
+    struct nx_cursor_image *per;
+    struct vulkan_device *device = queue->device;
+    VkSubmitInfo submit = {.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO};
+    struct swapchain *swapchain;
+    VkPipelineStageFlags *stages;
+    uint32_t index, i;
+    int px, py, count, origin_x, origin_y, width, height, r;
+
+    if (present_info->swapchainCount != 1) return;
+    swapchain = swapchain_from_handle( client_swapchains[0] );
+    if (!swapchain->nx_osk_usable) return;
+    if (!&wine_nx_cursor_panel || !wine_nx_cursor_panel( &px, &py )) return;
+    if (!(count = pointer_overlay_runs( px, py, 1280, 720, swapchain->nx_extent.width,
+                                        swapchain->nx_extent.height, runs )))
+        return;
+    /* Where the arrow's own rectangle starts, and how large it is before the
+     * picture's edges cut it: the runs are in the image's pixels.  The size is
+     * the picture's scale of the arrow and nothing else -- worked out from the
+     * tip, one pixel of movement would round it up or down, and the buffers
+     * behind it would be made again on every frame the arrow crossed that
+     * pixel, with the queue waited out first. */
+    origin_x = (int)((long long)px * swapchain->nx_extent.width / 1280);
+    origin_y = (int)((long long)py * swapchain->nx_extent.height / 720);
+    width = (int)(((long long)POINTER_CURSOR_W * swapchain->nx_extent.width + 1279) / 1280);
+    height = (int)(((long long)POINTER_CURSOR_H * swapchain->nx_extent.height + 719) / 720);
+    if (width < 1 || height < 1) return;
+    if (origin_x + width > (int)swapchain->nx_extent.width) width = (int)swapchain->nx_extent.width - origin_x;
+    if (origin_y + height > (int)swapchain->nx_extent.height) height = (int)swapchain->nx_extent.height - origin_y;
+    if (width < 1 || height < 1) return;
+    if (!nx_cursor_prepare( device, swapchain, queue->info.queueFamilyIndex, width, height )) return;
+    index = present_info->pImageIndices[0];
+    if (index >= swapchain->nx_cursor->count) return;
+    per = &swapchain->nx_cursor->per[index];
+    if (!per->pixels || !per->cmd) return;
+
+    /* The runs in this image's own buffer, in the arrow's grid: a run carries
+     * the sprite pixels the picture will show, so the copy needs no scaling of
+     * its own.  White and black are the same two bytes in either order. */
+    for (i = 0; i < (uint32_t)count; i++)
+    {
+        const struct pointer_overlay_run *run = &runs[i];
+        uint32_t *pixels = per->pixels;
+        int bx0 = run->x0 - origin_x, bx1 = run->x1 - origin_x;
+        int by0 = run->y0 - origin_y, by1 = run->y1 - origin_y;
+        int bx, by;
+
+        for (by = by0; by < by1; by++)
+            for (bx = bx0; bx < bx1; bx++)
+            {
+                if (bx < 0 || bx >= width || by < 0 || by >= height) continue;
+                pixels[(size_t)by * width + bx] = pointer_overlay_pixel( run, bx - bx0 );
+            }
+    }
+    if (!per->recorded || per->recorded_px != px || per->recorded_py != py || per->recorded_count != count)
+        if (nx_cursor_record( device, swapchain, index, runs, count, px, py, origin_x, origin_y, pool ))
+            return;
+
+    if (!(stages = mem_alloc( pool, sizeof(*stages) * (present_info->waitSemaphoreCount + 1) ))) return;
+    for (r = 0; r < (int)present_info->waitSemaphoreCount; r++) stages[r] = VK_PIPELINE_STAGE_TRANSFER_BIT;
+    submit.waitSemaphoreCount = present_info->waitSemaphoreCount;
+    submit.pWaitSemaphores = present_info->pWaitSemaphores;
+    submit.pWaitDstStageMask = stages;
+    submit.commandBufferCount = 1;
+    submit.pCommandBuffers = &per->cmd;
+    submit.signalSemaphoreCount = 1;
+    submit.pSignalSemaphores = &per->done;
+    if (device->p_vkQueueSubmit( queue->host.queue, 1, &submit, VK_NULL_HANDLE )) return;
+    present_info->waitSemaphoreCount = 1;
+    present_info->pWaitSemaphores = &per->done;
+}
+
 #endif
 
 static VkResult win32u_vkQueuePresentKHR( VkQueue client_queue, const VkPresentInfoKHR *client_present_info )
@@ -4316,6 +4614,9 @@ static VkResult win32u_vkQueuePresentKHR( VkQueue client_queue, const VkPresentI
 #endif
 #ifdef __SWITCH__
     nx_osk_present( queue, present_info, client_swapchains, &pool );
+    /* Over the keyboard, as the compositor draws it: the arrow is the last
+     * thing on the picture, the way it is the last thing on the panel. */
+    nx_cursor_present( queue, present_info, client_swapchains, &pool );
 #endif
 #ifdef WINE_NX_MESA_SWITCH
     if (present_info->swapchainCount)

@@ -33,6 +33,7 @@
 #include "../../horizon-wine/source/graphics_config.h"
 #include "../../horizon-wine/source/thread_profile.h"
 #include "../../horizon-wine/source/gl_entries.h"
+#include "../../horizon-wine/source/pointer_overlay.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(wgl);
 
@@ -48,6 +49,9 @@ extern void wine_nx_desktop_size( int *width, int *height ) __attribute__((weak)
 extern void wine_nx_runtime_trace( const char *msg ) __attribute__((weak));
 extern int wine_nx_screenshot_requested( void ) __attribute__((weak));
 extern int wine_nx_screenshot_take( const void *pixels, int width, int height, int stride_px, int format ) __attribute__((weak));
+/* The arrow whose tip is at this panel pixel (pointer_cursor.h), for a picture
+ * the compositor does not draw. */
+extern int wine_nx_cursor_panel( int *x, int *y ) __attribute__((weak));
 
 static const struct egl_platform *egl;
 static const struct opengl_funcs *funcs;
@@ -706,6 +710,149 @@ static void nx_osk_draw( struct opengl_drawable *base )
     funcs->p_glPixelStorei( GL_UNPACK_ALIGNMENT, alignment );
 }
 
+/* The mouse arrow over the program's own picture.
+ *
+ * While a program's OpenGL surface has the screen the compositor has stepped
+ * aside and nothing else draws the arrow: a window with a mouse that moves but
+ * no cursor to show for it.  This puts it into the back buffer just before the
+ * swap takes that buffer to the screen, the way the floating keyboard above
+ * goes in, and puts everything it touched back as the program left it.
+ *
+ * The sprite is opaque only where the arrow has a shape (pointer_cursor.h) and
+ * a blit copies whole pixels without blending, so the arrow goes in a run of
+ * opaque pixels at a time (pointer_overlay.h): a transparent pixel copied whole
+ * would be a black one on the glass.  The picture covers the panel, so the
+ * arrow lands where the compositor would have put it, the panel's own 12x19 at
+ * whatever the surface's scale is.
+ */
+struct nx_cursor_gl
+{
+    EGLContext context;
+    GLuint texture, framebuffer;
+    int uploaded;
+};
+static struct nx_cursor_gl nx_cursor_gl[8];
+static unsigned int nx_cursor_gl_next;
+
+static struct nx_cursor_gl *nx_cursor_slot( EGLContext context )
+{
+    struct nx_cursor_gl *slot = NULL;
+    unsigned int i;
+
+    for (i = 0; i < ARRAY_SIZE(nx_cursor_gl) && !slot; i++)
+        if (nx_cursor_gl[i].context == context) slot = &nx_cursor_gl[i];
+    if (!slot)
+    {
+        /* A context not seen before: the names in the slot it takes belong to
+         * another context, which this one cannot delete. */
+        slot = &nx_cursor_gl[nx_cursor_gl_next++ % ARRAY_SIZE(nx_cursor_gl)];
+        memset( slot, 0, sizeof(*slot) );
+        slot->context = context;
+    }
+    return slot;
+}
+
+static void nx_cursor_draw( struct opengl_drawable *base )
+{
+    struct pointer_overlay_run runs[POINTER_OVERLAY_MAX_RUNS];
+    uint32_t sprite[POINTER_CURSOR_W * POINTER_CURSOR_H];
+    GLint read_fb, draw_fb, texture, unpack_buffer, row_length, skip_pixels, skip_rows, alignment;
+    GLboolean scissor, srgb;
+    struct nx_cursor_gl *slot;
+    EGLint width = 0, height = 0;
+    EGLContext context;
+    int px, py, count, i, created;
+
+    if (!&wine_nx_cursor_panel || !wine_nx_cursor_panel( &px, &py )) return;
+    if (!funcs->p_eglQuerySurface( egl->display, base->surface, EGL_WIDTH, &width ) ||
+        !funcs->p_eglQuerySurface( egl->display, base->surface, EGL_HEIGHT, &height ) ||
+        width < 1 || height < 1)
+        return;
+    if (!(count = pointer_overlay_runs( px, py, 1280, 720, width, height, runs ))) return;
+    if (!(context = funcs->p_eglGetCurrentContext())) return;
+    if (!p_glBlitFramebuffer)
+    {
+        p_glGenFramebuffers = (void *)funcs->p_eglGetProcAddress( "glGenFramebuffers" );
+        p_glBindFramebuffer = (void *)funcs->p_eglGetProcAddress( "glBindFramebuffer" );
+        p_glFramebufferTexture2D = (void *)funcs->p_eglGetProcAddress( "glFramebufferTexture2D" );
+        p_glIsFramebuffer = (void *)funcs->p_eglGetProcAddress( "glIsFramebuffer" );
+        p_glBindBuffer = (void *)funcs->p_eglGetProcAddress( "glBindBuffer" );
+        if (!p_glGenFramebuffers || !p_glBindFramebuffer || !p_glFramebufferTexture2D || !p_glIsFramebuffer ||
+            !p_glBindBuffer)
+            return;
+        p_glBlitFramebuffer = (void *)funcs->p_eglGetProcAddress( "glBlitFramebuffer" );
+        if (!p_glBlitFramebuffer) return;
+    }
+
+    slot = nx_cursor_slot( context );
+    created = 0;
+    if (!slot->texture || !funcs->p_glIsTexture( slot->texture ) || !p_glIsFramebuffer( slot->framebuffer ))
+    {
+        funcs->p_glGenTextures( 1, &slot->texture );
+        p_glGenFramebuffers( 1, &slot->framebuffer );
+        slot->uploaded = 0;
+        created = 1;
+    }
+
+    funcs->p_glGetIntegerv( GL_READ_FRAMEBUFFER_BINDING, &read_fb );
+    funcs->p_glGetIntegerv( GL_DRAW_FRAMEBUFFER_BINDING, &draw_fb );
+    funcs->p_glGetIntegerv( GL_TEXTURE_BINDING_2D, &texture );
+    funcs->p_glGetIntegerv( GL_PIXEL_UNPACK_BUFFER_BINDING, &unpack_buffer );
+    funcs->p_glGetIntegerv( GL_UNPACK_ROW_LENGTH, &row_length );
+    funcs->p_glGetIntegerv( GL_UNPACK_SKIP_PIXELS, &skip_pixels );
+    funcs->p_glGetIntegerv( GL_UNPACK_SKIP_ROWS, &skip_rows );
+    funcs->p_glGetIntegerv( GL_UNPACK_ALIGNMENT, &alignment );
+    scissor = funcs->p_glIsEnabled( GL_SCISSOR_TEST );
+    srgb = funcs->p_glIsEnabled( GL_FRAMEBUFFER_SRGB );
+
+    funcs->p_glBindTexture( GL_TEXTURE_2D, slot->texture );
+    p_glBindBuffer( GL_PIXEL_UNPACK_BUFFER, 0 );
+    funcs->p_glPixelStorei( GL_UNPACK_ROW_LENGTH, 0 );
+    funcs->p_glPixelStorei( GL_UNPACK_SKIP_PIXELS, 0 );
+    funcs->p_glPixelStorei( GL_UNPACK_SKIP_ROWS, 0 );
+    funcs->p_glPixelStorei( GL_UNPACK_ALIGNMENT, 4 );
+    if (!slot->uploaded)
+    {
+        /* The sprite does not change: it goes in once per context, and the
+         * names a program may reuse are checked above. */
+        pointer_cursor_image( sprite );
+        funcs->p_glTexImage2D( GL_TEXTURE_2D, 0, GL_RGBA8, POINTER_CURSOR_W, POINTER_CURSOR_H, 0,
+                               GL_RGBA, GL_UNSIGNED_BYTE, sprite );
+        funcs->p_glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST );
+        funcs->p_glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST );
+        slot->uploaded = 1;
+    }
+
+    if (scissor) funcs->p_glDisable( GL_SCISSOR_TEST );
+    if (srgb) funcs->p_glDisable( GL_FRAMEBUFFER_SRGB );
+    p_glBindFramebuffer( GL_READ_FRAMEBUFFER, slot->framebuffer );
+    /* The sprite is attached once, when the framebuffer is made. */
+    if (created) p_glFramebufferTexture2D( GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, slot->texture, 0 );
+    p_glBindFramebuffer( GL_DRAW_FRAMEBUFFER, 0 );
+    /* The sprite's first row is its top, the framebuffer's first row is its
+     * bottom; the runs are in the picture's own, top-down pixels. */
+    for (i = 0; i < count; i++)
+    {
+        const struct pointer_overlay_run *run = &runs[i];
+
+        p_glBlitFramebuffer( run->src_x0, POINTER_CURSOR_H - run->src_y - 1,
+                             run->src_x1, POINTER_CURSOR_H - run->src_y,
+                             run->x0, height - run->y1, run->x1, height - run->y0,
+                             GL_COLOR_BUFFER_BIT, GL_NEAREST );
+    }
+    if (scissor) funcs->p_glEnable( GL_SCISSOR_TEST );
+    if (srgb) funcs->p_glEnable( GL_FRAMEBUFFER_SRGB );
+
+    p_glBindFramebuffer( GL_READ_FRAMEBUFFER, read_fb );
+    p_glBindFramebuffer( GL_DRAW_FRAMEBUFFER, draw_fb );
+    funcs->p_glBindTexture( GL_TEXTURE_2D, texture );
+    p_glBindBuffer( GL_PIXEL_UNPACK_BUFFER, unpack_buffer );
+    funcs->p_glPixelStorei( GL_UNPACK_ROW_LENGTH, row_length );
+    funcs->p_glPixelStorei( GL_UNPACK_SKIP_PIXELS, skip_pixels );
+    funcs->p_glPixelStorei( GL_UNPACK_SKIP_ROWS, skip_rows );
+    funcs->p_glPixelStorei( GL_UNPACK_ALIGNMENT, alignment );
+}
+
 /* The frame about to be shown, kept when the player asked for it (Minus+R;
  * horizon-wine/source/runtime.c).  glReadPixels comes up bottom-up, which the
  * sink is told.  The read buffer is taken back to whatever the program left
@@ -770,6 +917,9 @@ static BOOL nx_drawable_swap( struct opengl_drawable *base )
                                            base->client->virtual_rect.top );
     }
     nx_osk_draw( base );
+    /* Over the keyboard, as the compositor draws it: the arrow is the last
+     * thing on the picture, the way it is the last thing drawn on the panel. */
+    nx_cursor_draw( base );
     nx_drawable_screenshot( base );
     /* The first three swaps say what they are, because the first one is where
      * a program that shows nothing stops: a swap the driver never returns used

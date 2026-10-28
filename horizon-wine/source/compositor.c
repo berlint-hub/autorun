@@ -19,6 +19,7 @@ void wine_nx_desktop_size( int *width, int *height );
 void wine_nx_present_fit( int src_w, int src_h, int src_x, int src_y,
                           int *dst_x, int *dst_y, int *dst_w, int *dst_h );
 void wine_nx_screen_to_panel( double x, double y, int *px, int *py );
+int wine_nx_cursor_panel( int *x, int *y );
 #include "thread_profile.h"
 #include "compositor_gl.h"
 
@@ -576,9 +577,16 @@ static void *presenter_thread( void *arg )
                 drawn[count++] = keyboard;
             }
         }
-        cursor_x = comp.cursor_x;
-        cursor_y = comp.cursor_y;
-        cursor_visible = comp.cursor_visible;
+        /* The arrow is mapped through the fit in force for this frame, the
+         * one the windows above are placed by: a display mode or a surface
+         * that changed the screen moves the arrow with the picture, not to
+         * where the previous fit left it. */
+        cursor_visible = comp.cursor_visible && wine_nx_cursor_panel( &cursor_x, &cursor_y );
+        if (!cursor_visible)
+        {
+            cursor_x = comp.cursor_x;
+            cursor_y = comp.cursor_y;
+        }
         pthread_mutex_unlock( &comp.lock );
 
         /* Only this thread frees layers, so drawn stays valid; a layer destroyed

@@ -290,6 +290,64 @@ static void test_speed_scales_the_stick(void)
     assert( fabs( c.x - a.x ) < 0.01 );
 }
 
+/* What the overlays copy into a program's picture: the sprite as RGBA, the
+ * same arrow the compositor puts on the panel. */
+static void test_image_is_the_sprite(void)
+{
+    uint32_t pixels[POINTER_CURSOR_W * POINTER_CURSOR_H];
+    unsigned int i, black = 0, white = 0, clear = 0;
+
+    pointer_cursor_image( pixels );
+    for (i = 0; i < POINTER_CURSOR_W * POINTER_CURSOR_H; i++)
+    {
+        int i2 = i % POINTER_CURSOR_W;
+        char shape = pointer_cursor_shape[i / POINTER_CURSOR_W][i2];
+
+        assert( shape == 'B' || shape == 'W' || shape == '.' );
+        assert( pixels[i] == (shape == 'W' ? 0xffffffffu : shape == 'B' ? 0xff000000u : 0u) );
+        if (shape == 'B') black++;
+        else if (shape == 'W') white++;
+        else clear++;
+    }
+    assert( black == 49 && white == 69 && clear == 110 );
+    assert( black + white + clear == POINTER_CURSOR_W * POINTER_CURSOR_H );
+    /* The tip of the arrow is its first pixel: the hot spot is the sprite's
+     * top-left corner, whichever way the picture is drawn. */
+    assert( pixels[0] == 0xff000000u );
+}
+
+/* A program's display mode changes the screen under the cursor: the arrow
+ * keeps the place it had, and the new edges are reachable. */
+static void test_resize_keeps_place_and_edges(void)
+{
+    struct pointer_cursor c = cursor_at( 960, 540 );
+
+    c.width = 1920;
+    c.height = 1080;
+    pointer_cursor_resize( &c, 640, 480 );
+    assert( c.width == 640 && c.height == 480 );
+    assert( c.x == 320 && c.y == 240 );
+    /* The far corner of the smaller screen, then back to the larger one: the
+     * arrow goes where it was relative to the picture, and the edge it could
+     * not reach before is reachable now. */
+    pointer_cursor_place( &c, 639, 479 );
+    pointer_cursor_resize( &c, 1920, 1080 );
+    assert( c.width == 1920 && c.height == 1080 );
+    assert( fabs( c.x - 1917 ) < 0.01 && fabs( c.y - 1077.75 ) < 0.01 );
+    for (int i = 0; i < 100; i++) pointer_cursor_step( &c, 32767, -32767, 20 * MS );
+    assert( c.x == 1919 && c.y == 1079 );
+    /* A cursor that never had a size starts in the middle of the screen it is
+     * given, and a nonsense size changes nothing. */
+    {
+        struct pointer_cursor fresh = {0};
+
+        pointer_cursor_resize( &fresh, 800, 600 );
+        assert( fresh.x == 400 && fresh.y == 300 );
+        pointer_cursor_resize( &fresh, 0, 0 );
+        assert( fresh.width == 800 && fresh.height == 600 && fresh.x == 400 );
+    }
+}
+
 int main(void)
 {
     test_buttons_between_takes();
@@ -303,7 +361,10 @@ int main(void)
     test_warp_keeps_unsent_motion();
     test_held_cursor_still_moves();
     test_speed_scales_the_stick();
+    test_image_is_the_sprite();
+    test_resize_keeps_place_and_edges();
     puts( "pointer cursor: buttons between takes, dead zone, speed curve, time scaling, edges, sprite "
-          "restore, motion kept across warps, a held cursor still moving and the speed scale passed" );
+          "restore, motion kept across warps, a held cursor still moving, the speed scale, the overlay's\n"
+          "sprite and a change of screen size passed" );
     return 0;
 }

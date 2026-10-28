@@ -62,6 +62,36 @@ jobs:
             horizon-wine/tests/screen_fit.c -o screen_fit
           ./screen_fit
 
+      # The arrow over a program's own picture: the run of opaque sprite pixels
+      # a blit or a buffer-image copy carries, at the panel's scale and at the
+      # scales a window's surface has, clipped where the picture ends.
+      - name: Hardware cursor over a program's picture
+        run: |
+          cc -std=gnu11 -Wall -Wextra -Werror -O1 -g \
+            -I horizon-wine/source \
+            horizon-wine/tests/pointer_overlay.c -o pointer_overlay
+          ./pointer_overlay
+
+      # The analog-stick cursor: its sprite as the overlays copy it, and a
+      # screen that changes size under it.
+      - name: Pointer cursor
+        run: |
+          cc -std=gnu11 -Wall -Wextra -Werror -O1 -g \
+            -I horizon-wine/source \
+            horizon-wine/tests/pointer_cursor.c -o pointer_cursor -lm
+          ./pointer_cursor
+
+      # The same over a program's own OpenGL and Vulkan pictures: the code
+      # dlls/win32u/winnx_opengl.c and vulkan.c run at a swap, taken as it is
+      # and run against mocks -- which run blits or copies what, where it lands,
+      # one upload per context, the swapchain's present waiting for the copy,
+      # and the program's GL state put back. No EGL or Vulkan is needed.
+      - name: Hardware cursor over an OpenGL picture
+        run: python3 horizon-wine/tests/check_cursor_overlay.py
+
+      - name: Hardware cursor over a Vulkan picture
+        run: python3 horizon-wine/tests/check_cursor_vulkan.py
+
       # A screen that shows no frame, read from the numbers the stall report
       # already has: which of the ways a stuck swap leaves it empty is, so the
       # log says why and not only how many slots there are.

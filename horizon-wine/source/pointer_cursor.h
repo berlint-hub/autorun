@@ -93,6 +93,30 @@ static inline int pointer_cursor_warp( struct pointer_cursor *c, int sent_x, int
     return (int)c->x != x || (int)c->y != y;
 }
 
+/* The screen the arrow lives on changed size (a program's display mode, or the
+ * surface holding the screen): keep the arrow where it was, in proportion, and
+ * let it reach the new edges.  A cursor left with the old bounds stops a third
+ * of the way across a larger screen and cannot be pushed further, which is what
+ * a program's own display mode used to do to it. */
+static inline void pointer_cursor_resize( struct pointer_cursor *c, int width, int height )
+{
+    if (width < 1 || height < 1) return;
+    if (c->width < 1 || c->height < 1)
+    {
+        c->width = width;
+        c->height = height;
+        pointer_cursor_place( c, width / 2.0, height / 2.0 );
+        return;
+    }
+    if (width == c->width && height == c->height) return;
+    /* The relative place is what a player means by it, not the pixel count. */
+    c->x = c->x * width / c->width;
+    c->y = c->y * height / c->height;
+    c->width = width;
+    c->height = height;
+    pointer_cursor_place( c, c->x, c->y );
+}
+
 /* Buttons seen by the polls since the last take: the latest state, and every
  * button that went down or up in between. Polls can outpace the message loop
  * that takes them, and a click shorter than that gap must not be lost. */
@@ -139,6 +163,23 @@ static const char pointer_cursor_shape[POINTER_CURSOR_H][POINTER_CURSOR_W + 1] =
     "......BWWB..",
     ".......BB...",
 };
+
+/* The arrow as RGBA8888 pixels, row 0 at the top: the same sprite the
+ * compositor draws, for a picture it does not draw (pointer_overlay.h). */
+static inline void pointer_cursor_image( uint32_t *pixels )
+{
+    int i, j;
+
+    for (j = 0; j < POINTER_CURSOR_H; j++)
+        for (i = 0; i < POINTER_CURSOR_W; i++)
+        {
+            char shape = pointer_cursor_shape[j][i];
+
+            /* Opaque white, opaque black or clear: little-endian RGBA bytes. */
+            pixels[j * POINTER_CURSOR_W + i] = shape == 'W' ? 0xffffffffu :
+                                               shape == 'B' ? 0xff000000u : 0u;
+        }
+}
 
 /* Draw the arrow into RGBA8888 pixels (draw != 0), saving what it covers, or
  * put the saved pixels back. The position must not change in between. */

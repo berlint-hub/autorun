@@ -226,6 +226,11 @@ static int mock_config_attrib(void *display, EGLConfig config, int attribute, in
 static int mock_error(void) { return 0; }
 static const char *mock_string(void *display, int name) { return "mock"; }
 static void nx_osk_draw(struct opengl_drawable *base) { overlays++; }
+/* The arrow over the program's picture is the GL overlay's own (its runs are
+ * tested on their own, horizon-wine/tests/pointer_overlay.c); what this fixture
+ * checks is when the swap draws the overlay, and the order it draws them in. */
+static int cursor_drawn;
+static void nx_cursor_draw(struct opengl_drawable *base) { assert(base); cursor_drawn = overlays; }
 static unsigned long long horizon_interrupt_time(void) { static unsigned int ticks; return ++ticks; }
 static unsigned int wine_nx_gl_swaps;
 static unsigned long long wine_nx_gl_swap_time;
@@ -313,6 +318,9 @@ int main(void) {
     struct opengl_drawable *visible = get_window_unused_drawable(&game, 1);
     assert(visible && visible->surface->window && screen_busy && acquires == 1);
     assert(visible->funcs->swap(visible) && overlays == 1 && wine_nx_gl_swaps == 1);
+    /* The arrow goes in after the keyboard, over it: the same order the
+     * compositor draws them in. */
+    assert(cursor_drawn == 1);
     /* A vsync interval deeper than the config's maximum is what the driver
      * would refuse; it is left at the maximum instead, and a shallower one is
      * passed through as asked. */
