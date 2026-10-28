@@ -89,7 +89,24 @@ runtime; the full package now ships the Mesa 26 one.
   no NVC0 at all. NVK does not claim Khronos conformance and said so on every
   run, which reads as a broken driver in a log; the runtime silences that one
   warning (`MESA_VK_IGNORE_CONFORMANCE_WARNING`) and the probe's own line names
-  the instance and device instead. Frames of another size than the screen's
+  the instance and device instead.
+  When a program ends up without a context, the run log says which of the ways
+  it happened: `[NXGL] EGL … (OpenGL OpenGL_ES): N config(s) for OpenGL` names
+  the driver and what it offers the moment a context or a surface is first
+  asked for, `the first context made current is …, OpenGL …` names the renderer
+  that was really made (the renderer setting says what was asked for, not what
+  came back), `no context for format N …: EGL EGL_BAD_…` carries EGL's own
+  error by name, and win32u counts how many of the pixel formats could carry a
+  context at all. A display with no config renderable with desktop OpenGL says
+  so before any of that: it is a driver built for GLES only.
+
+  One EGL display has one backend for its lifetime, so the **OpenGL renderer**
+  setting is the process's, not only the program's: the launcher, the
+  compositor and the program share one display, and a second program started
+  in the same run keeps the renderer the first one asked for. The log says so
+  when it happens. The swap interval is capped at what the config offers (0
+  and 1 here) rather than passed on to be refused: the frame limit is what caps
+  frames, and `eglSwapInterval` has no return value anyone would read. Frames of another size than the screen's
   (800x600 or 640x480 in full screen) are scaled to it by the runtime's own
   compute blit, and the **Scaling** setting decides where they land: stretched
   over the screen, kept in proportion with bars, by whole pixel steps, or with

@@ -1158,6 +1158,14 @@ static UINT egldrv_init_pixel_formats( UINT *onscreen_count )
         funcs->p_eglGetConfigAttrib( egl->display, configs[i], EGL_RENDERABLE_TYPE, &render );
         if (render & EGL_OPENGL_BIT) configs[j++] = configs[i];
     }
+    /* A display with configs but none of them renderable with desktop OpenGL
+     * is a driver that has no desktop GL to give -- built for GLES only, or
+     * one whose configs were made before the API was bound. It is the whole
+     * reason a program then ends up without a context, and it reads
+     * differently from a display that failed to describe one at all. */
+    if (!j)
+        ERR( "None of the EGL display's %d config(s) is renderable with desktop OpenGL, so no pixel format can carry a context\n",
+             count );
     count = j;
 
     if (TRACE_ON(wgl)) for (i = 0; i < count; i++)

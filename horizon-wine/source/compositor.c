@@ -620,6 +620,11 @@ stopped:
     return NULL;
 
 failed:
+    /* A presenter that cannot start has still initialised EGL on the way --
+     * the display, and possibly a context. Letting go of it here is what lets
+     * the next user of OpenGL in this process (a program's own context, on the
+     * display's one backend) be created with the renderer it asked for. */
+    if (backend->quit) backend->quit();
     wine_nx_thread_unregister();
     comp_log( "[NXCOMP] cannot present through OpenGL, keeping the framebuffer: %s", error );
     pthread_mutex_lock( &comp.lock );

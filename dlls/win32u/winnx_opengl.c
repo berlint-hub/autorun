@@ -361,10 +361,76 @@ const char *wine_nx_gl_entry_name( int entry )
     return entry >= 0 && entry < NX_GL_ENTRIES ? nx_gl_entry_names[entry] : NULL;
 }
 
-/* The EGL config of a pixel format, as win32u's egldrv chooses it for pbuffers. */
+/* The EGL config of a pixel format, as win32u's egldrv chooses it for pbuffers.
+ * A display with no config for OpenGL has no pixel format either, and win32u
+ * asks for none of them -- but the modulo below is a division by that count,
+ * and a count of zero is a trap rather than an error. */
 static EGLConfig nx_config_for_format( int format )
 {
+    if (!egl->config_count) return 0;  /* no config, so EGL refuses every surface made with it */
     return egl->configs[(format - 1) % egl->config_count];
+}
+
+/* EGL's errors by name: "error 0x3005" is what a log had, and it says nothing
+ * to anyone reading it. */
+static const char *nx_egl_error_name( EGLint error )
+{
+    switch (error)
+    {
+    case EGL_SUCCESS:             return "EGL_SUCCESS";
+    case EGL_NOT_INITIALIZED:     return "EGL_NOT_INITIALIZED";
+    case EGL_BAD_ACCESS:          return "EGL_BAD_ACCESS";
+    case EGL_BAD_ALLOC:           return "EGL_BAD_ALLOC";
+    case EGL_BAD_ATTRIBUTE:       return "EGL_BAD_ATTRIBUTE";
+    case EGL_BAD_CONTEXT:         return "EGL_BAD_CONTEXT";
+    case EGL_BAD_CONFIG:          return "EGL_BAD_CONFIG";
+    case EGL_BAD_CURRENT_SURFACE: return "EGL_BAD_CURRENT_SURFACE";
+    case EGL_BAD_DISPLAY:         return "EGL_BAD_DISPLAY";
+    case EGL_BAD_SURFACE:         return "EGL_BAD_SURFACE";
+    case EGL_BAD_MATCH:           return "EGL_BAD_MATCH";
+    case EGL_BAD_PARAMETER:       return "EGL_BAD_PARAMETER";
+    case EGL_BAD_NATIVE_PIXMAP:   return "EGL_BAD_NATIVE_PIXMAP";
+    case EGL_BAD_NATIVE_WINDOW:   return "EGL_BAD_NATIVE_WINDOW";
+    case 0x300e:                  return "EGL_CONTEXT_LOST";  /* EGL 1.5; not in every header */
+    default:                      return "an error EGL has no name for";
+    }
+}
+
+/* What the EGL behind this driver is, once, the first time a context is asked
+ * for: the only place in a log that says which port of Mesa answered. The
+ * per-game setting names a renderer the runtime asks for, not what it got, and
+ * a run that ends with no OpenGL at all is read from these two lines and the
+ * GL renderer below. */
+static void nx_note_egl_display( void )
+{
+    const char *vendor, *version, *apis;
+    static int noted;
+
+    if (InterlockedExchange( &noted, 1 )) return;
+    vendor = funcs->p_eglQueryString( egl->display, EGL_VENDOR );
+    version = funcs->p_eglQueryString( egl->display, EGL_VERSION );
+    /* EGL_CLIENT_APIS says which APIs this display was built with, and a
+     * display without OpenGL in it is why a program can end up with no
+     * context whatever its pixel format says: no config, so no format. */
+    apis = funcs->p_eglQueryString( egl->display, EGL_CLIENT_APIS );
+    nx_log( "[NXGL] EGL %s %s (%s): %u config(s) for OpenGL", vendor ? vendor : "?",
+            version ? version : "?", apis ? apis : "client APIs not given", egl->config_count );
+}
+
+/* The renderer of the first context that is actually made current: under a
+ * program that asks for Zink over NVK this is where "Zink on NVK" or "NVK
+ * (nouveau)" is proved, and where an NVC0 context that was asked for as Zink
+ * shows up. Said once, before anything of the program's own has run. */
+static void nx_note_first_context( void )
+{
+    const char *renderer, *version;
+    static int noted;
+
+    if (InterlockedExchange( &noted, 1 ) || !funcs->p_glGetString) return;
+    renderer = (const char *)funcs->p_glGetString( GL_RENDERER );
+    version = (const char *)funcs->p_glGetString( GL_VERSION );
+    nx_log( "[NXGL] the first context made current is %s, OpenGL %s",
+            renderer ? renderer : "?", version ? version : "?" );
 }
 
 static void nx_drawable_destroy( struct opengl_drawable *base )
@@ -398,10 +464,33 @@ static void nx_drawable_destroy( struct opengl_drawable *base )
 
 static void nx_drawable_flush( struct opengl_drawable *base, UINT flags )
 {
+    int interval, max = 0;
+
     TRACE( "drawable %s, flags %#x\n", debugstr_opengl_drawable( base ), flags );
 
-    if (impl_from_opengl_drawable( base )->screen && (flags & GL_FLUSH_INTERVAL))
-        funcs->p_eglSwapInterval( egl->display, abs( base->interval ) );
+    if (!impl_from_opengl_drawable( base )->screen || !(flags & GL_FLUSH_INTERVAL)) return;
+    interval = abs( base->interval );
+
+    /* A vsync interval deeper than the config's maximum is not a cap the
+     * driver can make: eglSwapInterval refuses it (EGL_BAD_MATCH) and the
+     * surface keeps the interval it had, so a program that asks for one to
+     * reach 30 Hz simply keeps swapping at the panel's rate -- silently, since
+     * the call has no return value anyone reads. This port's configs offer 0
+     * and 1. The runtime caps frames itself (the frame limit), so the swap is
+     * left at the deepest interval the config allows, and the first program
+     * that asked for more is named rather than left to wonder. */
+    if (funcs->p_eglGetConfigAttrib && funcs->p_eglGetConfigAttrib( egl->display,
+            nx_config_for_format( base->format ), EGL_MAX_SWAP_INTERVAL, &max ) && max > 0 &&
+        interval > max)
+    {
+        static int told;
+
+        if (!told++)
+            nx_log( "[NXGL] this session's OpenGL configs take a swap interval up to %d, not %d; "
+                    "the frame limit is what caps frames here", max, interval );
+        interval = max;
+    }
+    funcs->p_eglSwapInterval( egl->display, interval );
 }
 
 /* Frames presented and the time inside eglSwapBuffers, for [PROGRESS]. */
@@ -777,6 +866,7 @@ static BOOL nx_surface_create( struct client_surface *client, int format, struct
     void *window;
 
     TRACE( "hwnd %p, format %d\n", hwnd, format );
+    nx_note_egl_display();
 
     if ((previous = *drawable) && previous->format == format && wine_nx_gl_drawable_matches_window( previous ))
         return TRUE;
@@ -943,6 +1033,7 @@ static struct opengl_context *nx_context_create( int format, struct opengl_conte
         dst[1] = attribs[1];
     }
     *end = EGL_NONE;
+    nx_note_egl_display();
     nx_note_context_request( format, egl_attribs, end );
 
     if (!(context = calloc( 1, sizeof(*context) ))) return NULL;
@@ -970,7 +1061,8 @@ static struct opengl_context *nx_context_create( int format, struct opengl_conte
                 nx_drop_context_attribute( egl_attribs, &end, EGL_CONTEXT_MINOR_VERSION_KHR );
                 nx_drop_context_attribute( egl_attribs, &end, EGL_CONTEXT_FLAGS_KHR );
             }
-            nx_log( "[NXGL] the driver refused a context with %#x, retrying without it", droppable[i] );
+            nx_log( "[NXGL] the driver refused a context of format %d with %#x (EGL error %#x), "
+                    "retrying without it", format, droppable[i], error );
             context->host_context = funcs->p_eglCreateContext( egl->display, nx_config_for_format( format ),
                                                                 share ? share->host_context : NULL,
                                                                 end != egl_attribs ? egl_attribs : NULL );
@@ -979,8 +1071,20 @@ static struct opengl_context *nx_context_create( int format, struct opengl_conte
     }
     if (error != EGL_SUCCESS || !context->host_context)
     {
+        /* The driver's own words for it: a config that cannot carry desktop
+         * GL, a profile or version it does not implement, or a share context
+         * that is not in the same share group. */
+        static int failures;
+
         nx_note_egl_state( "a context could not be made" );
-        ERR( "context creation failed for format %d, share %p, error %#x\n", format, share, error );
+        ERR( "context creation failed for format %d, share %p, error %#x (%s)\n", format, share,
+             error, nx_egl_error_name( error ) );
+        /* Inside the runtime's own log too: a program's stderr is a separate
+         * file, and the run log is what gets read when nothing was drawn. */
+        if (failures++ < 4)
+            nx_log( "[NXGL] no context for format %d (share %p, attribs %s): EGL %s",
+                    format, share, end != egl_attribs ? "given" : "none",
+                    nx_egl_error_name( error ) );
         free( context );
         return NULL;
     }
@@ -1007,6 +1111,7 @@ static BOOL nx_context_activate( struct opengl_context *context, struct opengl_d
             nx_log( "[NXGL] the program's OpenGL context could not be made current, error %#x", error );
         return FALSE;
     }
+    nx_note_first_context();
     /* Only the program's own window tells us what it got; a context that draws
      * into a pbuffer or the compositor's own is none of our business. */
     if (draw && draw->surface == nx_screen_surface) nx_note_program_gl();

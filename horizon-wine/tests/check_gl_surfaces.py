@@ -28,6 +28,8 @@ fixture = r'''
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdarg.h>
+#include <string.h>
 #include <pthread.h>
 #define __SWITCH__ 1
 typedef int32_t LONG;
@@ -54,6 +56,8 @@ typedef struct mock_surface { int window, width, height; } *EGLSurface;
 #define GL_BACK_RIGHT 0x403
 #define GL_FRONT_AND_BACK 0x408
 #define GL_FLUSH_INTERVAL 2
+#define EGL_MAX_SWAP_INTERVAL 0x303c   /* as wine/wgl.h has it */
+#define EGL_CLIENT_APIS 0x308d
 #define WND_DESKTOP ((WND *)1)
 #define WND_OTHER_PROCESS ((WND *)2)
 #define CONTAINING_RECORD(ptr, type, field) ((type *)((char *)(ptr) - offsetof(type, field)))
@@ -180,7 +184,20 @@ static void client_surface_update(struct client_surface *client) { client->funcs
 static unsigned long long nx_swap_begun_at;
 static unsigned int nx_swap_named;
 static int nx_swap_surface_w, nx_swap_surface_h, nx_swap_surface_screen;
-static void nx_log(const char *format, ...) { }
+/* The driver's own lines, kept so a test can say what was said and that it was
+ * said once: the EGL report is the line that names the display and what it
+ * offers ("2 config(s) for OpenGL") -- the window surface's own line names the
+ * vendor too, and is not that report. */
+static unsigned int egl_reports;
+static char last_egl_report[256];
+static void nx_log(const char *format, ...) {
+    va_list args;
+    if (!strstr(format, "config(s) for OpenGL")) return;
+    egl_reports++;
+    va_start(args, format);
+    vsnprintf(last_egl_report, sizeof(last_egl_report), format, args);
+    va_end(args);
+}
 static EGLSurface mock_create_pbuffer(void *display, EGLConfig config, const EGLint *attributes) {
     if (fail_pbuffer) return NULL;
     assert(attributes[0] == EGL_WIDTH && attributes[2] == EGL_HEIGHT && attributes[4] == EGL_NONE);
@@ -192,6 +209,8 @@ static EGLSurface mock_create_window(void *display, EGLConfig config, EGLNativeW
     EGLSurface s = calloc(1, sizeof(*s));
     s->window = TRUE; s->width = acquire_width; s->height = acquire_height; live_surfaces++; return s;
 }
+/* What the config a flush asks about offers, and the last interval it set. */
+static int max_swap_interval = 1, last_interval = -1;
 static int mock_query(void *display, EGLSurface surface, int attribute, int *value) {
     assert(surface);
     if (attribute == EGL_WIDTH) { *value = surface->width; return TRUE; }
@@ -199,7 +218,11 @@ static int mock_query(void *display, EGLSurface surface, int attribute, int *val
     return FALSE;
 }
 static BOOL mock_swap(void *display, EGLSurface surface) { assert(surface); swaps++; return TRUE; }
-static void mock_interval(void *display, int value) { intervals++; }
+static void mock_interval(void *display, int value) { intervals++; last_interval = value; }
+static int mock_config_attrib(void *display, EGLConfig config, int attribute, int *value) {
+    if (attribute == EGL_MAX_SWAP_INTERVAL) { *value = max_swap_interval; return TRUE; }
+    return FALSE;
+}
 static int mock_error(void) { return 0; }
 static const char *mock_string(void *display, int name) { return "mock"; }
 static void nx_osk_draw(struct opengl_drawable *base) { overlays++; }
@@ -216,16 +239,18 @@ struct opengl_funcs {
     BOOL (*p_eglSwapBuffers)(void *, EGLSurface);
     void (*p_eglSwapInterval)(void *, int);
     int (*p_eglQuerySurface)(void *, EGLSurface, int, int *);
+    int (*p_eglGetConfigAttrib)(void *, EGLConfig, int, int *);
 };
 static const struct egl_platform platform = { .configs = {1, 2}, .config_count = 2 };
 static const struct egl_platform *egl = &platform;
 static const struct opengl_funcs functions = {mock_create_pbuffer, mock_create_window, mock_destroy_surface, mock_error,
-                                             mock_string, mock_swap, mock_interval, mock_query};
+                                             mock_string, mock_swap, mock_interval, mock_query, mock_config_attrib};
 static const struct opengl_funcs *funcs = &functions;
 '''
 
 implementation = nx[nx.index("struct nx_gl_drawable\n"):nx.index("static void nx_log(")]
-for name in ("nx_config_for_format", "nx_drawable_destroy", "nx_drawable_flush", "nx_drawable_swap"):
+for name in ("nx_config_for_format", "nx_note_egl_display", "nx_drawable_destroy", "nx_drawable_flush",
+             "nx_drawable_swap"):
     implementation += function(nx, name)
 start = nx.index("static const struct opengl_drawable_funcs nx_drawable_funcs =")
 implementation += nx[start:nx.index("\n};", start) + 3]
@@ -280,11 +305,34 @@ int main(void) {
     struct opengl_drawable *hidden = get_window_unused_drawable(&probe, 1);
     assert(hidden && !hidden->surface->window && hidden->surface->width == 1280 && hidden->surface->height == 720);
     assert(!screen_busy && !acquires);
+    /* The EGL behind the driver is named once, with what it offers. */
+    assert(egl_reports == 1 && strstr(last_egl_report, "2 config(s) for OpenGL"));
+    assert(strstr(last_egl_report, "mock"));
     hidden->funcs->flush(hidden, GL_FLUSH_INTERVAL);
     assert(hidden->funcs->swap(hidden) && !overlays && !intervals && !wine_nx_gl_swaps);
     struct opengl_drawable *visible = get_window_unused_drawable(&game, 1);
     assert(visible && visible->surface->window && screen_busy && acquires == 1);
     assert(visible->funcs->swap(visible) && overlays == 1 && wine_nx_gl_swaps == 1);
+    /* A vsync interval deeper than the config's maximum is what the driver
+     * would refuse; it is left at the maximum instead, and a shallower one is
+     * passed through as asked. */
+    max_swap_interval = 1; last_interval = -1; visible->interval = 1;
+    visible->funcs->flush(visible, GL_FLUSH_INTERVAL);
+    assert(last_interval == 1);
+    visible->interval = 4;
+    visible->funcs->flush(visible, GL_FLUSH_INTERVAL);
+    assert(last_interval == 1);
+    max_swap_interval = 3;
+    visible->funcs->flush(visible, GL_FLUSH_INTERVAL);
+    assert(last_interval == 3);
+    visible->interval = -2;
+    visible->funcs->flush(visible, GL_FLUSH_INTERVAL);
+    assert(last_interval == 2);
+    max_swap_interval = 1; visible->interval = 1;
+    /* A flush that does not carry an interval leaves the driver alone. */
+    intervals = 0;
+    visible->funcs->flush(visible, 0);
+    assert(!intervals);
     struct opengl_drawable *shared = get_window_unused_drawable(&game, 1);
     assert(shared && shared->surface == visible->surface && nx_screen_refs == 2 && acquires == 1);
     fail_pbuffer = TRUE;
@@ -392,7 +440,9 @@ int main(void) {
     clear(&oversized, whole);
     assert(!live_drawables && !live_surfaces && !screen_busy && !nx_screen_refs);
     for (unsigned int i = 0; i < 64; i++) assert(!clients[i]);
-    puts("OpenGL surfaces: offscreen probes, sharing, visibility, resizing, cached references, failures, screen sizing and Vulkan isolation passed");
+    assert(egl_reports == 1);   /* never repeated, however many surfaces were made */
+    puts("OpenGL surfaces: offscreen probes, sharing, visibility, resizing, cached references, failures, screen sizing, "
+         "swap intervals and the EGL report passed");
 }
 '''
 

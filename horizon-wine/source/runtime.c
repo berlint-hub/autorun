@@ -5935,9 +5935,23 @@ int main( int argc, char **argv )
             log_line( "[MESA] compiled shaders take %llu MiB in %u driver version(s), %u given back to the card",
                       shaders.kept >> 20, shaders.buckets, shaders.buckets_removed );
     }
-    /* mesa-switch embeds Zink alongside NVC0. Choose per game before the
-     * first EGL initialization: this selects OpenGL for the game and the
-     * runtime compositor; Vulkan applications continue to use NVK. */
+    /* mesa-switch embeds Zink alongside NVC0, and has to be told which before
+     * the first eglInitialize: this selects OpenGL for the game and the runtime
+     * compositor; Vulkan applications continue to use NVK.
+     *
+     * One EGL display has one backend for its lifetime
+     * (mesa-switch, docs/switch-opengl.rst), and the display outlives the
+     * program that first asked for it -- the compositor's is made in the same
+     * process. A second program that asks for the other renderer cannot change
+     * it, and saying so is better than a setting that looks applied. */
+    {
+        static int applied = -1;
+
+        if (applied >= 0 && applied != runtime_gl_driver && wine_nx_compositor_running())
+            log_line( "[MESA] this process's EGL display was made with the first program's renderer, "
+                      "so this one cannot change it; it takes effect when the runtime restarts" );
+        applied = runtime_gl_driver;
+    }
     if (runtime_gl_driver == 1)
     {
         setenv( "MESA_SWITCH_GL_DRIVER", "zink", 1 );
