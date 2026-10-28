@@ -1,4 +1,5 @@
 from pathlib import Path
+import os
 import re
 import subprocess
 import tempfile
@@ -150,8 +151,35 @@ static void opengl_drawable_release(struct opengl_drawable *d) {
     client_surface_release(d->client);
     live_drawables--; free(d);
 }
-static void *wine_nx_gl_acquire_window(void) { acquires++; if (screen_busy) return NULL; screen_busy = TRUE; return (void *)1; }
+/* The size the screen's NWindow was asked for, which is what the window
+ * surface is then created at. */
+static int acquire_width, acquire_height;
+static void *wine_nx_gl_acquire_window(int width, int height) {
+    assert(width > 0 && height > 0);
+    acquires++; acquire_width = width; acquire_height = height;
+    if (screen_busy) return NULL;
+    screen_busy = TRUE; return (void *)1;
+}
 static void wine_nx_gl_release_window(void) { assert(screen_busy); screen_busy = FALSE; releases++; }
+/* The rest of the runtime, which the swap and the picture size read. */
+static unsigned int vulkan_owns_screen, stretched_fits;
+static int desktop_w = 1920, desktop_h = 1080;
+static int wine_nx_vulkan_owns_screen(void) { return (int)vulkan_owns_screen; }
+static void wine_nx_present_fit_stretched(int src_w, int src_h, int src_x, int src_y) {
+    assert(src_w > 0 && src_h > 0);
+    stretched_fits++;
+}
+static void wine_nx_desktop_size(int *width, int *height) { *width = desktop_w; *height = desktop_h; }
+/* Called by the swap, and only logged by the real ones. */
+static void nx_note_program_gl(void) { }
+static void nx_drawable_screenshot(struct opengl_drawable *base) { }
+static int nx_prof_counted_line(unsigned int n) { return 0; }
+static void client_surface_update(struct client_surface *client) { client->funcs->update(client); }
+/* What the stall report reads back: when the open swap began, and the size and
+ * screen of the surface it presents into. */
+static unsigned long long nx_swap_begun_at;
+static unsigned int nx_swap_named;
+static int nx_swap_surface_w, nx_swap_surface_h, nx_swap_surface_screen;
 static void nx_log(const char *format, ...) { }
 static EGLSurface mock_create_pbuffer(void *display, EGLConfig config, const EGLint *attributes) {
     if (fail_pbuffer) return NULL;
@@ -161,7 +189,14 @@ static EGLSurface mock_create_pbuffer(void *display, EGLConfig config, const EGL
 }
 static EGLSurface mock_create_window(void *display, EGLConfig config, EGLNativeWindowType window, const EGLint *attributes) {
     if (fail_window) return NULL;
-    EGLSurface s = calloc(1, sizeof(*s)); s->window = TRUE; live_surfaces++; return s;
+    EGLSurface s = calloc(1, sizeof(*s));
+    s->window = TRUE; s->width = acquire_width; s->height = acquire_height; live_surfaces++; return s;
+}
+static int mock_query(void *display, EGLSurface surface, int attribute, int *value) {
+    assert(surface);
+    if (attribute == EGL_WIDTH) { *value = surface->width; return TRUE; }
+    if (attribute == EGL_HEIGHT) { *value = surface->height; return TRUE; }
+    return FALSE;
 }
 static BOOL mock_swap(void *display, EGLSurface surface) { assert(surface); swaps++; return TRUE; }
 static void mock_interval(void *display, int value) { intervals++; }
@@ -180,10 +215,12 @@ struct opengl_funcs {
     const char *(*p_eglQueryString)(void *, int);
     BOOL (*p_eglSwapBuffers)(void *, EGLSurface);
     void (*p_eglSwapInterval)(void *, int);
+    int (*p_eglQuerySurface)(void *, EGLSurface, int, int *);
 };
 static const struct egl_platform platform = { .configs = {1, 2}, .config_count = 2 };
 static const struct egl_platform *egl = &platform;
-static const struct opengl_funcs functions = {mock_create_pbuffer, mock_create_window, mock_destroy_surface, mock_error, mock_string, mock_swap, mock_interval};
+static const struct opengl_funcs functions = {mock_create_pbuffer, mock_create_window, mock_destroy_surface, mock_error,
+                                             mock_string, mock_swap, mock_interval, mock_query};
 static const struct opengl_funcs *funcs = &functions;
 '''
 
@@ -192,7 +229,7 @@ for name in ("nx_config_for_format", "nx_drawable_destroy", "nx_drawable_flush",
     implementation += function(nx, name)
 start = nx.index("static const struct opengl_drawable_funcs nx_drawable_funcs =")
 implementation += nx[start:nx.index("\n};", start) + 3]
-implementation += function(nx, "nx_surface_create")
+implementation += function(nx, "nx_offscreen_surface") + function(nx, "nx_surface_create")
 implementation += function(core, "get_target") + function(core, "drawable_matches_window")
 implementation += r'''
 static WND *get_win_ptr(HWND hwnd) { return hwnd; }
@@ -276,13 +313,19 @@ int main(void) {
     set_window_opengl_drawable(&probe, visible, TRUE);
     set_window_opengl_drawable(&probe, visible, FALSE);
     update(&probe, TRUE, 1280, 720);
-    assert(drawable_matches_window(visible));
-    update(&probe, FALSE, 1280, 720);
-    hidden = get_updated_drawable(NULL, 1, visible);
-    assert(hidden && !hidden->surface->window && screen_busy);
-    set_window_opengl_drawable(&probe, visible, FALSE);
-    assert(!probe.unused_drawable);
+    /* A window whose size changed no longer fits the drawable made for it. */
+    assert(!drawable_matches_window(visible));
+    struct opengl_drawable *grown = get_updated_drawable(NULL, 1, visible);
+    assert(grown && grown->surface->window && screen_busy);
+    update(&probe, TRUE, 1280, 720);
+    assert(drawable_matches_window(grown));   /* the same window again: the drawable is kept */
     opengl_drawable_release(visible);
+    update(&probe, FALSE, 1280, 720);
+    hidden = get_updated_drawable(NULL, 1, grown);
+    assert(hidden && !hidden->surface->window && screen_busy);
+    set_window_opengl_drawable(&probe, grown, FALSE);   /* hidden now: it is not taken */
+    assert(!probe.unused_drawable);
+    opengl_drawable_release(grown);
     assert(!screen_busy);
     clear(&probe, hidden);
 
@@ -330,9 +373,26 @@ int main(void) {
     assert(nx_surface_create(raw, 1, &hidden));
     assert(hidden->surface->width == 400 && hidden->surface->height == 200);
     clear(&probe, hidden); client_surface_release(raw);
+    /* A window larger than the desktop takes the desktop's size, a swap
+     * publishes the size it presented at for the stall report, and one that has
+     * to stand down for a Vulkan surface publishes nothing. */
+    WND oversized = {.visible = TRUE, .rect = {0, 0, 2560, 1440}};
+    struct opengl_drawable *whole = get_window_unused_drawable(&oversized, 1);
+    assert(whole && whole->surface->window && acquire_width == desktop_w && acquire_height == desktop_h);
+    unsigned int swaps_before = wine_nx_gl_swaps;
+    unsigned int fits_before = stretched_fits, overlays_before = overlays;
+    assert(whole->funcs->swap(whole) && wine_nx_gl_swaps == swaps_before + 1);
+    assert(stretched_fits == fits_before + 1);
+    assert(nx_swap_surface_w == desktop_w && nx_swap_surface_h == desktop_h && nx_swap_surface_screen == 1);
+    fits_before = stretched_fits; overlays_before = overlays;
+    vulkan_owns_screen = 1;
+    assert(whole->funcs->swap(whole) && wine_nx_gl_swaps == swaps_before + 1);
+    assert(stretched_fits == fits_before && overlays == overlays_before);
+    vulkan_owns_screen = 0;
+    clear(&oversized, whole);
     assert(!live_drawables && !live_surfaces && !screen_busy && !nx_screen_refs);
     for (unsigned int i = 0; i < 64; i++) assert(!clients[i]);
-    puts("OpenGL surfaces: offscreen probes, sharing, visibility, resizing, cached references, failures and Vulkan isolation passed");
+    puts("OpenGL surfaces: offscreen probes, sharing, visibility, resizing, cached references, failures, screen sizing and Vulkan isolation passed");
 }
 '''
 
@@ -341,7 +401,9 @@ with tempfile.TemporaryDirectory(prefix="autorun-gl-surfaces-") as directory:
     source = path / "gl_surfaces.c"
     source.write_text(fixture + implementation + checks)
     executable = path / "gl_surfaces"
-    subprocess.run(["clang", "-std=gnu11", "-Wall", "-Wextra", "-Werror",
-                    "-Wno-unused-parameter", "-Wno-unused-variable", "-fsanitize=address,undefined", "-pthread",
+    subprocess.run([os.environ.get("WINE_NX_HOST_CC", "cc"), "-std=gnu11", "-Wall", "-Wextra", "-Werror",
+                    "-Wno-unused-parameter", "-Wno-unused-variable",
+                    # The runtime's weak hooks are stubs here, so "&hook && hook()" is a constant.
+                    "-Wno-address", "-fsanitize=address,undefined", "-pthread",
                     str(source), "-o", str(executable)], check=True)
     subprocess.run([str(executable)], check=True)

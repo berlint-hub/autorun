@@ -46,9 +46,12 @@ struct horizon_server_object {
     struct horizon_server_object *thread_next, *wait_port, *file_completion, *mapping_shared_file;
     struct horizon_user_apc *apc_first, *apc_last;
     struct horizon_completion_queue completion;
-    void *reg_key;
+    void *reg_key, *mapping_version;
     char *file_name, *dir_mask, *name;
 };
+/* horizon_server_free_object() releases the file's locks first (horizon.c),
+ * which needs the whole file-lock table; nothing in this test takes one. */
+static void horizon_file_locks_release_locked(struct horizon_server_object *o) { (void)o; }
 static struct horizon_server_object *horizon_server_threads;
 static unsigned horizon_server_running_threads;
 static struct { unsigned thread_objects; } horizon_lifecycle;
@@ -58,18 +61,30 @@ static unsigned long long horizon_get_system_affinity_mask(void) { return 7; }
 static long long horizon_server_now(void) { return 12345; }
 static void horizon_reg_release(int *registry, void *key) { (void)registry; (void)key; assert(0); }
 struct horizon_obj_locator { unsigned long long id, offset; };
-struct horizon_queue_shm { unsigned wake_bits, changed_bits, wake_mask, changed_mask; };
+/* The queue's shared page: a thread's queue reports how many hooks are posted
+ * for it, one count per hook slot (dlls/ntdll/unix/horizon_hooks.h). */
+#define HORIZON_NB_HOOKS 17
+struct horizon_queue_shm { unsigned wake_bits, changed_bits, wake_mask, changed_mask;
+                           int hooks_count[HORIZON_NB_HOOKS]; };
 struct horizon_shared_object { unsigned long long id; struct { struct horizon_queue_shm queue; } shm; };
 static struct horizon_msgqs horizon_msg_queues;
 static struct horizon_obj_locator horizon_free_queue_shm[32];
 static unsigned horizon_free_queue_shm_count;
 static unsigned long long horizon_session_next_id;
+struct horizon_hook_entry;
+static struct horizon_hook_entry *horizon_hooks;
+int horizon_hook_count_for(struct horizon_hook_entry *hooks, int index, unsigned int tid) {
+    assert(hooks == horizon_hooks && index >= 0 && index < HORIZON_NB_HOOKS);
+    (void)tid; return 0;
+}
 static struct horizon_shared_object shared;
 static struct horizon_shared_object *horizon_server_shared_object_locked(struct horizon_obj_locator loc) {
     assert(!loc.offset); return &shared;
 }
 static void horizon_server_flush_session_range_locked(unsigned long long offset, size_t size) {
-    assert(!offset && size == sizeof(shared));
+    /* What a wake or a hook count change writes back: the queue's page, from
+     * the shared object's start through the end of the queue. */
+    assert(offset == 0 && size == offsetof(struct horizon_shared_object, shm) + sizeof(struct horizon_queue_shm));
 }
 static int horizon_server_alloc_shared_object_locked(size_t size, struct horizon_obj_locator *loc) {
     assert(size == sizeof(struct horizon_queue_shm));

@@ -158,7 +158,13 @@ NTSTATUS WINAPI NtQueryInformationProcess(HANDLE handle, PROCESSINFOCLASS class,
 #undef __SWITCH__
 '''
 signal = (root / 'dlls/ntdll/unix/signal_arm64.c').read_text()
-contexts = signal[signal.index('static NTSTATUS check_current_thread_context_access('):signal.index('/* Windows leaves the wait')]
+# The access check, and the two WoW64 context calls that use it. The slice used
+# to end at a comment that has since gone; it ends where the next function
+# begins, so the two calls are included and nothing after them is.
+start = signal.index('static NTSTATUS check_current_thread_context_access(')
+end = signal.index('extern void wine_nx_call_pe_apc(')
+contexts = signal[start:end]
+assert 'set_thread_wow64_context' in contexts and 'get_thread_wow64_context' in contexts
 context_fixture = r'''
 static TEB teb;
 #define NtCurrentTeb() (&teb)

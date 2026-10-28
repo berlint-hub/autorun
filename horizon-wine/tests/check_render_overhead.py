@@ -170,11 +170,14 @@ struct vk_device { void *vk_device; int (*p_vkFlushMappedMemoryRanges)(void *,un
 struct buffer {
     void *vk_memory, *map_ptr, *host_ptr;
     struct vk_device *vk_device;
-    int pinned, explicit_flush;
+    int pinned, explicit_flush, copy_on_flush;
     size_t map_length;
     unsigned map_access;
 };
 static unsigned wine_nx_gl_explicit_flushes;
+/* Bytes copied out of a mapping the driver would not take, which the [PROGRESS]
+ * line reports as copy_mb. */
+unsigned long long wine_nx_gl_copy_bytes;
 static int error;
 static void *clean_ptr; static size_t clean_size;
 static void set_gl_error(TEB *teb, int e) { error=e; }
@@ -198,6 +201,16 @@ int main(void) {
     flush_buffer(NULL,&b,0,4); assert(error==GL_INVALID_OPERATION);
     b.map_ptr=bytes; b.explicit_flush=0; error=0;
     flush_buffer(NULL,&b,0,4); assert(!error && wine_nx_gl_explicit_flushes==1);
+    /* Unpinned, the mapping is copied to the buffer's own memory instead: the
+     * bytes land where the program put them, and the count says how many. */
+    b.map_ptr=bytes+64; b.host_ptr=bytes; b.pinned=0; b.copy_on_flush=1;
+    memset(bytes,0,sizeof(bytes)); memset(bytes+64,0x5a,64);
+    flush_buffer(NULL,&b,8,16);
+    assert(!error && wine_nx_gl_copy_bytes==16);
+    for (int i=8;i<24;i++) assert((unsigned char)bytes[i]==0x5a);
+    flush_buffer(NULL,&b,120,9); assert(error==GL_INVALID_VALUE && wine_nx_gl_copy_bytes==16);
+    error=0; b.map_ptr=NULL;
+    flush_buffer(NULL,&b,0,4); assert(error==GL_INVALID_VALUE && wine_nx_gl_copy_bytes==16);
 }
 '''
 run('Pinned flush mapping offsets, bounds, overflow, unmapped and conservative fallback',prefix+function(s,'flush_buffer')+test)

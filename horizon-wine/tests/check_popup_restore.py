@@ -13,6 +13,8 @@ core = source[source.index('struct wine_nx_surface\n'):source.index('/**********
 position = source[source.index('void wine_nx_drv_WindowPosChanged('):]
 fixture = r'''
 #include <assert.h>
+#include <pthread.h>
+#include <unistd.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -26,11 +28,16 @@ typedef struct { LONG x, y; } POINT;
 typedef struct { struct { int biWidth, biHeight; } bmiHeader; DWORD bmiColors[256]; } BITMAPINFO;
 #define TRUE 1
 #define FALSE 0
+#define ARRAY_SIZE(a) (sizeof(a)/sizeof((a)[0]))
+#define max(a,b) ((a) > (b) ? (a) : (b))
+#define min(a,b) ((a) < (b) ? (a) : (b))
 #define FIELD_OFFSET(t,f) offsetof(t,f)
 #define CONTAINING_RECORD(p,t,f) ((t *)((char *)(p) - offsetof(t,f)))
 #define WS_POPUP 0x80000000u
 #define GWL_STYLE -16
 #define GW_OWNER 4
+#define GW_CHILD 5
+#define GW_HWNDNEXT 2
 #define GA_ROOT 2
 #define SWP_HIDEWINDOW 0x80
 #define RDW_INVALIDATE 1
@@ -40,8 +47,11 @@ typedef struct { struct { int biWidth, biHeight; } bmiHeader; DWORD bmiColors[25
 #define RDW_UPDATENOW 0x100
 struct window_rects { RECT window, client, visible; };
 struct window_surface;
+/* A DPI as Wine's own server protocol holds it (include/wine/server_protocol.h). */
+struct ratio { unsigned short num, den; };
 struct window_surface_funcs {
-    void (*clip)(struct window_surface *, const RECT *, UINT);
+    const UINT size;
+    void (*set_clip)(struct window_surface *, const RECT *, UINT);
     BOOL (*flush)(struct window_surface *, const RECT *, const RECT *, const BITMAPINFO *, const void *, BOOL, const BITMAPINFO *, const void *);
     void (*destroy)(struct window_surface *);
 };
@@ -79,10 +89,35 @@ static void *window_surface_get_color(struct window_surface *s, BITMAPINFO *info
     info->bmiHeader.biWidth = s->rect.right; info->bmiHeader.biHeight = -s->rect.bottom; return s->pixels;
 }
 static struct window_surface *window_surface_get(HWND h) { return h < 4 ? surfaces[h] : NULL; }
-static void get_win_monitor_dpi(HWND h, UINT *dpi) { *dpi = 96; }
-static struct window_surface *get_driver_window_surface(struct window_surface *s, UINT dpi) { return s; }
+static struct ratio get_win_monitor_dpi(HWND h, struct ratio *raw) { (void)h; *raw = (struct ratio){96, 96}; return *raw; }
+static struct window_surface *get_driver_window_surface(struct window_surface *s, struct ratio dpi) { (void)dpi; return s; }
 static DWORD get_window_long(HWND h, int offset) { return h > 1 ? WS_POPUP : 0; }
-static HWND get_window_relative(HWND h, UINT rel) { return h > 1 ? 1 : 0; }
+/* The desktop's child chain, which is only walked to restack: every window is
+ * at the top of it in turn, ending after the last one. */
+static HWND get_desktop_window(void) { return (HWND)0x100; }
+/* The compositor and the desktop's fit live in the runtime; the surfaces here
+ * have no layers, so these only have to link. */
+static int layer_places, layers_destroyed, rests;
+void wine_nx_layer_place(struct wine_nx_layer *l, int x, int y, int w, int h) { assert(!l); layer_places++; }
+void wine_nx_layer_update(struct wine_nx_layer *l, const uint32_t *pixels, int stride,
+                          int left, int top, int right, int bottom) { assert(!l); }
+void wine_nx_layer_destroy(struct wine_nx_layer *l) { assert(!l); layers_destroyed++; }
+void wine_nx_compositor_restack(struct wine_nx_layer **l, int count) { rests++; }
+/* The panel and the desktop are the screen, so a screen point is a panel point. */
+void wine_nx_desktop_size(int *w, int *h) { *w = 320; *h = 300; }
+void wine_nx_present_fit(int sw, int sh, int sx, int sy, int *dx, int *dy, int *dw, int *dh) {
+    /* The panel is the whole desktop, so the fit is the whole rectangle. */
+    if (dx) *dx = 0;
+    if (dy) *dy = 0;
+    if (dw) *dw = sw;
+    if (dh) *dh = sh;
+}
+void wine_nx_screen_to_panel(double x, double y, int *px, int *py) { *px = x; *py = y; }
+void wine_nx_panel_to_screen(int px, int py, double *x, double *y) { *x = px; *y = py; }
+int wine_nx_pointer_poll(int *x, int *y, unsigned int *buttons) { *x = *y = 0; *buttons = 0; return 0; }
+static HWND get_window_relative(HWND h, UINT rel) {
+    return h == (HWND)0x100 ? (HWND)1 : (rel == GW_HWNDNEXT && h < 3 ? h + 1 : 0);
+}
 static HWND NtUserWindowFromPoint(int x, int y) { return 1; }
 static HWND get_active_window(void) { return 1; }
 static HWND get_focus(void) { return 1; }
@@ -140,5 +175,6 @@ with tempfile.TemporaryDirectory(prefix='wine-nx-popup-') as temp:
     src = Path(temp) / 'test.c'
     exe = Path(temp) / 'test'
     src.write_text(fixture + core + position + tests)
-    subprocess.run(['cc', '-g', '-Wno-pointer-bool-conversion', '-fsanitize=address,undefined', str(src), '-o', str(exe)], check=True)
+    subprocess.run(['cc', '-g', '-Wno-pointer-bool-conversion', '-fsanitize=address,undefined',
+                    '-pthread', str(src), '-o', str(exe)], check=True)
     subprocess.run([str(exe)], check=True)

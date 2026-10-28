@@ -13,6 +13,7 @@ import tempfile
 
 root = Path(__file__).resolve().parents[2]
 stubs = (root / 'horizon-wine/source/ws2_32_unix_stub.c').read_text()
+crypt32 = (root / 'horizon-wine/source/crypt32_roots.c').read_text()
 
 def enum_count(header, enum, last):
     text = (root / header).read_text()
@@ -21,19 +22,36 @@ def enum_count(header, enum, last):
     assert names[-1] == last, (header, names[-1])
     return len(names) - 1
 
-def table_size(name):
-    return int(re.search(r'const unixlib_entry_t %s\[(\d+)\]' % name, stubs).group(1))
+def table_size(name, source):
+    """Entries in a table's initializer, whose declared size may be left to the
+    compiler (`[]`) and asserted elsewhere: a number written here instead would
+    be the very thing that drifts when the DLL's enum grows."""
+    match = re.search(r'const unixlib_entry_t %s\[[^\]]*\] =\n\{(.*?)\n\};' % name, source, re.S)
+    assert match, f'{name} has no initializer'
+    body = re.sub(r'/\*.*?\*/', '', match.group(1), flags=re.S)
+    entries = [entry.strip() for entry in body.split(',') if entry.strip()]
+    assert entries, f'{name} is empty'
+    declared = re.search(r'const unixlib_entry_t %s\[(\d+)\]' % name, source)
+    if declared:
+        assert int(declared.group(1)) == len(entries), \
+            f'{name} declares {declared.group(1)} entries and has {len(entries)}'
+    return len(entries)
 
+# Each table lives beside what serves it: ws2_32's stub in its own file, and
+# crypt32's, which moved there when the real calls arrived.
 checks = [
-    ('wine_nx_ws2_32_wow64_unix_funcs', 'dlls/ws2_32/ws2_32_private.h', 'ws_unix_funcs', 'ws_unix_funcs_count'),
-    ('wine_nx_crypt32_wow64_unix_funcs', 'dlls/crypt32/crypt32_private.h', 'unix_funcs', 'unix_funcs_count'),
+    ('wine_nx_ws2_32_wow64_unix_funcs', stubs, 'dlls/ws2_32/ws2_32_private.h',
+     'ws_unix_funcs', 'ws_unix_funcs_count'),
+    ('wine_nx_crypt32_wow64_unix_funcs', crypt32, 'dlls/crypt32/crypt32_private.h',
+     'unix_funcs', 'unix_funcs_count'),
 ]
-for table, header, enum, last in checks:
+for table, source, header, enum, last in checks:
     count = enum_count(header, enum, last)
-    size = table_size(table)
+    size = table_size(table, source)
     assert size == count, f'{table} has {size} entries, {header} defines {count}'
     name = table.replace('_funcs', '_count')
-    assert f'const unsigned int {name} = ARRAY_SIZE({table});' in stubs, f'{name} must be the size of {table}'
+    assert f'const unsigned int {name} = ARRAY_SIZE({table});' in source, \
+        f'{name} must be the size of {table}'
 
 # opengl32 and winenxaudio.drv have their real unix tables linked in, so their
 # bound has to come from the DLL's own enum rather than a length written here.
@@ -93,11 +111,38 @@ const unixlib_entry_t wine_nx_opengl32_wow64_unix_funcs[3] = { gl_call, gl_call,
 const unixlib_entry_t wine_nx_audio_wow64_unix_funcs[2] = { audio_call, audio_call };
 const unixlib_entry_t wine_nx_crypt32_wow64_unix_funcs[2] = { crypt_call, crypt_call };
 const unixlib_entry_t wine_nx_xinput_wow64_unix_funcs[2] = { xinput_call, xinput_call };
+/* The modules the gate serves that this test does not drive: a table and its
+ * count, so its dispatch table compiles against what it names. */
+const unixlib_entry_t wine_nx_dnsapi_wow64_unix_funcs[2] = { ws2_call, ws2_call };
+const unixlib_entry_t wine_nx_secur32_wow64_unix_funcs[2] = { crypt_call, crypt_call };
+const unixlib_entry_t wine_nx_wma_wow64_unix_funcs[2] = { audio_call, audio_call };
+const unixlib_entry_t wine_nx_winedmo_wow64_unix_funcs[2] = { audio_call, audio_call };
+const unixlib_entry_t wine_nx_media_wow64_unix_funcs[2] = { audio_call, audio_call };
 const unsigned int wine_nx_ws2_32_wow64_unix_count = 5;
 const unsigned int wine_nx_opengl32_wow64_unix_count = 3;
 const unsigned int wine_nx_audio_wow64_unix_count = 2;
 const unsigned int wine_nx_crypt32_wow64_unix_count = 2;
 const unsigned int wine_nx_xinput_wow64_unix_count = 2;
+const unsigned int wine_nx_dnsapi_wow64_unix_count = 2;
+const unsigned int wine_nx_secur32_wow64_unix_count = 2;
+const unsigned int wine_nx_wma_wow64_unix_count = 2;
+const unsigned int wine_nx_winedmo_wow64_unix_count = 2;
+const unsigned int wine_nx_media_wow64_unix_count = 2;
+/* What the gate's own table names for the native side it dispatches to when no
+ * table matched, plus the two the fixture drives through the 32-bit gate. */
+const unixlib_entry_t wine_nx_ws2_32_unix_funcs[5] = { ws2_call, ws2_call, ws2_call, ws2_call, ws2_call };
+const unixlib_entry_t wine_nx_dnsapi_unix_funcs[2] = { ws2_call, ws2_call };
+const unixlib_entry_t wine_nx_crypt32_unix_funcs[2] = { crypt_call, crypt_call };
+const unixlib_entry_t wine_nx_secur32_unix_funcs[2] = { crypt_call, crypt_call };
+const unixlib_entry_t wine_nx_opengl32_unix_funcs[3] = { gl_call, gl_call, gl_call };
+const unixlib_entry_t wine_nx_audio_unix_funcs[2] = { audio_call, audio_call };
+const unixlib_entry_t wine_nx_wma_unix_funcs[2] = { audio_call, audio_call };
+const unixlib_entry_t wine_nx_winedmo_unix_funcs[2] = { audio_call, audio_call };
+const unixlib_entry_t wine_nx_media_unix_funcs[2] = { audio_call, audio_call };
+const unixlib_entry_t wine_nx_xinput_unix_funcs[2] = { xinput_call, xinput_call };
+const unsigned int wine_nx_wma_unix_count = 2;
+const unsigned int wine_nx_winedmo_unix_count = 2;
+const unsigned int wine_nx_media_unix_count = 2;
 /* opengl32's calls are timed as they are dispatched (wine_nx_gl_profile). */
 struct wine_nx_gl_profile_entry { unsigned long long time; unsigned int calls; };
 struct wine_nx_gl_profile_entry wine_nx_gl_profile_entries[8];
@@ -145,4 +190,4 @@ with tempfile.TemporaryDirectory() as tmp:
 print('PASS: the ws2_32 (%d) and crypt32 (%d) stub tables match their DLL enums, audio and XInput '
       'count their native and WoW64 tables; the x86 unix call gate reaches ntdll and every static table '
       'within its size, times opengl32 calls and refuses other handles'
-      % (table_size(checks[0][0]), table_size(checks[1][0])))
+      % (table_size(checks[0][0], checks[0][1]), table_size(checks[1][0], checks[1][1])))

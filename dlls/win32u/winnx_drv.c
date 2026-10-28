@@ -409,15 +409,15 @@ static HWND wine_nx_find_popup_restore_owner( HWND hwnd, HWND owner_hint, const 
     return owner;
 }
 
-static void wine_nx_restore_popup_owner( HWND hwnd, HWND owner_hint, const RECT *old_rect )
+static BOOL wine_nx_restore_popup_owner( HWND hwnd, HWND owner_hint, const RECT *old_rect )
 {
     HWND owner;
     BOOL presented;
 
-    if (!(get_window_long( hwnd, GWL_STYLE ) & WS_POPUP)) return;
+    if (!(get_window_long( hwnd, GWL_STYLE ) & WS_POPUP)) return FALSE;
     wine_nx_note_surface_hidden( hwnd );
     owner = wine_nx_find_popup_restore_owner( hwnd, owner_hint, old_rect );
-    if (!owner || owner == hwnd) return;
+    if (!owner || owner == hwnd) return FALSE;
 
     presented = wine_nx_present_hwnd_surface( owner, old_rect );
     wine_nx_present_visible_popups( hwnd );
@@ -426,6 +426,9 @@ static void wine_nx_restore_popup_owner( HWND hwnd, HWND owner_hint, const RECT 
     if (!presented)
         NtUserRedrawWindow( owner, NULL, 0, RDW_INVALIDATE | RDW_ERASE | RDW_FRAME |
                            RDW_ALLCHILDREN | RDW_UPDATENOW );
+    /* The owner's blit published itself; the caller only has to publish when
+     * nothing was drawn over the popup. */
+    return presented;
 }
 
 static void wine_nx_surface_set_clip( struct window_surface *surface, const RECT *rects, UINT count )
@@ -1069,8 +1072,10 @@ void wine_nx_drv_WindowPosChanged( HWND hwnd, HWND insert_after, HWND owner_hint
         wine_nx_note_surface_hidden( hwnd );
         /* The compositor shows what was under the window by itself. */
         if (wine_nx_hide_window_layer( hwnd )) return;
-        wine_nx_restore_popup_owner( hwnd, owner_hint, has_old_screen_rect ? &old_screen_rect : NULL );
-        wine_nx_fb_present();
+        /* One publish per hide: the owner's present already put the pixels the
+         * popup covered back on the panel. */
+        if (!wine_nx_restore_popup_owner( hwnd, owner_hint, has_old_screen_rect ? &old_screen_rect : NULL ))
+            wine_nx_fb_present();
         return;
     }
     if (surface)

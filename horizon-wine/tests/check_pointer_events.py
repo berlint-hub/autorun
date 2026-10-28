@@ -40,6 +40,28 @@ static NTSTATUS get_shared_desktop(struct object_lock *lock, const desktop_shm_t
 static void wine_nx_pointer_follow(int x, int y) { assert(0); }
 extern void wine_nx_runtime_trace(const char *line) __attribute__((weak));
 typedef long LPARAM;
+typedef long INT_PTR;
+/* The window tree a close walks: one visible top level window, reachable from
+ * the desktop, and a second one that is not visible. */
+#define GW_CHILD 5
+#define GW_HWNDNEXT 2
+#define GW_OWNER 4
+#define WM_CLOSE 0x0010
+static int posted_to;
+static HWND get_desktop_window(void) { return (HWND)0x200; }
+static HWND get_window_relative(HWND hwnd, UINT rel) {
+    static const HWND children[] = { (HWND)0x300, (HWND)0x400 };
+    if (hwnd == (HWND)0x200 && rel == GW_CHILD) return children[0];
+    if (hwnd == children[0] && rel == GW_HWNDNEXT) return children[1];
+    return NULL;
+}
+static int is_window_visible(HWND hwnd) { return hwnd == (HWND)0x300; }
+static int NtUserPostMessage(HWND hwnd, UINT msg, LPARAM w, LPARAM l) {
+    assert(msg == WM_CLOSE && !w && !l);
+    posted_to++;
+    return 1;
+}
+static int NtGetTickCount(void) { return 1000; }
 #define TRUE 1
 #define FALSE 0
 #define INPUT_MOUSE 0
@@ -80,6 +102,9 @@ static void wine_nx_input_take(struct input_snapshot *out) { *out = state; }
 static void wine_nx_pointer_set_pos(int x, int y) { set_x = x; set_y = y; }
 static void wine_nx_fb_present(void) { presents++; }
 static void nxdrv_trace(const char *fmt, int a, int b, int c, int d) {}
+/* Set by the launcher's request to quit; ProcessEvents posts WM_CLOSE once and
+ * the weak reference in the production code tests it. */
+int wine_nx_close_asked;
 static void nxdrv_trace_hot(const char *fmt, int a, int b, int c, int d) {}
 static HKL NtUserGetKeyboardLayout(DWORD id) { return (HKL)1; }
 static UINT NtUserMapVirtualKeyEx(UINT vk, UINT type, HKL layout) {
@@ -88,8 +113,17 @@ static UINT NtUserMapVirtualKeyEx(UINT vk, UINT type, HKL layout) {
     if (vk == VK_RETURN) return 0x1c;
     return 0x1e;
 }
+/* The trailing no-coalesce click is a hint to the server, not an event the
+ * program sees: counted, not recorded as state. */
+static int flushes;
 static UINT NtUserSendHardwareInput(HWND hwnd, UINT flags, const INPUT *input, LPARAM lparam) {
-    assert(!hwnd && !flags && !lparam && sent_count < 128);
+    assert(!hwnd && !flags && !lparam);
+    if (input->type == INPUT_MOUSE && input->mi.dwFlags == MOUSEEVENTF_MOVE_NOCOALESCE)
+    {
+        flushes++;
+        return TRUE;
+    }
+    assert(sent_count < 128);
     if (reenter) { reenter = 0; assert(!wine_nx_drv_ProcessEvents(0)); }
     sent[sent_count++] = *input; return TRUE;
 }
@@ -105,6 +139,8 @@ static long long take(int moved, int x, int y, unsigned int held, unsigned int p
         .buttons = held, .pressed = pressed, .released = released };
     ret = wine_nx_drv_ProcessEvents(0);
     assert(sent_count - before <= 2);
+    assert(flushes == 1);   /* one batch, one flush */
+    flushes = 0;
     assert(ret == (sent_count != before));
     if (sent_count == before) return -1;
     for (i = before; i < sent_count; i++) {
@@ -209,8 +245,17 @@ int main(void) {
     assert(sent[5].mi.dwFlags == MOUSEEVENTF_XUP && sent[5].mi.mouseData == XBUTTON2);
     assert(sent[6].mi.dwFlags == MOUSEEVENTF_WHEEL && sent[6].mi.mouseData == 120);
     assert(sent[7].mi.dwFlags == MOUSEEVENTF_HWHEEL && (int)sent[7].mi.mouseData == -120);
+    /* A quit asked for by the launcher closes the program's visible windows,
+     * once, and asks nothing of the program when it is not asked. */
+    wine_nx_close_asked = 1;
+    sent_count = 0;
+    state = (struct input_snapshot){ 0 };
+    assert(!wine_nx_drv_ProcessEvents(0) && posted_to == 1 && sent_count == 0);
+    assert(!wine_nx_drv_ProcessEvents(0) && posted_to == 1 && sent_count == 0);
+    wine_nx_close_asked = 0;
+
     puts("PASS: stick moves, A left and B right clicks, drag, touch press, clicks between calls, cursor visibility "
-         "and SetCursorPos");
+         "and SetCursorPos, and one WM_CLOSE per quit request");
     return 0;
 }
 '''
@@ -218,6 +263,7 @@ with tempfile.TemporaryDirectory(prefix='wine-nx-pointer-') as temp:
     src = Path(temp) / 'test.c'
     exe = Path(temp) / 'test'
     src.write_text(fixture + defines + events + tests)
-    subprocess.run(['cc', '-g', '-Wall', '-Werror', '-Wno-unused-function', '-fsanitize=address,undefined',
+    subprocess.run(['cc', '-g', '-Wall', '-Werror', '-Wno-unused-function', '-Wno-address',
+                    '-fsanitize=address,undefined',
                     '-I', str(root / 'horizon-wine/source'), str(src), '-o', str(exe)], check=True)
     subprocess.run([str(exe)], check=True)
