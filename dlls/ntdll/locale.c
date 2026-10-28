@@ -364,6 +364,26 @@ void locale_init(void)
         }
     }
 
+    /* The launcher can request a per-program Windows locale. Unlike the
+     * manifest's activeCodePage, this is an explicit user override: apply it
+     * last so ANSI/OEM conversions and the default locale APIs agree. */
+    if (!RtlQueryEnvironmentVariable( NULL, L"WINE_NX_WINDOWS_LOCALE", 22,
+                                      locale, ARRAY_SIZE(locale), &size ))
+    {
+        const NLS_LOCALE_LCNAME_INDEX *entry = find_lcname_entry( locale_table, locale );
+
+        if (entry)
+        {
+            const NLS_LOCALE_DATA *data = get_locale_data( locale_table, entry->idx );
+
+            system_lcid = data->idefaultlanguage;
+            ansi_cp = data->idefaultansicodepage;
+            oem_cp = data->idefaultcodepage;
+            NtSetDefaultLocale( FALSE, system_lcid );
+            NtSetDefaultLocale( TRUE, system_lcid );
+        }
+    }
+
     NtGetNlsSectionPtr( 10, 0, NULL, &case_ptr, &size );
     NtCurrentTeb()->Peb->UnicodeCaseTableData = case_ptr;
     if (peb64) peb64->UnicodeCaseTableData = PtrToUlong( case_ptr );

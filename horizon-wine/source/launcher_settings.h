@@ -187,6 +187,7 @@ struct launcher_settings
     int profile;      /* the sampling profiler */
     int fast_sync;
     int windows_xp;  /* report Windows XP SP3 to this program's version APIs */
+    int windows_czech;  /* use Czech (Czechia) locale and Windows codepage 1250 */
     int fex;      /* 0: Box64, 1: FEX, 2: FEX optimized, -1: fex-variant.txt decides */
     int four_cores;
     int lazy_file_views;  /* views of files read from the card on demand */
@@ -497,6 +498,8 @@ static inline void launcher_settings_read( const struct launcher_kv *kv, struct 
     settings->fast_sync = launcher_kv_get( kv, "sync", value, sizeof(value) ) && !strcasecmp( value, "horizon" );
     settings->windows_xp = launcher_kv_get( kv, "windows-version", value, sizeof(value) ) &&
                            !strcasecmp( value, "winxp" );
+    settings->windows_czech = launcher_kv_get( kv, "windows-locale", value, sizeof(value) ) &&
+                              !strcasecmp( value, "cs-CZ" );
     if (!launcher_kv_get( kv, "cpu", value, sizeof(value) )) settings->fex = -1;
     else if (!strcasecmp( value, "box64" )) settings->fex = 0;
     else if (!strcasecmp( value, "fex-opt" )) settings->fex = 2;
@@ -654,13 +657,15 @@ static inline int launcher_settings_write( struct launcher_kv *kv, const struct 
         settings->scaling < 0 || settings->scaling >= LAUNCHER_SCALING_COUNT ||
         settings->upscaling_sharpness < 0 || settings->upscaling_sharpness >= LAUNCHER_SHARPNESS_COUNT ||
         settings->gl_driver < 0 || settings->gl_driver >= LAUNCHER_GL_DRIVER_COUNT ||
-        settings->windows_xp < 0 || settings->windows_xp > 1) return 0;
+        settings->windows_xp < 0 || settings->windows_xp > 1 ||
+        settings->windows_czech < 0 || settings->windows_czech > 1) return 0;
     return launcher_kv_set( kv, "title", settings->title[0] ? settings->title : NULL ) &&
            launcher_kv_set( kv, "hidden", settings->hidden ? "1" : NULL ) &&
            launcher_kv_set( kv, "verbose", states[settings->verbose + 1] ) &&
            launcher_kv_set( kv, "profile", states[settings->profile + 1] ) &&
            launcher_kv_set( kv, "sync", settings->fast_sync ? "horizon" : NULL ) &&
            launcher_kv_set( kv, "windows-version", settings->windows_xp ? "winxp" : NULL ) &&
+           launcher_kv_set( kv, "windows-locale", settings->windows_czech ? "cs-CZ" : NULL ) &&
            launcher_kv_set( kv, "cpu", settings->fex < 0 ? NULL :
                                        settings->fex == 0 ? "box64" :
                                        settings->fex == 2 ? "fex-opt" : "fex" ) &&

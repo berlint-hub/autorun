@@ -1835,7 +1835,7 @@ enum program_row
 {
     ROW_START, ROW_PRESET, ROW_COPY, ROW_FAVORITE, ROW_ARTWORK, ROW_FORWARDER, ROW_LOCATE, ROW_PLAYED, ROW_TITLE,
     ROW_ARGS, ROW_RESET, ROW_VERBOSE, ROW_PROFILE,
-    ROW_WINDOWS, ROW_WINDOWS_VERSION, ROW_SCALING, ROW_RESOLUTION, ROW_D3D9, ROW_VKD3D_VERSION, ROW_DXVK_VERSION, ROW_DXVK_OPTIONS, ROW_DXVK_HUD, ROW_FRAME_LIMIT, ROW_FRAME_LIMIT_SYNC, ROW_VSYNC,
+    ROW_WINDOWS, ROW_WINDOWS_VERSION, ROW_WINDOWS_LOCALE, ROW_SCALING, ROW_RESOLUTION, ROW_D3D9, ROW_VKD3D_VERSION, ROW_DXVK_VERSION, ROW_DXVK_OPTIONS, ROW_DXVK_HUD, ROW_FRAME_LIMIT, ROW_FRAME_LIMIT_SYNC, ROW_VSYNC,
     ROW_VOODOO,
     ROW_LSFG, ROW_LSFG_DLL, ROW_LSFG_PERFORMANCE, ROW_LSFG_FLOW,
     ROW_UPSCALING, ROW_UPSCALING_SHARPNESS, ROW_GL_THREAD, ROW_GL_YEAR, ROW_GL_DRIVER,
@@ -2925,6 +2925,17 @@ static int program_menu_run( struct launcher *l, struct program *p, char *target
             row->choices = 2;
             snprintf( row->value, sizeof(row->value), "%s", names[p->settings.windows_xp != 0] );
         }
+        if (x86 || x64)
+        {
+            static const char *const names[] = { "Default", "Čeština (Česko)" };
+
+            ADD_ROW( ROW_WINDOWS_LOCALE, SECTION_EMULATION, "Windows locale",
+                     "Uses Czech (Czechia) regional settings and Windows code pages 1250/852 for this game. "
+                     "Does not translate the game or add missing characters to its own fonts." );
+            row->kind = UI_ROW_DROPDOWN;
+            row->choices = 2;
+            snprintf( row->value, sizeof(row->value), "%s", names[p->settings.windows_czech != 0] );
+        }
         ADD_ROW( ROW_FOUR_CORES, SECTION_EMULATION, "4-core support",
                  l->options->four_cores_available
                  ? "Moves graphics workers to core 3. Game threads stay on cores 0-2."
@@ -3596,6 +3607,25 @@ static int program_menu_run( struct launcher *l, struct program *p, char *target
             }
             else break;
             p->settings.windows_xp = selected;
+            save_program_settings( l, p );
+            break;
+        }
+
+        case ROW_WINDOWS_LOCALE:
+        {
+            static const char *const names[] = { "Default", "Čeština (Česko)" };
+            struct ui_row items[2] = {0};
+            int selected;
+
+            if (action == UI_ACTION_RESET) selected = 0;
+            else if (action == UI_ACTION_CHOOSE)
+            {
+                for (i = 0; i < 2; i++) snprintf( items[i].label, sizeof(items[i].label), "%s", names[i] );
+                selected = ui_settings_dropdown( ui, &list, items, 2, p->settings.windows_czech );
+                if (selected < 0) break;
+            }
+            else break;
+            p->settings.windows_czech = selected;
             save_program_settings( l, p );
             break;
         }

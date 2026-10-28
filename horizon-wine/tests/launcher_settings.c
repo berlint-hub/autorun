@@ -71,7 +71,8 @@ static void test_settings( const char *dir )
     load_text( &kv, "" );
     launcher_settings_read( &kv, &settings );
     assert( !settings.fast_sync && settings.fex && settings.four_cores &&
-            settings.d3d == LAUNCHER_D3D_DXVK && !settings.resolution && !settings.windows_xp );
+            settings.d3d == LAUNCHER_D3D_DXVK && !settings.resolution && !settings.windows_xp &&
+            !settings.windows_czech );
     load_text( &kv, "windows-version=winxp\n" );
     launcher_settings_read( &kv, &settings );
     assert( settings.windows_xp && launcher_settings_write( &kv, &settings ) &&
@@ -83,6 +84,17 @@ static void test_settings( const char *dir )
     load_text( &kv, "windows-version=win7\n" );
     launcher_settings_read( &kv, &settings );
     assert( !settings.windows_xp );
+    load_text( &kv, "windows-locale=cs-CZ\n" );
+    launcher_settings_read( &kv, &settings );
+    assert( settings.windows_czech && launcher_settings_write( &kv, &settings ) &&
+            strstr( kv.text, "windows-locale=cs-CZ" ) );
+    launcher_settings_read( &kv, &back );
+    assert( back.windows_czech );
+    settings.windows_czech = 0;
+    assert( launcher_settings_write( &kv, &settings ) && !strstr( kv.text, "windows-locale=" ) );
+    load_text( &kv, "windows-locale=cs\n" );
+    launcher_settings_read( &kv, &settings );
+    assert( !settings.windows_czech );
     load_text( &kv, "four-cores=0\n" );
     launcher_settings_read( &kv, &settings );
     assert( !settings.four_cores && launcher_settings_write( &kv, &settings ) );
@@ -426,6 +438,10 @@ static void test_write_refuses_what_it_cannot_say(void)
     assert( !launcher_settings_write( &kv, &settings ) );
     settings.windows_xp = 0;
 
+    settings.windows_czech = 2;
+    assert( !launcher_settings_write( &kv, &settings ) );
+    settings.windows_czech = 0;
+
     assert( launcher_settings_write( &kv, &settings ) );
 }
 
@@ -440,6 +456,8 @@ static void test_copy(void)
     snprintf( from.title, sizeof(from.title), "SPEED2" );
     from.hidden = 1;
     from.fex = 2;
+    from.windows_xp = 1;
+    from.windows_czech = 1;
     from.d3d = LAUNCHER_D3D_DXVK_VKD3D;
     from.frame_limit = 3;
     from.vsync = 0;
@@ -453,6 +471,7 @@ static void test_copy(void)
     launcher_settings_copy( &to, &from );
     assert( !strcmp( to.title, "Mine" ) && to.hidden == 0 );   /* the game's own */
     assert( to.fex == 2 && to.d3d == LAUNCHER_D3D_DXVK_VKD3D && to.frame_limit == 3 && !to.vsync );
+    assert( to.windows_xp && to.windows_czech );
     assert( to.upscaling == 1 && to.lsfg_enabled == 1 && !strcmp( to.dxvk_version, "2.4.1" ) );
     /* The game it came from is left as it was. */
     assert( !strcmp( from.title, "SPEED2" ) && from.hidden == 1 );

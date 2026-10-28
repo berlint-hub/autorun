@@ -791,6 +791,7 @@ static const char *runtime_fex_variant;
 static char runtime_fex_module_tag[48];
 static int runtime_four_cores;
 static int runtime_windows_xp;
+static int runtime_windows_czech;
 static int runtime_dxvk_hud;
 static char runtime_vkd3d_version[32];
 static char runtime_dxvk_version[32];
@@ -2601,9 +2602,10 @@ static const char runtime_environment[] =
     "WINE_D3D_CONFIG=cs_spin_count=64,explicit_buffer_flush=1\0"
     "WINE_NX_GRAPHICS_PATH=\0";
 
-/* ntdll reads this Wine-specific process setting while initializing its
- * version APIs; child processes inherit it, while unrelated launches do not. */
+/* ntdll reads these Wine-specific process settings during locale/version
+ * initialization; child processes inherit them, unrelated launches do not. */
 static const char runtime_windows_version_environment[] = "WINE_NX_WINDOWS_VERSION=winxp";
+static const char runtime_windows_locale_environment[] = "WINE_NX_WINDOWS_LOCALE=cs-CZ";
 
 static size_t runtime_fex_environment( const char *target, char *buffer, size_t size )
 {
@@ -3036,6 +3038,7 @@ static RTL_USER_PROCESS_PARAMETERS *runtime_create_process_params( const char *t
     chars += strlen( nt_path ) + 1;
     chars += sizeof(runtime_environment) + 2 * strlen( graphics_path ) + strlen( dxvk_hud ) - 1;
     if (runtime_windows_xp) chars += sizeof(runtime_windows_version_environment);
+    if (runtime_windows_czech) chars += sizeof(runtime_windows_locale_environment);
     chars += fex_environment_size;
     if (left4dead) chars += sizeof(LEFT4DEAD_ENVIRONMENT) - 1;
     size = sizeof(*params) + chars * sizeof(WCHAR);
@@ -3086,6 +3089,9 @@ static RTL_USER_PROCESS_PARAMETERS *runtime_create_process_params( const char *t
     if (runtime_windows_xp)
         for (i = 0; i < sizeof(runtime_windows_version_environment); i++)
             *cursor++ = (unsigned char)runtime_windows_version_environment[i];
+    if (runtime_windows_czech)
+        for (i = 0; i < sizeof(runtime_windows_locale_environment); i++)
+            *cursor++ = (unsigned char)runtime_windows_locale_environment[i];
     for (i = 0; i < fex_environment_size; i++) *cursor++ = (unsigned char)fex_environment[i];
     if (left4dead)
         for (i = 0; i < sizeof(LEFT4DEAD_ENVIRONMENT) - 1; i++)
@@ -5378,6 +5384,7 @@ int main( int argc, char **argv )
 #endif
         runtime_four_cores = 1;
         runtime_windows_xp = 0;
+        runtime_windows_czech = 0;
         horizon_fast_sync_enabled = 0;
         wine_nx_scaling_mode = SCREEN_SCALING_ASPECT;
 #ifdef WINE_NX_MESA_SWITCH
@@ -5402,6 +5409,9 @@ int main( int argc, char **argv )
             runtime_windows_xp = settings.windows_xp;
             if (runtime_windows_xp)
                 log_line( "[VERSION] Windows XP SP3 version APIs enabled for %s", target );
+            runtime_windows_czech = settings.windows_czech;
+            if (runtime_windows_czech)
+                log_line( "[LOCALE] Czech (Czechia), ANSI 1250 and OEM 852 enabled for %s", target );
             wine_nx_lazy_file_views = settings.lazy_file_views;
 #ifdef WINE_NX_FEX
             runtime_fex = settings.fex != 0;
