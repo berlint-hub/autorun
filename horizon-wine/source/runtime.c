@@ -207,6 +207,8 @@ static void *wine_nx_fb_pending_bits;
 static int wine_nx_fb_pending_stride;
 static int wine_nx_fb_pending_dirty;
 static int wine_nx_fb_lock_depth;
+/* Advisory fast path for the input poller; authoritative state stays under fb_mutex. */
+static unsigned int wine_nx_fb_present_pending;
 static u64 wine_nx_fb_last_present;
 static unsigned int wine_nx_fb_frames; /* frames queued to the display, for [PROGRESS] */
 
@@ -1115,6 +1117,15 @@ static struct pointer_cursor wine_nx_cursor =
     { .x = WINE_NX_FB_W / 2, .y = WINE_NX_FB_H / 2, .width = WINE_NX_FB_W, .height = WINE_NX_FB_H };
 static int wine_nx_cursor_moved;
 static int wine_nx_cursor_visible = 1;  /* 0 while the program hides the mouse cursor */
+
+/* Called with wine_nx_fb_mutex held; the atomic is only a no-work hint. */
+static void wine_nx_fb_update_present_hint(void)
+{
+    __atomic_store_n( &wine_nx_fb_present_pending,
+                      wine_nx_fb_ready && ((wine_nx_fb_pending_bits && wine_nx_fb_pending_dirty) ||
+                                           wine_nx_cursor_moved),
+                      __ATOMIC_RELEASE );
+}
 static int wine_nx_gl_window;  /* an OpenGL window surface owns the screen's NWindow */
 static int wine_nx_vulkan_window;  /* a Vulkan surface owns it (DXVK's presents) */
 /* Controller and touchscreen state, guarded by wine_nx_pointer_mutex.  The
@@ -1179,6 +1190,7 @@ int wine_nx_fb_init(void)
      * the framebuffer's picture is fitted as it is drawn and stays whole. */
     nwindowSetCrop( nwindowGetDefault(), 0, 0, 0, 0 );
     wine_nx_fb_ready = 1;
+    wine_nx_fb_update_present_hint();
     log_line( "[NXFB] framebuffer ready %dx%d", WINE_NX_FB_W, WINE_NX_FB_H );
     return 0;
 }
@@ -1217,6 +1229,7 @@ void wine_nx_fb_unlock(void)
 {
     wine_nx_fb_pending_dirty = 1;
     if (wine_nx_fb_lock_depth > 0) wine_nx_fb_lock_depth--;
+    wine_nx_fb_update_present_hint();
     pthread_mutex_unlock( &wine_nx_fb_mutex );
 }
 
@@ -1357,6 +1370,7 @@ static void *wine_nx_screen_acquire( int width, int height, int vulkan )
             wine_nx_fb_pending_bits = NULL;
             wine_nx_fb_pending_stride = 0;
             wine_nx_fb_pending_dirty = 0;
+            wine_nx_fb_update_present_hint();
         }
         else if (wine_nx_console_active)
         {
@@ -1569,10 +1583,12 @@ void wine_nx_fb_present(void)
 {
     u64 now;
 
+    if (!__atomic_load_n( &wine_nx_fb_present_pending, __ATOMIC_ACQUIRE )) return;
     pthread_mutex_lock( &wine_nx_fb_mutex );
     if (!wine_nx_fb_ready || wine_nx_fb_lock_depth ||
         (!(wine_nx_fb_pending_bits && wine_nx_fb_pending_dirty) && !wine_nx_cursor_moved))
     {
+        if (!wine_nx_fb_lock_depth) wine_nx_fb_update_present_hint();
         pthread_mutex_unlock( &wine_nx_fb_mutex );
         return;
     }
@@ -1601,6 +1617,7 @@ void wine_nx_fb_present(void)
             wine_nx_fb_pending_stride = 0;
             wine_nx_fb_pending_dirty = 0;
             wine_nx_cursor_moved = 0;
+            wine_nx_fb_update_present_hint();
             wine_nx_fb_last_present = now;
             __atomic_add_fetch( &wine_nx_fb_frames, 1, __ATOMIC_RELAXED );
         }
@@ -1616,7 +1633,11 @@ static void wine_nx_cursor_move( int x, int y )
     if (x != (int)wine_nx_cursor.x || y != (int)wine_nx_cursor.y)
     {
         pointer_cursor_place( &wine_nx_cursor, x, y );
-        if (wine_nx_cursor_visible) wine_nx_cursor_moved = 1;
+        if (wine_nx_cursor_visible)
+        {
+            wine_nx_cursor_moved = 1;
+            wine_nx_fb_update_present_hint();
+        }
     }
     x = (int)wine_nx_cursor.x;
     y = (int)wine_nx_cursor.y;
@@ -1634,6 +1655,7 @@ void wine_nx_cursor_show( int visible )
     {
         wine_nx_cursor_visible = !!visible;
         wine_nx_cursor_moved = 1;  /* present the change */
+        wine_nx_fb_update_present_hint();
     }
     int x = (int)wine_nx_cursor.x, y = (int)wine_nx_cursor.y;
     pthread_mutex_unlock( &wine_nx_fb_mutex );
@@ -4128,6 +4150,7 @@ static void release_screen_buffers( void )
         wine_nx_fb_pending_bits = NULL;
         wine_nx_fb_pending_stride = 0;
         wine_nx_fb_pending_dirty = 0;
+        wine_nx_fb_update_present_hint();
         log_line( "[EXIT] framebuffer closed" );
     }
     if (wine_nx_console_active)
