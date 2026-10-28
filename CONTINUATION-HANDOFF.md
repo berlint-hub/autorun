@@ -131,6 +131,52 @@ Not done, still open: the GL scaling mismatch (finding 1), Vulkan screen ownersh
 cmake harnesses aside, they no longer match the sources they slice; none of them runs in
 CI, which is why it went unnoticed).
 
+## Sarek 1.14 (berlint-hub/dxvk-sarek at `arena/847675e2-dxvk-sarek`): the Tegra defaults (2026-10-28)
+
+The branch is DXVK `v1.14.1` with "Tegra X1: reduce shader stutter with async
+compilation + 3 compiler threads". What it actually does, read from the tree:
+
+- `applyTegraX1Defaults()` (`src/dxvk/dxvk_options.cpp`) sets
+  `numShaderCompilerThreads = 3` when 0, `framePace = "low-latency"` when empty,
+  `tilerMode = False` and `maxMemoryBudget = 2048 MiB` when 0.
+- `d3d9`: `numBackBuffers = 2`, `samplerAnisotropy = 4`, `maxFrameLatency = 2`
+  when left at 0/-1; `d3d11`: `disableMsaa = true`, the same anisotropy and
+  latency, back buffers from `dxgi.numBackBuffers`.
+- `dxbc`: `fp16Shader = true` (not a config key).
+
+Three findings, in order of importance:
+
+1. **The tuning never reaches the console.** `DxvkAdapter::isTegraX1()` wants
+   `vendorID == NVIDIA && deviceID == 0x1380`. NVK on Horizon reports the Tegra
+   X1 as **0x0fe0** (`mesa-switch`, `src/nouveau/horizon/nouveau_horizon_device.c:32`)
+   and passes it straight into `VkPhysicalDeviceProperties.deviceID`
+   (`src/nouveau/vulkan/nvk_physical_device.c:890`), so every Tegra default in
+   that fork is dead code on the Switch -- including the "3 compiler threads" the
+   commit is named after. Suggested patch there: accept `0x0fe0` (or chipset
+   `0x12b`, or `device_name` containing "Tegra") in `isTegraX1()`.
+2. **"Async compilation" is not set.** The comment in the `framePace` block says
+   `DXVK_SHADER_COMPILATION_METHOD=async`, but no code sets
+   `shaderCompilationMethod`; it stays at the `dyasync` default. Setting `async`
+   has a visual cost (briefly missing geometry), so Autorun does not force it.
+3. `d3d11.maxFeatureLevel` is not read by 1.14 at all (its `d3d11_options.cpp`
+   has no such key), so Autorun stops offering it from 1.14.
+
+Changed on `arena/16b1334a-autorun`: `horizon-wine/source/dxvk_options.c` carries
+the profile as a table (`tegra_x1_defaults`) and **writes it into the game's
+`dxvk.conf`** when the setting is left at Default for Sarek >= 1.14, so the
+numbers apply whether or not the build's detection fires; the options screen
+shows the default as `Default (3 / Tegra)`, `Default (True / Tegra)` and so on,
+and a value the player picks always wins. `tests/dxvk_options.c` covers the
+values, the written lines, the player's override and the versions that must get
+neither; CI runs it as "DXVK options and Sarek releases". A hand-made `dxvk.conf`
+next to the game is still read after the launcher's (`runtime.c`), so it wins.
+
+Watch on device, because these now actually happen: `d3d11.disableMsaa = True`
+(image quality) and `dxvk.maxMemoryBudget = 2048` (memory pressure on a shared
+2 GiB budget). Both were silently unapplied before. `dxvk.tilerMode`,
+`dxvk.lowLatencyOffset`, `dxvk.shrinkNvidiaHvvHeap`, `dxvk.zeroMappedMemory` and
+`dxvk.maxFrameRate` are also in that build and still have no Autorun option.
+
 ## Next actions
 
 1. Read this file and inspect `git status` before changing anything; continue on `arena/97e282a9-autorun`.

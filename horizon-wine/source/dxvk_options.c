@@ -398,9 +398,12 @@ const struct dxvk_option dxvk_options[] =
     OPTION( "d3d9.deferSurfaceCreation",
             "Create the D3D9 surface on first Present. Can help games that change graphics APIs during startup.",
             boolean, 10500, 0, 11003, 0, 1, 0, "False" ),
+    /* Sarek 1.14 does not read this at all (its d3d11_options.cpp has no such
+     * key: the feature level is the device's), so it stops being offered where
+     * the fork dropped it rather than writing a line nothing reads. */
     OPTION( "d3d11.maxFeatureLevel",
             "Maximum D3D11 feature level exposed to the game. This does not add unsupported Vulkan features.",
-            feature_level, 10101, 0, 11003, 0, 1, 0, "Device limit" ),
+            feature_level, 10101, 0, 11003, 11400, 1, 0, "Device limit" ),
     OPTION( "d3d9.forceAspectRatio",
             "Only advertise display modes with this aspect ratio. Default keeps the full mode list.",
             aspect, 10500, 0, 11003, 0, 1, 0, "All" ),
@@ -487,6 +490,63 @@ int dxvk_option_value( const struct launcher_kv *kv, const struct dxvk_option *o
     return -1;
 }
 
+/* The Sarek fork Autorun runs is tuned for the console, and from 1.14 it says
+ * so in the driver rather than in DXVK's own defaults: applyTegraX1Defaults()
+ * (src/dxvk/dxvk_options.cpp) sets three shader compiler workers, low-latency
+ * frame pacing, no tiler mode and a 2 GiB memory budget, and the per-adapter
+ * Tegra defaults in d3d9/d3d11 change the back buffer count, anisotropy, frame
+ * latency and MSAA. On the Switch the device is a Tegra X1 on every run, so a
+ * "Default" that named the upstream value would name a number the build never
+ * uses -- it is what a player reads before deciding to change anything.
+ *
+ * These are the values the build ends at when the setting is left alone (each
+ * one is guarded by "0"/empty in the driver), written the way the options
+ * already show a default: the value, then why. Verified against
+ * berlint-hub/dxvk-sarek 1.14.1 (arena/847675e2-dxvk-sarek). */
+struct tegra_default
+{
+    const char *name;
+    const char *value;   /* in the option's own value form, the way it is written */
+    const char *shown;   /* the default as the launcher shows it */
+};
+
+static const struct tegra_default tegra_x1_defaults[] =
+{
+    { "dxvk.numShaderCompilerThreads", "3",                  "3 / Tegra" },
+    { "dxvk.framePace",                "\"low-latency\"",   "low-latency / Tegra" },
+    { "dxvk.maxMemoryBudget",          "2048",               "2048 MiB / Tegra" },
+    { "d3d9.numBackBuffers",           "2",                  "2 / Tegra" },
+    { "dxgi.numBackBuffers",           "2",                  "2 / Tegra" },
+    { "d3d9.samplerAnisotropy",        "4",                  "4 / Tegra" },
+    { "d3d11.samplerAnisotropy",       "4",                  "4 / Tegra" },
+    { "d3d9.maxFrameLatency",          "2",                  "2 / Tegra" },
+    { "dxgi.maxFrameLatency",          "2",                  "2 / Tegra" },
+    { "d3d11.disableMsaa",             "True",               "True / Tegra" },
+};
+
+/* The profile above is also written out, because the build's own way of
+ * reaching it does not fire on the console: isTegraX1() (dxvk_adapter.cpp)
+ * wants vendorID NVIDIA and deviceID 0x1380, and NVK on Horizon reports the
+ * Tegra X1 as 0x0fe0 (mesa-switch, src/nouveau/horizon/nouveau_horizon_device.c;
+ * NVK passes it straight into VkPhysicalDeviceProperties.deviceID). So on a
+ * Switch every Tegra default in that fork is dead code, and "3 compiler
+ * threads" never happens. Autorun writes the values the build would have picked
+ * for a setting the player left at Default -- the numbers are the build's own,
+ * applied by us -- and a fork that later recognises the console is unaffected,
+ * because it would set exactly these. */
+static const struct tegra_default *tegra_default_for( const struct dxvk_option *option )
+{
+    for (unsigned int i = 0; i < sizeof(tegra_x1_defaults) / sizeof(tegra_x1_defaults[0]); i++)
+        if (!strcmp( option->name, tegra_x1_defaults[i].name )) return tegra_x1_defaults + i;
+    return NULL;
+}
+
+/* The profile is Sarek 1.14's. */
+static int tegra_profile_applies( enum dxvk_source source, unsigned int release )
+{
+    return source == DXVK_SOURCE_SAREK && release >= 11400;
+}
+
 const char *dxvk_option_default( const struct dxvk_option *option, enum dxvk_source source,
                                  unsigned int version, int hud )
 {
@@ -495,6 +555,12 @@ const char *dxvk_option_default( const struct dxvk_option *option, enum dxvk_sou
         !strcmp( option->name, "dxvk.gplAsyncCache" )) return "True";
     if (source != DXVK_SOURCE_SAREK && version == 10903 &&
         !strcmp( option->name, "d3d9.floatEmulation" )) return "True";
+    if (tegra_profile_applies( source, version ))
+    {
+        const struct tegra_default *tegra = tegra_default_for( option );
+
+        if (tegra) return tegra->shown;
+    }
     return option->default_value;
 }
 
@@ -504,26 +570,38 @@ int dxvk_options_apply( const struct launcher_kv *kv, enum dxvk_source source, c
     unsigned int release = dxvk_options_version( source, version );
     size_t length = strnlen( config, size ), required = length;
 
+    int profile = tegra_profile_applies( source, release );
+
     if (length == size) return 0;
     for (unsigned int i = 0; i < dxvk_option_count; i++)
     {
         const struct dxvk_option *option = dxvk_options + i;
+        const struct tegra_default *tegra = profile ? tegra_default_for( option ) : NULL;
         int value;
 
-        if (!dxvk_option_supported( option, source, release ) ||
-            (value = dxvk_option_value( kv, option )) <= 0) continue;
-        required += strlen( option->name ) + strlen( option->choices[value].value ) + 4;
+        if (!dxvk_option_supported( option, source, release )) continue;
+        value = dxvk_option_value( kv, option );
+        /* A value the player chose, or the one the profile fills in when they
+         * left it at Default and the build does not do it itself. */
+        if (value > 0) required += strlen( option->name ) + strlen( option->choices[value].value ) + 4;
+        else if (!value && tegra) required += strlen( option->name ) + strlen( tegra->value ) + 4;
+        else continue;
         if (required >= size) return 0;
     }
     for (unsigned int i = 0; i < dxvk_option_count; i++)
     {
         const struct dxvk_option *option = dxvk_options + i;
+        const struct tegra_default *tegra = profile ? tegra_default_for( option ) : NULL;
         int value;
 
-        if (!dxvk_option_supported( option, source, release ) ||
-            (value = dxvk_option_value( kv, option )) <= 0) continue;
-        length += snprintf( config + length, size - length, "%s = %s\n",
-                            option->name, option->choices[value].value );
+        if (!dxvk_option_supported( option, source, release )) continue;
+        value = dxvk_option_value( kv, option );
+        if (value > 0)
+            length += snprintf( config + length, size - length, "%s = %s\n",
+                                option->name, option->choices[value].value );
+        else if (!value && tegra)
+            length += snprintf( config + length, size - length, "%s = %s\n",
+                                option->name, tegra->value );
     }
     return 1;
 }

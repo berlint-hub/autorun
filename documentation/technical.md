@@ -413,7 +413,21 @@ its executable, named after it:
 | `NAME.box64.txt` | Box64 code generation options, one `BOX64_DYNAREC_*=value` per line |
 
 `d3d=dxvk` selects `C:\dxvk` for x86 programs and `C:\dxvk64` for AMD64
-programs. Application-local graphics DLLs have priority. Existing
+programs. Application-local graphics DLLs have priority.
+
+DXVK's own settings are per game and per release: the options screen offers only
+what the chosen DXVK parses (`source/dxvk_options.c`), and a value it never set
+is not written, so the release's own default stands. Sarek 1.14 is the exception,
+because its console tuning does not reach the console: the build applies it for
+`deviceID 0x1380` and NVK on Horizon reports the Tegra X1 as **0x0fe0**
+(`mesa-switch`, `src/nouveau/horizon/nouveau_horizon_device.c`, passed straight
+into `VkPhysicalDeviceProperties.deviceID`), so three shader compiler workers,
+low-latency pacing, a 2 GiB budget and the d3d9/d3d11 Tegra defaults would
+otherwise never happen. Autorun therefore writes that profile itself for a
+setting left at Default -- `Default (3 / Tegra)` and the like in the options
+screen -- and a game's own choice always wins. A Sarek build that later
+recognises the console is unaffected: the written values are the ones it would
+choose. Existing
 `d3d9=dxvk` settings remain readable. A game's settings can be set in one go
 from a preset (Balanced, Performance, Battery, Compatibility), which writes the
 same keys: the preset touches only the translator, the fast paths, vsync and

@@ -16,6 +16,35 @@ static const struct dxvk_option *find( const char *name, enum dxvk_source source
     return found;
 }
 
+/* A default as the launcher shows it -- "3 / Tegra", "2048 MiB / Tegra",
+ * "low-latency / Tegra" -- reduced to the value the option would be given, so
+ * it can be checked against the option's own choices. A choice writes its
+ * string values with DXVK's quotes. */
+static int normalize_default( const char *text, char *out, size_t size )
+{
+    static const char *const reasoning[] = { " / Tegra", " MiB" };
+    size_t length = 0;
+
+    for (; *text; text++)
+    {
+        if (*text == '"') continue;
+        if (length + 1 >= size) return 0;
+        out[length++] = *text;
+    }
+    out[length] = 0;
+    for (unsigned int i = 0; i < sizeof(reasoning) / sizeof(reasoning[0]); i++)
+    {
+        size_t suffix = strlen( reasoning[i] );
+
+        if (length > suffix && !strcmp( out + length - suffix, reasoning[i] ))
+        {
+            length -= suffix;
+            out[length] = 0;
+        }
+    }
+    return length > 0;
+}
+
 static void versions(void)
 {
     assert( dxvk_options_version( DXVK_SOURCE_OFFICIAL, "1.0" ) == 10000 );
@@ -180,6 +209,92 @@ static void defaults(void)
     assert( !strcmp( dxvk_option_default( option, DXVK_SOURCE_GPLASYNC, 20600, 0 ), "True" ) );
 }
 
+/* The value a Sarek 1.14 build on the console ends at when a setting is left
+ * alone, and the same setting one release earlier: the fork's Tegra defaults
+ * are 1.14's (applyTegraX1Defaults() and the per-adapter ones in d3d9/d3d11 of
+ * berlint-hub/dxvk-sarek 1.14.1), and a version before it still answers with
+ * DXVK's own. Each value is also one its option offers, so a player who picks
+ * it by hand gets what the label said. */
+static void tegra_defaults(void)
+{
+    static const struct { const char *name, *value; } console_defaults[] =
+    {
+        { "dxvk.numShaderCompilerThreads", "3 / Tegra" },
+        { "dxvk.framePace",                "low-latency / Tegra" },
+        { "dxvk.maxMemoryBudget",          "2048 MiB / Tegra" },
+        { "d3d9.numBackBuffers",           "2 / Tegra" },
+        { "dxgi.numBackBuffers",           "2 / Tegra" },
+        { "d3d9.samplerAnisotropy",        "4 / Tegra" },
+        { "d3d11.samplerAnisotropy",       "4 / Tegra" },
+        { "d3d9.maxFrameLatency",          "2 / Tegra" },
+        { "dxgi.maxFrameLatency",          "2 / Tegra" },
+        { "d3d11.disableMsaa",             "True / Tegra" },
+    };
+    char value[64], offered[64];
+
+    for (unsigned int i = 0; i < sizeof(console_defaults) / sizeof(console_defaults[0]); i++)
+    {
+        const struct dxvk_option *option = find( console_defaults[i].name, DXVK_SOURCE_SAREK, "1.14.1" );
+        const struct dxvk_option *older;
+        int matches = 0;
+
+        assert( option );
+        assert( !strcmp( dxvk_option_default( option, DXVK_SOURCE_SAREK, 11401, 0 ), console_defaults[i].value ) );
+        older = find( console_defaults[i].name, DXVK_SOURCE_SAREK, "1.13.0" );
+        assert( older && !strcmp( dxvk_option_default( older, DXVK_SOURCE_SAREK, 11300, 0 ), older->default_value ) );
+        /* "3 / Tegra", "2048 MiB / Tegra" and "low-latency / Tegra" are the
+         * option's own "3", "2048" and low-latency, written with the reason. */
+        normalize_default( console_defaults[i].value, value, sizeof(value) );
+        for (unsigned int j = 1; j < option->choice_count; j++)
+            if (normalize_default( option->choices[j].value, offered, sizeof(offered) ) &&
+                !strcmp( value, offered )) matches++;
+        assert( matches == 1 );
+    }
+    /* Left at Default, the profile is written out; the build's own Tegra
+     * detection does not fire on the console (it wants deviceID 0x1380 and NVK
+     * reports 0x0fe0), and without these lines the tuning would silently not
+     * happen. */
+    {
+        struct launcher_kv kv = {0};
+        char config[LAUNCHER_KV_MAX];
+
+        config[0] = 0;
+        assert( dxvk_options_apply( &kv, DXVK_SOURCE_SAREK, "1.14.1", config, sizeof(config) ) );
+        assert( strstr( config, "dxvk.numShaderCompilerThreads = 3\n" ) );
+        assert( strstr( config, "dxvk.framePace = \"low-latency\"\n" ) );
+        assert( strstr( config, "dxvk.maxMemoryBudget = 2048\n" ) );
+        assert( strstr( config, "d3d9.numBackBuffers = 2\n" ) );
+        assert( strstr( config, "d3d11.disableMsaa = True\n" ) );
+        assert( strstr( config, "dxgi.maxFrameLatency = 2\n" ) );
+        /* A value the player chose is theirs, profile or not. */
+        assert( launcher_kv_set( &kv, "dxvk.numShaderCompilerThreads", "2" ) );
+        config[0] = 0;
+        assert( dxvk_options_apply( &kv, DXVK_SOURCE_SAREK, "1.14.1", config, sizeof(config) ) );
+        assert( strstr( config, "dxvk.numShaderCompilerThreads = 2\n" ) );
+        assert( !strstr( config, "numShaderCompilerThreads = 3" ) );
+        /* One release earlier, and an official build, get neither: with nothing
+         * chosen, they write an empty file. */
+        memset( &kv, 0, sizeof(kv) );
+        config[0] = 0;
+        assert( dxvk_options_apply( &kv, DXVK_SOURCE_SAREK, "1.13.0", config, sizeof(config) ) );
+        assert( !config[0] );
+        config[0] = 0;
+        assert( dxvk_options_apply( &kv, DXVK_SOURCE_OFFICIAL, "3.1.1", config, sizeof(config) ) );
+        assert( !config[0] );
+    }
+
+    /* An official build has DXVK's defaults: the Tegra table is the fork's. */
+    assert( !strcmp( dxvk_option_default( find( "d3d11.disableMsaa", DXVK_SOURCE_OFFICIAL, "3.1.1" ),
+                                          DXVK_SOURCE_OFFICIAL, 30101, 0 ), "False" ) );
+    assert( !strcmp( dxvk_option_default( find( "dxgi.maxFrameLatency", DXVK_SOURCE_GPLASYNC, "2.7.1-1" ),
+                                          DXVK_SOURCE_GPLASYNC, 20701, 0 ), "0 / Game" ) );
+    /* The fork's 1.14 does not read the feature level at all, so it stops being
+     * offered where it was dropped instead of writing a line nothing reads. */
+    assert( find( "d3d11.maxFeatureLevel", DXVK_SOURCE_SAREK, "1.13.0" ) );
+    assert( !find( "d3d11.maxFeatureLevel", DXVK_SOURCE_SAREK, "1.14.1" ) );
+    assert( find( "d3d11.maxFeatureLevel", DXVK_SOURCE_OFFICIAL, "3.1.1" ) );
+}
+
 static void catalog(void)
 {
     struct launcher_kv kv;
@@ -217,6 +332,7 @@ int main(void)
     versions();
     configuration();
     defaults();
+    tegra_defaults();
     catalog();
     puts("DXVK options: version filtering, defaults, values and configuration precedence passed");
     return 0;
