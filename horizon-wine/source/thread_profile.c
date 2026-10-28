@@ -1138,6 +1138,25 @@ void wine_nx_thread_report( void )
                        rows[i].name[0] ? ":" : "", rows[i].name, (int)rows[i].core,
                        rows[i].permille / 10, rows[i].permille % 10 );
     wine_nx_runtime_trace( line );
+    /* A program that runs on one thread and asks the console for nothing else is
+     * what the other cores cannot help with: there is no other work of its to
+     * run.  Said once, because the question a log leaves a player asking is
+     * exactly "why is only one core busy". */
+    if (count && rows[0].permille >= 800 && total - rows[0].permille <= 150)
+    {
+        static unsigned int told;
+
+        if (!__atomic_exchange_n( &told, 1, __ATOMIC_ACQ_REL ))
+        {
+            len = appendf( line, 0, "[THREADS] one thread carries the program: %u%c%s%s at %u.%u%% of a core, "
+                           "all the others %u.%u%%; a program on one thread cannot be spread over cores, "
+                           "so the others run the runtime's own work or nothing",
+                           rows[0].tid, rows[0].kind, rows[0].name[0] ? ":" : "", rows[0].name,
+                           rows[0].permille / 10, rows[0].permille % 10,
+                           ( total - rows[0].permille ) / 10, ( total - rows[0].permille ) % 10 );
+            wine_nx_runtime_trace( line );
+        }
+    }
     if (profiling) server_report();
     if (profiling) profile_report( rows, count );
 }

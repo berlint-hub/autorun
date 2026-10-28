@@ -627,6 +627,27 @@ changes, and fails if the pinned text moves.
 
 - Speed. Heavy Direct3D games are limited by translated x86 code on the game's
   main thread and by Wine's Direct3D layer, rather than by the GPU.
+- **One thread at 100% is the program, not a core left unused.** A guest thread
+  is translated and run on one core from start to finish: FEX and Box64
+  translate the blocks that thread is about to run, on that thread, and there
+  is no way to hand half of a single thread's work to another core. What the
+  other three cores get is therefore only the work that is not the program's
+  own thread -- and the runtime already puts everything it can there:
+  `mesa_glthread=true` marshals GL commands onto a worker, DXVK compiles shaders
+  on `dxvk.numShaderCompilerThreads` workers (3 in the profile Autorun writes
+  for Sarek 1.14) and submits on its own thread, wined3d's CSMT does the same
+  for the OpenGL path, the compositor presents on a thread of its own (on core 3
+  at priority 63 with the four-core forwarder, `[CORES]`), and Wine's server
+  connections, audio and the input poller have theirs. The balancer (`[BALANCE]`, `source/thread_profile.h`)
+  keeps the busiest thread's core to itself, light threads included, so the
+  thread that is at 100% is not taken off its core a few times a frame. A log
+  that shows one core at 100% and the others near idle is that working as
+  intended; `[THREADS] one thread carries the program` says so once.
+  What does help a single-threaded program is making that one thread do less
+  work per frame: the Direct3D path (DXVK over Vulkan rather than wined3d over
+  OpenGL), a lower resolution, the **Older OpenGL games** year for
+  extension-list reads, FEX's block size (`FEX_MAXINST`) and `FEX_MULTIBLOCK`
+  for hot loops, and TSO left off unless a game needs it.
 - Wine's first-run setup (wineboot) does not run. The DLL repository writes the COM
   classes its DLLs serve to `horizon-dlls/classes.reg`, and the runtime runs
   `C:\windows\autorun-setup.exe` (`tools/autorun_setup.c`) before the first

@@ -75,32 +75,51 @@ struct nx_balance_thread
 #define NX_BALANCE_MAX_CORES 8
 #define NX_BALANCE_LIGHT     10  /* a thread below 1% of a core stays where it is */
 #define NX_BALANCE_SLACK     30  /* a core must be 3% less loaded to be preferred */
+#define NX_BALANCE_SATURATED 750 /* a core this busy has no room for work that could go elsewhere */
 
-/* Threads the program pinned, and light ones already on a core, stay; the rest
- * go heaviest first to the least loaded core, keeping their own unless another
- * is clearly less loaded. Sets new_core (-1 for a pinned thread on no single
- * core) and returns the busiest core's load after; *before is the busiest
+/* Threads the program pinned stay where they are.  So do light ones, unless
+ * they sit on the busiest core while it is saturated: there they take the core
+ * away from the thread that is using all of it, a few times a frame, and every
+ * core has room for a thread that is asking for less than a hundredth of one --
+ * which is what a program whose one thread runs at 100% leaves the others for.
+ * The rest go heaviest first to the least loaded core, keeping their own unless
+ * another is clearly less loaded.  Sets new_core (-1 for a pinned thread on no
+ * single core) and returns the busiest core's load after; *before is the busiest
  * before, not counting threads on no single core. */
 static inline unsigned int nx_balance_assign( struct nx_balance_thread *threads, unsigned int count,
                                               unsigned int cores, unsigned int *before )
 {
     unsigned int load_before[NX_BALANCE_MAX_CORES] = {0}, load_after[NX_BALANCE_MAX_CORES] = {0};
-    unsigned int i, c, best, after = 0;
+    unsigned int i, c, best, after = 0, busiest = 0;
 
     if (cores > NX_BALANCE_MAX_CORES) cores = NX_BALANCE_MAX_CORES;
+    /* What each core carries now, so that a light thread can tell whether the
+     * core it is on is the one a heavy thread needs to itself. */
+    for (i = 0; i < count; i++)
+        if (threads[i].core >= 0 && (unsigned int)threads[i].core < cores)
+            load_before[threads[i].core] += threads[i].load;
+    for (c = 1; c < cores; c++)
+        if (load_before[c] > load_before[busiest]) busiest = c;
     for (i = 0; i < count; i++)
     {
         struct nx_balance_thread *thread = &threads[i];
         int on_core = thread->core >= 0 && (unsigned int)thread->core < cores;
+        int in_the_way = on_core && (unsigned int)thread->core == busiest &&
+                         load_before[busiest] >= NX_BALANCE_SATURATED;
 
-        if (on_core) load_before[thread->core] += thread->load;
         if (thread->fixed && !on_core) thread->new_core = -1;
-        else if (on_core && (thread->fixed || thread->load < NX_BALANCE_LIGHT))
+        else if (on_core && thread->fixed)
         {
             thread->new_core = thread->core;
             load_after[thread->core] += thread->load;
         }
-        else thread->new_core = -2;  /* to place */
+        else if (in_the_way || !on_core || thread->load >= NX_BALANCE_LIGHT)
+            thread->new_core = -2;  /* to place */
+        else
+        {
+            thread->new_core = thread->core;
+            load_after[thread->core] += thread->load;
+        }
     }
     for (;;)
     {

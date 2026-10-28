@@ -268,15 +268,43 @@ int main(void)
         unsigned int before, after;
 
         after = nx_balance_assign( threads, 6, 3, &before );
-        assert( before == 972 && after == 885 );
-        /* The drawing thread keeps its core, the main thread gets one, the rest share the third. */
+        assert( before == 972 && after == 880 );
+        /* The drawing thread keeps its core, the main thread gets one, the rest
+         * share the third -- the light thread too: sitting on the saturated core
+         * it only took the drawing thread's core away from it. */
         assert( threads[0].new_core == 0 && threads[1].new_core == 1 && threads[2].new_core == 2 &&
-                threads[3].new_core == 2 && threads[4].new_core == 2 && threads[5].new_core == 0 );
+                threads[3].new_core == 2 && threads[4].new_core == 2 && threads[5].new_core == 2 );
         /* Placed that way, the next round moves nothing. */
         for (i = 0; i < 6; i++) threads[i].core = threads[i].new_core;
         after = nx_balance_assign( threads, 6, 3, &before );
-        assert( before == 885 && after == 885 );
+        assert( before == 880 && after == 880 );
         for (i = 0; i < 6; i++) assert( threads[i].new_core == threads[i].core );
+    }
+    /* One thread using the whole core and the rest nearly idle: this is what a
+     * single-threaded program looks like.  The light threads leave the busy
+     * core, and once they have, another round leaves everything alone. */
+    {
+        struct nx_balance_thread threads[] = { { 990, 0, 0, 0 }, { 6, 0, 0, 0 }, { 4, 0, 0, 0 }, { 3, -1, 0, 0 } };
+        unsigned int before, after;
+
+        after = nx_balance_assign( threads, 4, 3, &before );
+        assert( before == 1000 && after == 990 );
+        assert( threads[0].new_core == 0 );
+        assert( threads[1].new_core != 0 && threads[2].new_core != 0 );
+        for (i = 0; i < 4; i++) threads[i].core = threads[i].new_core;
+        after = nx_balance_assign( threads, 4, 3, &before );
+        assert( before == 990 && after == 990 );
+        for (i = 0; i < 4; i++) assert( threads[i].new_core == threads[i].core );
+    }
+    /* A core that is busy but not saturated keeps its light threads: moving one
+     * costs more than the time it takes. */
+    {
+        struct nx_balance_thread threads[] = { { 400, 1, 0, 0 }, { 5, 1, 0, 0 } };
+        unsigned int before, after;
+
+        after = nx_balance_assign( threads, 2, 3, &before );
+        assert( before == 405 && after == 405 );
+        assert( threads[0].new_core == 1 && threads[1].new_core == 1 );
     }
     /* A thread the program pinned stays, on a core or not; the heavy one beside it moves. */
     {
