@@ -988,6 +988,11 @@ void wine_nx_desktop_size( int *width, int *height )
  * transform input maps through -- scale plus offset from the rectangle, so a
  * picture with bars at the sides is touched where it is drawn.  src_x/src_y are
  * the presented window's origin in desktop coordinates. */
+/* Set while the window presents only the central 4:3 of an OpenGL buffer: the
+ * crop is cut into the buffer before the display's scaler sees it, so the fit
+ * input maps through has to cut the same part of the source. */
+static int wine_nx_screen_crop_4_3;
+
 static void wine_nx_present_fit_mode( int mode, int src_w, int src_h, int src_x, int src_y,
                                       int *dst_x, int *dst_y, int *dst_w, int *dst_h )
 {
@@ -1058,8 +1063,7 @@ void wine_nx_present_fit_stretched( int src_w, int src_h, int src_x, int src_y )
                       src_w, src_h, WINE_NX_FB_W, WINE_NX_FB_H );
         }
     }
-    wine_nx_present_fit_mode( screen_scaling_crops_4_3( wine_nx_scaling_mode ) ? wine_nx_scaling_mode
-                                                                              : SCREEN_SCALING_FULL,
+    wine_nx_present_fit_mode( wine_nx_screen_crop_4_3 ? SCREEN_SCALING_STRETCH_43 : SCREEN_SCALING_FULL,
                               src_w, src_h, src_x, src_y, NULL, NULL, NULL, NULL );
 }
 
@@ -1328,18 +1332,22 @@ int wine_nx_compositor_enabled(void)
  * next nwindowConfigureBuffer connects again; the line is only logged in the
  * case worth knowing about, so a run without one says the driver did its part.
  */
-static void screen_take_dimensions( int width, int height )
+/* FALSE if the window kept its own size: what it draws is then scaled into a
+ * window of another size, and nothing else here may pretend otherwise -- a
+ * crop taken for a size the window does not have cuts the wrong part. */
+static int screen_take_dimensions( int width, int height )
 {
     NWindow *window = nwindowGetDefault();
     Result rc = nwindowSetDimensions( window, width, height );
 
-    if (R_SUCCEEDED(rc)) return;
+    if (R_SUCCEEDED(rc)) return 1;
     log_line( "[NXGL] the screen would not take the program's %dx%d (error 0x%x); another "
               "client's buffers were still on it, and were released", width, height, rc );
     rc = nwindowReleaseBuffers( window );
     if (R_SUCCEEDED(rc)) rc = nwindowSetDimensions( window, width, height );
-    if (R_FAILED(rc))
-        log_line( "[NXGL] the screen still will not take %dx%d: error 0x%x", width, height, rc );
+    if (R_SUCCEEDED(rc)) return 1;
+    log_line( "[NXGL] the screen still will not take %dx%d: error 0x%x", width, height, rc );
+    return 0;
 }
 
 /* A window surface takes the screen. libnx's framebuffer and EGL cannot
@@ -1355,7 +1363,7 @@ static void *wine_nx_screen_acquire( int width, int height, int vulkan )
 {
     int compositor = wine_nx_compositor_enabled();
     NWindow *window = NULL;
-    int taken_over = 0;
+    int taken_over = 0, took_dimensions = 1;
 
     /* An exclusive D3D game expects the screen to take on its mode, the way a
      * real display modeset would: its ClipCursor, centring and cursor maths
@@ -1438,10 +1446,20 @@ static void *wine_nx_screen_acquire( int width, int height, int vulkan )
      * compositor shows only the central 4:3 of the buffer, stretched over the
      * whole panel.  The Vulkan screen buffers are drawn already cropped and
      * stay whole. */
-    if (window) screen_take_dimensions( width, height );
+    if (window && !screen_take_dimensions( width, height ))
+    {
+        u32 kept_w = 0, kept_h = 0;
+
+        /* The picture is presented into a window of another size, so it is the
+         * display that will scale it, not the fit this file maps input with. */
+        if (R_SUCCEEDED(nwindowGetDimensions( window, &kept_w, &kept_h )))
+            log_line( "[NXGL] the surface presents at %dx%d in the window's %ux%u", width, height, kept_w, kept_h );
+        took_dimensions = 0;
+    }
+    wine_nx_screen_crop_4_3 = 0;
     if (window && vulkan)
         nwindowSetCrop( window, 0, 0, 0, 0 );  /* the Vulkan buffers carry their own crop */
-    else if (window && screen_scaling_crops_4_3( wine_nx_scaling_mode ))
+    else if (window && took_dimensions && screen_scaling_crops_4_3( wine_nx_scaling_mode ))
     {
         int crop_w = width, crop_h = height, left, top;
 
@@ -1451,6 +1469,7 @@ static void *wine_nx_screen_acquire( int width, int height, int vulkan )
         Result rc = nwindowSetCrop( window, left, top, left + crop_w, top + crop_h );
 
         if (R_FAILED(rc)) log_line( "[NXGL] the crop would not take: error 0x%x", rc );
+        else wine_nx_screen_crop_4_3 = 1;
         log_line( "[NXGL] the crop is %d,%d-%d,%d", left, top, left + crop_w, top + crop_h );
     }
     else if (window) nwindowSetCrop( window, 0, 0, 0, 0 );

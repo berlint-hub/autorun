@@ -36,14 +36,48 @@ These were already present during the session and must not be discarded:
 - FEX 2610 memory/teardown patch and handover updates: `horizon-wine/fex/fex-2610-horizon-memory.patch`, `horizon-wine/fex/builder-handover.md`, `horizon-wine/tests/check_fex_2610_patch.py`.
 - `dlls/win32u/opengl.c` adds a final WGL swap-stage breadcrumb on the no-drawable return path. This is diagnostic bookkeeping and does not change image output.
 
-## Display/swapchain review findings (not fixed yet)
+## Display/swapchain review findings (2026-10-28, all answered)
 
-1. **OpenGL does not honor the launcher’s Aspect/Integer scaling settings.** The WGL/OpenGL NWindow path feeds the picture directly to the Switch display scaler, which stretches it. `nx_drawable_swap()` sets input mapping with `wine_nx_present_fit_stretched()` (`dlls/win32u/winnx_opengl.c:635–643`); `nwindowSetCrop()` is only used for `STRETCH_43` (`horizon-wine/source/runtime.c:1387–1402`). Vulkan and the software compositor use `screen_fit_rect()`, but ordinary GL does not. 4:3 or other non-panel-ratio GL games can therefore appear stretched despite the launcher help promising Aspect/Integer behavior. In `STRETCH_43`, GL input mapping also omits the crop offset. A robust fix likely needs a panel-sized output surface and an intermediate GL framebuffer/blit; do not treat a simple input-transform edit as fixing the picture.
-2. **Screen-size failures are logged but ignored.** `screen_take_dimensions()` returns `void`; after both `nwindowSetDimensions()` attempts fail, acquisition continues to crop/create a surface (`runtime.c:1281–1292`, `1387`). This can produce an incorrectly sized surface/image. Consider returning failure and unwinding screen/compositor ownership safely.
-3. **Vulkan screen ownership is boolean rather than reference-counted.** `wine_nx_screen_acquire()` reuses the NWindow when `wine_nx_vulkan_window` is already true (`runtime.c:1337–1346`), while destroying any Vulkan surface calls `wine_nx_vulkan_release_window()` (`dlls/win32u/vulkan.c:2175–2192`, `runtime.c:1480–1491`). If an application keeps multiple Vulkan surfaces alive, destroying one can return the screen prematurely. Either reference-count surfaces or reject additional independent surfaces.
-4. `horizon-wine/tests/check_gl_surfaces.py` is stale against the current `winnx_opengl.c` helper signatures/dependencies. It could not be run here because `clang` is absent; substituting GCC exposed generated-fixture errors (missing declarations/stubs and an outdated `wine_nx_gl_acquire_window()` signature). Update the test harness before relying on it as swapchain validation.
+1. **OpenGL and the launcher's Aspect/Integer scaling.** The WGL/OpenGL path
+   hands its buffer straight to the display's scaler, which stretches it, so
+   Aspect and Integer cannot reach an OpenGL picture without an intermediate
+   panel-sized pass (a compositor layer, or a readback and blit) that this
+   tree does not have for GL. What is fixed: the fit the input maps through now
+   follows what the window really shows (`wine_nx_present_fit_stretched`,
+   `wine_nx_screen_crop_4_3`), including the central 4:3 crop, which used to be
+   cut into the buffer while the input still mapped the uncropped picture; and
+   the first swap logs once that the display stretches an OpenGL surface when
+   the setting asked for something else, so a player is not left guessing.
+   `documentation/technical.md` says the same. Doing more means presenting GL
+   through the compositor: a bigger change, and one that needs a console to
+   judge.
+2. **Screen-size failures.** `screen_take_dimensions()` now answers whether the
+   window took the program's size. When it did not, the crop is not cut (a crop
+   for a size the window does not have cuts the wrong part), and the log names
+   the size the surface presents at against the size the window kept.
+3. **Vulkan screen ownership** is counted, not one flag: a program with two
+   surfaces, or a device reset whose new surface is made before the old is
+   destroyed, no longer has the screen handed back under it.
+4. `horizon-wine/tests/check_gl_surfaces.py` was brought back to what it
+   slices: it builds with `cc` (`WINE_NX_HOST_CC`) and passes, including the
+   size a swap publishes and a Vulkan stand-down.
 
-These are static review findings, not confirmed Switch failures. The user plays handheld and performs device testing themselves; no Switch screenshot/build was produced here.
+Also fixed from the same review: `wine_nx_compositor_suspend()` waits for the
+presenter with a three-second bound instead of for ever; a presenter or input
+thread that will not stop is reported to `return_to_launcher()`, which then
+keeps the process out of the loader's hands; `release_screen_buffers()` takes
+the screen's lock with a bound; and a hidden popup no longer presents the same
+frame twice.
+
+Eight host tests that slice the driver (`check_pointer_events`,
+`check_popup_restore`, `check_gl_surfaces`, `check_render_overhead`,
+`check_horizon_thread_fds`, `check_capture_context`,
+`check_wow64_unix_tables`, `check_horizon_thread_handles`) had drifted from
+the code they slice; they build and pass again and now run in CI.
+
+These were static review findings; they were fixed and host-tested here, not
+confirmed on a Switch. The user plays handheld and does their own device
+testing.
 
 ## Build and verification
 
@@ -69,8 +103,20 @@ Static review traced the game-start path through address-space checks, optional 
 
 Open concern from the review:
 
-- **[P2] Cleanup continues after worker-stop timeouts, creating a hang/race window.** `return_to_launcher()` ignores the status of `run_closing_step(stop_mesa_workers, ...)` and proceeds after `wine_nx_input_thread_stop()` and `wine_nx_compositor_stop()` merely log a timeout (`runtime.c:4656–4673`, `compositor.c:241–257`, `winnx_drv.c:112–137`). It then releases screen buffers and GPU sessions (`runtime.c:4114–4135`, `4211–4230`). In particular, `wine_nx_fb_present()` holds `wine_nx_fb_mutex` while calling `framebufferBegin/End` (`runtime.c:1567–1601`), whereas `release_screen_buffers()` takes that same mutex without a timeout (`runtime.c:4114–4135`). If a framebuffer call stalls while holding the mutex, the nominally bounded shutdown can block forever there. If a compositor/Mesa worker remains in GPU work, driver/surface teardown may also overlap it. The final memory guard should prevent reloading while a worker's stack is still borrowed, but it runs only after these teardown operations. Consider propagating stop status and avoiding resource teardown/reload while a worker may still use those resources; verify fail-closed app exit behavior on device.
-- **[P2] Shutdown thread registry reads race with registration/unregistration.** `wine_nx_threads_wake()`, `wine_nx_threads_program()` and `wine_nx_threads_other()` read ordinary `registry[]` fields without `registry_mutex` (`thread_profile.c:325–375`), while `wine_nx_thread_register()` and `wine_nx_thread_unregister()` mutate them under that mutex (`294–325`, `378–390`). During cooperative shutdown this is a C-level data race and may produce an inconsistent worker count/wake list. The later borrowed-memory guard reduces the risk of handing a live worker's stack to the loader, but does not prevent overlap with earlier graphics teardown. Consider a safe snapshot/atomic-handle design and a concurrency test.
+- **[P2] Cleanup continues after worker-stop timeouts, creating a hang/race window.
+  Answered:** `wine_nx_input_thread_stop()` and `wine_nx_compositor_stop()` now
+  answer whether the thread ended, and `return_to_launcher()` keeps the process
+  out of the loader's hands when one did not; `release_screen_buffers()` takes
+  the screen's lock with a bound and says so when a stuck thread holds it.
+- **[P2] (original wording) Cleanup continues after worker-stop timeouts.** `return_to_launcher()` ignores the status of `run_closing_step(stop_mesa_workers, ...)` and proceeds after `wine_nx_input_thread_stop()` and `wine_nx_compositor_stop()` merely log a timeout (`runtime.c:4656–4673`, `compositor.c:241–257`, `winnx_drv.c:112–137`). It then releases screen buffers and GPU sessions (`runtime.c:4114–4135`, `4211–4230`). In particular, `wine_nx_fb_present()` holds `wine_nx_fb_mutex` while calling `framebufferBegin/End` (`runtime.c:1567–1601`), whereas `release_screen_buffers()` takes that same mutex without a timeout (`runtime.c:4114–4135`). If a framebuffer call stalls while holding the mutex, the nominally bounded shutdown can block forever there. If a compositor/Mesa worker remains in GPU work, driver/surface teardown may also overlap it. The final memory guard should prevent reloading while a worker's stack is still borrowed, but it runs only after these teardown operations. Consider propagating stop status and avoiding resource teardown/reload while a worker may still use those resources; verify fail-closed app exit behavior on device.
+- **[P2] Shutdown thread registry reads race with registration/unregistration.
+  Answered:** the slot's handle is the flag that says the slot holds a thread,
+  and it is now written last on registration and read atomically, so a reader
+  sees either a free slot or one whose fields are already written
+  (`registry_handle`, `registry_set_handle`, `source/thread_profile.c`);
+  `parked` is read and written the same way.  `threads_profile.c`'s host test
+  builds and passes with `cc`.
+- **[P2] (original wording) Shutdown thread registry reads race.** `wine_nx_threads_wake()`, `wine_nx_threads_program()` and `wine_nx_threads_other()` read ordinary `registry[]` fields without `registry_mutex` (`thread_profile.c:325–375`), while `wine_nx_thread_register()` and `wine_nx_thread_unregister()` mutate them under that mutex (`294–325`, `378–390`). During cooperative shutdown this is a C-level data race and may produce an inconsistent worker count/wake list. The later borrowed-memory guard reduces the risk of handing a live worker's stack to the loader, but does not prevent overlap with earlier graphics teardown. Consider a safe snapshot/atomic-handle design and a concurrency test.
 
 Other shutdown behavior confirmed by inspection: the first quit chord asks the game to terminate itself; the runtime forces teardown after five seconds or on a second press (`runtime.c:4396–4410`, 320–356). Forced termination can lose game data that was not saved; that is distinct from memory reclamation. `loader-anyway.txt` deliberately bypasses the normal outstanding-memory guard (`runtime.c:4790–4795`, 5123); keep it an explicit diagnostic override, not a default.
 
@@ -179,8 +225,13 @@ Watch on device, because these now actually happen: `d3d11.disableMsaa = True`
 
 ## Next actions
 
-1. Read this file and inspect `git status` before changing anything; continue on `arena/97e282a9-autorun`.
+1. Read this file and inspect `git status` before changing anything; the work
+   branch is `arena/16b1334a-autorun`.
 2. Preserve unrelated FEX/Zink work and keep all changes on this branch.
-3. Prioritize the GL scaling mismatch, Vulkan surface lifetime, and the new shutdown-timeout/thread-registry findings above. Be cautious around NWindow ownership: OpenGL already uses `nx_screen_refs`; Vulkan currently does not.
+3. The remaining display work that needs a console: presenting OpenGL through
+   the compositor, which is the only way the Aspect/Integer settings can reach
+   a GL picture. Everything else from the review is answered above.
 4. Add bounded retention for per-run logs/reports before release.
-5. The CI runtime build and host tests passed. The user still needs to test the resulting build on handheld Switch, especially repeated start/normal exit/forced quit and memory reuse; do not claim hardware safety without that test.
+5. The user still needs to test this build on a handheld Switch, especially
+   repeated start/normal exit/forced quit, two Vulkan surfaces alive at once,
+   and memory reuse; do not claim hardware safety without that test.

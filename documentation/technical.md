@@ -232,8 +232,8 @@ runtime; the full package now ships the Mesa 26 one.
   used to leave the numbers and no conclusion, which cost a run to read.
 - **The screen goes back when the last surface does.** A program can hold more
   than one Vulkan surface at a time -- two windows, and the surface of a device
-  reset made before the one it replaces is destroyed -- and the runtime counted
-  them with one flag. Destroying the older surface therefore handed the screen
+  reset made before the one it replaces is destroyed -- and the runtime kept
+  them in one flag. Destroying the older surface therefore handed the screen
   to the compositor, released the window's buffers and left the newer one
   presenting into a screen it no longer had. The holders are counted now, and
   the screen goes back with the last of them (`wine_nx_vulkan_window`,

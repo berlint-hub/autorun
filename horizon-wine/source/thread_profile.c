@@ -99,6 +99,18 @@ struct nx_prof_target
 
 static pthread_mutex_t registry_mutex = PTHREAD_MUTEX_INITIALIZER;
 static struct nx_prof_thread registry[NX_PROF_MAX_THREADS];
+/* The handle is the slot's own flag: set last when the thread registers, and
+ * read without the lock by the threads that have to be woken and counted.  It
+ * is, and is read, atomically, so that a reader sees either a free slot or a
+ * thread whose fields are already written. */
+static Handle registry_handle( unsigned int i )
+{
+    return __atomic_load_n( &registry[i].handle, __ATOMIC_ACQUIRE );
+}
+static void registry_set_handle( unsigned int i, Handle handle )
+{
+    __atomic_store_n( &registry[i].handle, handle, __ATOMIC_RELEASE );
+}
 /* Held by the sampler for a round of samples, by the report and by threads
  * leaving; registry_mutex is never taken while holding it. */
 static pthread_mutex_t profile_mutex = PTHREAD_MUTEX_INITIALIZER;
@@ -310,7 +322,6 @@ void wine_nx_thread_register( char kind, unsigned int tid, void *teb )
     if (slot < NX_PROF_MAX_THREADS)
     {
         memset( &registry[slot], 0, sizeof(registry[slot]) );
-        registry[slot].handle = handle;
         registry[slot].tid = tid;
         registry[slot].kind = kind;
         registry[slot].core = core;
@@ -322,6 +333,7 @@ void wine_nx_thread_register( char kind, unsigned int tid, void *teb )
             snprintf( registry[slot].name, sizeof(registry[slot].name), "compositor" );
             offload_thread_locked( &registry[slot] );
         }
+        registry_set_handle( slot, handle );  /* the slot is a thread from here on */
     }
     pthread_mutex_unlock( &registry_mutex );
 }
@@ -335,7 +347,7 @@ unsigned int wine_nx_threads_wake( void )
      * refused, and waiting on a thread that is being told to end would not do. */
     for (i = 0; i < NX_PROF_MAX_THREADS; i++)
     {
-        Handle handle = registry[i].handle;
+        Handle handle = registry_handle( i );
 
         if (!handle || handle == self) continue;
         if (R_SUCCEEDED( svcCancelSynchronization( handle ) )) woken++;
@@ -350,7 +362,7 @@ void wine_nx_thread_parked( int parked )
     unsigned int i;
 
     for (i = 0; i < NX_PROF_MAX_THREADS; i++)
-        if (registry[i].handle == handle) registry[i].parked = parked;
+        if (registry_handle( i ) == handle) __atomic_store_n( &registry[i].parked, parked, __ATOMIC_RELEASE );
 }
 
 unsigned int wine_nx_threads_program( void )
@@ -361,7 +373,11 @@ unsigned int wine_nx_threads_program( void )
     /* The presenter is the runtime's own and is stopped separately; everything
      * else belongs to the program that is being closed. */
     for (i = 0; i < NX_PROF_MAX_THREADS; i++)
-        if (registry[i].handle && registry[i].handle != self && registry[i].kind != 'c') count++;
+    {
+        Handle handle = registry_handle( i );
+
+        if (handle && handle != self && registry[i].kind != 'c') count++;
+    }
     return count;
 }
 
@@ -371,7 +387,11 @@ unsigned int wine_nx_threads_other( void )
     unsigned int i, count = 0;
 
     for (i = 0; i < NX_PROF_MAX_THREADS; i++)
-        if (registry[i].handle && registry[i].handle != self) count++;
+    {
+        Handle handle = registry_handle( i );
+
+        if (handle && handle != self) count++;
+    }
     return count;
 }
 
@@ -382,7 +402,7 @@ void wine_nx_thread_unregister( void )
 
     pthread_mutex_lock( &registry_mutex );
     for (i = 0; i < NX_PROF_MAX_THREADS; i++)
-        if (registry[i].handle == handle) registry[i].handle = 0;
+        if (registry_handle( i ) == handle) registry_set_handle( i, 0 );
     pthread_mutex_unlock( &registry_mutex );
     pthread_mutex_lock( &profile_mutex );
     for (i = 0; i < NX_PROF_TARGETS; i++)
@@ -1133,8 +1153,10 @@ void wine_nx_threads_report_unparked( void )
     len = appendf( line, 0, "[QUIT] still running:" );
     for (i = 0; i < NX_PROF_MAX_THREADS && len < 200; i++)
     {
-        if (!registry[i].handle || registry[i].handle == self || registry[i].kind == 'c') continue;
-        if (registry[i].parked) continue;
+        Handle handle = registry_handle( i );
+
+        if (!handle || handle == self || registry[i].kind == 'c') continue;
+        if (__atomic_load_n( &registry[i].parked, __ATOMIC_ACQUIRE )) continue;
         len = appendf( line, len, " %u%c", registry[i].tid, registry[i].kind );
     }
     wine_nx_runtime_trace( line );
