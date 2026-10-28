@@ -239,10 +239,11 @@ static void runtime_alternate_clean(void)
 {
     static u64 start;
     static int last = -1;
-    u64 now = armGetSystemTick(), seconds;
+    u64 now, seconds;
     int skip;
 
     if (!clean_alternates) return;
+    now = armGetSystemTick();
     if (!start) start = now;
     seconds = armTicksToNs( now - start ) / 1000000000ull;
     skip = seconds >= 60 && (seconds / 30) % 2 == 0;
@@ -1566,12 +1567,18 @@ int wine_nx_screenshot_take( const void *pixels, int width, int height, int stri
 
 void wine_nx_fb_present(void)
 {
-    u64 now = armGetSystemTick();
+    u64 now;
 
     pthread_mutex_lock( &wine_nx_fb_mutex );
-    if (wine_nx_fb_ready && !wine_nx_fb_lock_depth &&
-        ((wine_nx_fb_pending_bits && wine_nx_fb_pending_dirty) ||
-         (wine_nx_cursor_moved && armTicksToNs( now - wine_nx_fb_last_present ) >= WINE_NX_CURSOR_FRAME_NS)))
+    if (!wine_nx_fb_ready || wine_nx_fb_lock_depth ||
+        (!(wine_nx_fb_pending_bits && wine_nx_fb_pending_dirty) && !wine_nx_cursor_moved))
+    {
+        pthread_mutex_unlock( &wine_nx_fb_mutex );
+        return;
+    }
+    now = armGetSystemTick();
+    if ((wine_nx_fb_pending_bits && wine_nx_fb_pending_dirty) ||
+        (wine_nx_cursor_moved && armTicksToNs( now - wine_nx_fb_last_present ) >= WINE_NX_CURSOR_FRAME_NS))
     {
         if (!wine_nx_fb_pending_bits)
         {
