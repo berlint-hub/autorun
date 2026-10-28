@@ -63,10 +63,28 @@ These are static review findings, not confirmed Switch failures. The user plays 
 - Added `<unistd.h>` in follow-up commit `c9ab039` and pushed it to this branch. GitHub Actions run [40680661822](https://github.com/berlint-hub/autorun/actions/runs/40680661822) then **passed both jobs**: Host tests (56s) and Build the runtime (7m22s). Build included forwarder NCA checks and uploaded the release/card archive. Artifact `autorun`, ID `12812558132`, is 19,049,272 bytes; download it from the Actions run page. Separate `test-shots` artifact contains the overlay test images.
 - This is a successful CI build, not a Switch hardware/display verification.
 
+## Additional launch/shutdown/memory review (2026-10-28)
+
+Static review traced the game-start path through address-space checks, optional FEX attachment, process-parameter creation, image/section mapping and Wine entry; the normal self-termination path goes through `NtTerminateProcess` → `wine_nx_leave_process` → cooperative thread park/join → graphics/service cleanup → release of Box64/FEX/code mappings → clear uncached heap attributes → a final borrowed-region check before the loader is allowed to reload. If Autorun still owns borrowed regions, it normally refuses loader handoff and closes the app instead. This is a useful fail-closed guard, not proof of hardware safety.
+
+Open concern from the review:
+
+- **[P2] Cleanup continues after worker-stop timeouts, creating a hang/race window.** `return_to_launcher()` ignores the status of `run_closing_step(stop_mesa_workers, ...)` and proceeds after `wine_nx_input_thread_stop()` and `wine_nx_compositor_stop()` merely log a timeout (`runtime.c:4656–4673`, `compositor.c:241–257`, `winnx_drv.c:112–137`). It then releases screen buffers and GPU sessions (`runtime.c:4114–4135`, `4211–4230`). In particular, `wine_nx_fb_present()` holds `wine_nx_fb_mutex` while calling `framebufferBegin/End` (`runtime.c:1567–1601`), whereas `release_screen_buffers()` takes that same mutex without a timeout (`runtime.c:4114–4135`). If a framebuffer call stalls while holding the mutex, the nominally bounded shutdown can block forever there. If a compositor/Mesa worker remains in GPU work, driver/surface teardown may also overlap it. The final memory guard should prevent reloading while a worker's stack is still borrowed, but it runs only after these teardown operations. Consider propagating stop status and avoiding resource teardown/reload while a worker may still use those resources; verify fail-closed app exit behavior on device.
+- **[P2] Shutdown thread registry reads race with registration/unregistration.** `wine_nx_threads_wake()`, `wine_nx_threads_program()` and `wine_nx_threads_other()` read ordinary `registry[]` fields without `registry_mutex` (`thread_profile.c:325–375`), while `wine_nx_thread_register()` and `wine_nx_thread_unregister()` mutate them under that mutex (`294–325`, `378–390`). During cooperative shutdown this is a C-level data race and may produce an inconsistent worker count/wake list. The later borrowed-memory guard reduces the risk of handing a live worker's stack to the loader, but does not prevent overlap with earlier graphics teardown. Consider a safe snapshot/atomic-handle design and a concurrency test.
+
+Other shutdown behavior confirmed by inspection: the first quit chord asks the game to terminate itself; the runtime forces teardown after five seconds or on a second press (`runtime.c:4396–4410`, 320–356). Forced termination can lose game data that was not saved; that is distinct from memory reclamation. `loader-anyway.txt` deliberately bypasses the normal outstanding-memory guard (`runtime.c:4790–4795`, 5123); keep it an explicit diagnostic override, not a default.
+
+Verification performed for this review:
+
+- `check_horizon_mappings.py`, `check_horizon_guest_reserve.py`, and `check_horizon_address_space_limit.py` passed.
+- The host `horizon_threads.c` test passed under GCC ASan/UBSan and GCC ThreadSanitizer. The encompassing script then stopped because `check_select_wait.py` requires missing `clang`.
+- `check_horizon_thread_fds.py` and `check_horizon_thread_handles.py` could not compile/run their generated/static fixtures against the current source (stale symbol/layout assumptions); TLS/suspend/fast-sync/FEX memory scripts also need missing `clang`. These are test-harness/environment limitations, not runtime failures.
+- No code was changed by this review, and no Switch execution or memory-reuse/repeated-launch test was performed.
+
 ## Next actions
 
 1. Read this file and inspect `git status` before changing anything; continue on `arena/97e282a9-autorun`.
 2. Preserve unrelated FEX/Zink work and keep all changes on this branch.
-3. Prioritize the GL scaling mismatch and Vulkan surface lifetime review. Be cautious around NWindow ownership: OpenGL already uses `nx_screen_refs`; Vulkan currently does not.
-4. Add a bounded retention policy for per-run logs/reports, with tests, before treating the history feature as release-ready.
-5. The CI runtime build and host tests passed. The user still needs to install/test the resulting build on handheld Switch; do not claim visual fixes without that test.
+3. Prioritize the GL scaling mismatch, Vulkan surface lifetime, and the new shutdown-timeout/thread-registry findings above. Be cautious around NWindow ownership: OpenGL already uses `nx_screen_refs`; Vulkan currently does not.
+4. Add bounded retention for per-run logs/reports before release.
+5. The CI runtime build and host tests passed. The user still needs to test the resulting build on handheld Switch, especially repeated start/normal exit/forced quit and memory reuse; do not claim hardware safety without that test.
