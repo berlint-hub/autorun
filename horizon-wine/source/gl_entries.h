@@ -21,6 +21,20 @@ enum nx_gl_entry
 
 void wine_nx_gl_enter( unsigned int entry, int a, int b );
 void wine_nx_gl_leave( unsigned int entry, int ret );
+/* The Windows-side swap has several calls before it reaches the EGL drawable.
+ * These bounded breadcrumbs say which one is the last to return. */
+enum nx_gl_swap_stage
+{
+    NX_GL_SWAP_STAGE_BEGIN,
+    NX_GL_SWAP_STAGE_WINDOW,
+    NX_GL_SWAP_STAGE_BEFORE_SYNC,
+    NX_GL_SWAP_STAGE_AFTER_SYNC,
+    NX_GL_SWAP_STAGE_AFTER_FLUSH,
+    NX_GL_SWAP_STAGE_BEFORE_EGL,
+    NX_GL_SWAP_STAGE_AFTER_EGL,
+    NX_GL_SWAP_STAGE_RETURN
+};
+void wine_nx_gl_swap_stage( unsigned int stage );
 int wine_nx_gl_stage_of( unsigned int tid );
 const char *wine_nx_gl_entry_name( int entry );
 

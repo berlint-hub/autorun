@@ -3063,22 +3063,33 @@ static BOOL win32u_wglSwapBuffers( HDC hdc )
     BOOL ret;
 
 #ifdef __SWITCH__
+    wine_nx_gl_swap_stage( NX_GL_SWAP_STAGE_BEGIN );
     wine_nx_gl_enter( NX_GL_SWAP_BUFFERS, (int)(ULONG_PTR)hdc, context ? 1 : 0 );
 #endif
     if (!(hwnd = NtUserWindowFromDC( hdc )))
     {
         ret = flush_memory_pbuffer( funcs->p_glFlush );
 #ifdef __SWITCH__
+        wine_nx_gl_swap_stage( NX_GL_SWAP_STAGE_RETURN );
         wine_nx_gl_leave( NX_GL_SWAP_BUFFERS, ret );
 #endif
         return ret;
     }
 
+#ifdef __SWITCH__
+    wine_nx_gl_swap_stage( NX_GL_SWAP_STAGE_WINDOW );
+#endif
     interval = get_window_swap_interval( hwnd );
 
     TRACE( "context %p, hwnd %p, hdc %p, interval %d\n", context, hwnd, hdc, interval );
 
+#ifdef __SWITCH__
+    wine_nx_gl_swap_stage( NX_GL_SWAP_STAGE_BEFORE_SYNC );
+#endif
     if (context) context_sync_drawables( context, 0, 0 );
+#ifdef __SWITCH__
+    wine_nx_gl_swap_stage( NX_GL_SWAP_STAGE_AFTER_SYNC );
+#endif
 
     if (context) opengl_drawable_add_ref( (draw = context->draw) );
     else if (!(draw = get_window_current_drawable( hwnd )))
@@ -3090,9 +3101,17 @@ static BOOL win32u_wglSwapBuffers( HDC hdc )
     }
 
     opengl_drawable_flush( draw, interval, 0 );
+#ifdef __SWITCH__
+    wine_nx_gl_swap_stage( NX_GL_SWAP_STAGE_AFTER_FLUSH );
+    wine_nx_gl_swap_stage( NX_GL_SWAP_STAGE_BEFORE_EGL );
+#endif
     ret = opengl_drawable_swap( draw );
+#ifdef __SWITCH__
+    wine_nx_gl_swap_stage( NX_GL_SWAP_STAGE_AFTER_EGL );
+#endif
     opengl_drawable_release( draw );
 #ifdef __SWITCH__
+    wine_nx_gl_swap_stage( NX_GL_SWAP_STAGE_RETURN );
     wine_nx_gl_leave( NX_GL_SWAP_BUFFERS, ret );
 #endif
 

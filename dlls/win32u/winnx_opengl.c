@@ -395,6 +395,33 @@ unsigned long long wine_nx_gl_swap_time;  /* 100 ns */
  * how long. */
 static unsigned long long nx_swap_begun_at;
 static unsigned int nx_swap_named;
+static unsigned int nx_swap_api_calls;
+static __thread unsigned int nx_swap_api_number;
+
+static const char *const nx_gl_swap_stage_names[] =
+{
+    "entered win32u_wglSwapBuffers",
+    "looked up the window DC",
+    "about to sync the current context's drawables",
+    "context drawable sync returned",
+    "drawable flush returned",
+    "about to call the drawable's EGL swap",
+    "drawable's EGL swap returned",
+    "wglSwapBuffers is returning",
+};
+
+/* A WGL swap can block before the EGL drawable ever sees it. Keep a short
+ * trace of the first few calls so a stall tells us whether it is in the
+ * window lookup, context activation, command flush or the driver's present.
+ * This is deliberately per-call, bounded, and only adds logs during startup. */
+void wine_nx_gl_swap_stage( unsigned int stage )
+{
+    if (stage == NX_GL_SWAP_STAGE_BEGIN)
+        nx_swap_api_number = __atomic_add_fetch( &nx_swap_api_calls, 1, __ATOMIC_RELAXED );
+    if (stage < ARRAY_SIZE( nx_gl_swap_stage_names ) && nx_swap_api_number <= 3)
+        nx_log( "[NXGL] WGL swap #%u: %s", nx_swap_api_number, nx_gl_swap_stage_names[stage] );
+    if (stage == NX_GL_SWAP_STAGE_RETURN) nx_swap_api_number = 0;
+}
 
 /* Milliseconds the program's swap has been inside the driver, 0 if none is.
  * Read from another thread, hence the atomics; the clock is the same one the
