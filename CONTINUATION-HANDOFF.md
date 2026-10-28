@@ -59,12 +59,14 @@ These are static review findings, not confirmed Switch failures. The user plays 
   - `python3 -m py_compile horizon-wine/tools/package-autorun.py`: passed.
   - `git diff --check`: passed.
 - The full SDL launcher host suite and Switch visual tests were not run locally; `clang`, SDL headers, Docker, and the Switch toolchain are absent.
-- After the handoff commit was pushed, GitHub Actions run [40679657102](https://github.com/berlint-hub/autorun/actions/runs/40679657102) ran the **Host tests** job successfully, but the runtime build failed compiling `launcher.c`: `access()` and `F_OK` were undeclared because `<unistd.h>` was missing. The include has now been added; push the follow-up commit to rerun the Actions build and update this note with its final result/artifact.
+- GitHub Actions run [40679657102](https://github.com/berlint-hub/autorun/actions/runs/40679657102) first ran the **Host tests** job successfully, but the runtime build failed compiling `launcher.c`: `access()` and `F_OK` were undeclared because `<unistd.h>` was missing.
+- Added `<unistd.h>` in follow-up commit `c9ab039` and pushed it to this branch. GitHub Actions run [40680661822](https://github.com/berlint-hub/autorun/actions/runs/40680661822) then **passed both jobs**: Host tests (56s) and Build the runtime (7m22s). Build included forwarder NCA checks and uploaded the release/card archive. Artifact `autorun`, ID `12812558132`, is 19,049,272 bytes; download it from the Actions run page. Separate `test-shots` artifact contains the overlay test images.
+- This is a successful CI build, not a Switch hardware/display verification.
 
 ## Next actions
 
 1. Read this file and inspect `git status` before changing anything; continue on `arena/97e282a9-autorun`.
-2. The current code is recorded in the branch commit that accompanies this handoff; preserve unrelated FEX/Zink work.
+2. Preserve unrelated FEX/Zink work and keep all changes on this branch.
 3. Prioritize the GL scaling mismatch and Vulkan surface lifetime review. Be cautious around NWindow ownership: OpenGL already uses `nx_screen_refs`; Vulkan currently does not.
 4. Add a bounded retention policy for per-run logs/reports, with tests, before treating the history feature as release-ready.
-5. Re-run host tests after installing the expected dependencies, then ask the user to build/test the Switch image; do not claim visual fixes without that test.
+5. The CI runtime build and host tests passed. The user still needs to install/test the resulting build on handheld Switch; do not claim visual fixes without that test.
