@@ -17,6 +17,13 @@ this repository -- no FEX tree is needed to check them:
   the JIT allocation, the I-cache flush and the W^X transition all go through
   the unixlib, and the CRT heap is the runtime's.
 
+* it carries the parts of the FEX work's FEX-2609 port that FEX-2610 did not
+  pick up: the decoder's self-modifying-code rule, POP into memory, a
+  protection value that is actually read back, an execute fault not taken for
+  a write, an allocation that has to land below 2 GB, and a thread that is put
+  back after being suspended. FEX-2610 kept some of the scaffolding for these
+  (`ExecutableRangeWriteTracked`, `ForceFullSMCDetection`) and lost the use.
+
 The handover that tells a builder to apply it is checked too, so the three
 steps and the honest "not built yet" cannot quietly drop out of the docs.
 """
@@ -94,6 +101,23 @@ for needle, why in [
 ]:
     want(needle in patch, why)
 
+# -- what the FEX work's FEX-2609 port does and FEX-2610 does not ------------
+# Each marker only exists when the carried piece is there, so a re-port that
+# silently drops one of them fails here rather than on a card.
+for needle, why in [
+    ('ExecutableRangeWriteTracked = RangeInfo.WriteTracked',
+     'nothing records whether a writable range is write-tracked'),
+    ('BlockIt->ForceFullSMCDetection = true',
+     'a writable, untracked range no longer forces the full SMC check'),
+    ('StackBase',
+     'POP into memory does not account for the RSP increment'),
+    ('Prot, &Prot', 'the module write restores protection from an uninitialised value'),
+    ('0x7ffffffb', 'the 32-bit bridge is allocated without checking it landed below 2 GB'),
+    ('ExceptionInformation[0] == 1', 'an execute fault is taken for self-modifying code'),
+    ('NtResumeThread', 'a thread this code suspended is left suspended'),
+]:
+    want(needle in patch, why)
+
 want('__builtin___clear_cache' not in patch.split('jit_registry.h')[0] or
      'HorizonFlushICache' in patch,
      'the patch flushes the instruction cache with __builtin___clear_cache alone')
@@ -110,6 +134,7 @@ for needle, why in [
     ('FEX_TUNE_TEGRA_X1', 'the handover does not say how the modules are tuned'),
     ('libwow64fex-opt.dll', 'the handover does not say which modules the card gets'),
     ('Not checked', 'the handover does not say what has not been built'),
+    ('not carried', 'the handover does not say what the 2609 port has and this one does not'),
 ]:
     want(needle in handover, why)
 

@@ -89,6 +89,42 @@ index 1b53bd495..50db0cf9b 100644
  #endif
  
    if (Config.BlockJITNaming() || Config.GlobalJITNaming() || Config.LibraryJITNaming()) {
+diff --git a/FEXCore/Source/Interface/Core/Frontend.cpp b/FEXCore/Source/Interface/Core/Frontend.cpp
+index 12885675a..1824f912a 100644
+--- a/FEXCore/Source/Interface/Core/Frontend.cpp
++++ b/FEXCore/Source/Interface/Core/Frontend.cpp
+@@ -99,6 +99,7 @@ bool Decoder::CheckRangeExecutable(uint64_t Address, uint64_t Size) {
+     ExecutableRangeBase = RangeInfo.Base;
+     ExecutableRangeEnd = RangeInfo.Base + RangeInfo.Size;
+     ExecutableRangeWritable = RangeInfo.Writable;
++    ExecutableRangeWriteTracked = RangeInfo.WriteTracked;
+ 
+     if (RangeInfo.Size == 0) {
+       return false;
+@@ -1616,6 +1617,23 @@ void Decoder::DecodeLoop(const uint8_t* _InstStream, uint64_t GuestSizePause) {
+       }
+       uint64_t OpEndAddress = OpAddress + DecodeInst->InstSize;
+ 
++#if defined(FEX_HORIZON)
++      // No hardware write tracking on the console, and no page protection to
++      // fault on either: a writable range that the host does not track can be
++      // changed under the translated block without anything telling FEX. Such
++      // a block gets the full SMC check instead of data masks derived from the
++      // bytes it was translated from -- stale code is a crash a long way from
++      // its cause, a slightly wider check is not.
++      if (BlockIt->BlockStatus == DecodedBlockStatus::SUCCESS && CTX->Config.SMCChecks != FEXCore::Config::CONFIG_SMC_NONE) {
++        bool Writable = CheckRangeExecutable(OpAddress, 1) && ExecutableRangeWritable && !ExecutableRangeWriteTracked;
++        Writable |= CheckRangeExecutable(OpEndAddress - 1, 1) && ExecutableRangeWritable && !ExecutableRangeWriteTracked;
++        if (Writable) {
++          BlockIt->ForceFullSMCDetection = true;
++          BlockIt->DataMasks.clear();
++        }
++      }
++#endif
++
+       DecodedMinAddress = std::min(DecodedMinAddress, OpAddress);
+       DecodedMaxAddress = std::max(DecodedMaxAddress, OpEndAddress);
+ 
 diff --git a/FEXCore/Source/Interface/Core/LookupCache.cpp b/FEXCore/Source/Interface/Core/LookupCache.cpp
 index 0b230306f..46f51d7fe 100644
 --- a/FEXCore/Source/Interface/Core/LookupCache.cpp
@@ -216,6 +252,43 @@ index 391d48560..eed4d88aa 100644
 +#endif
  
    size_t AllocateOffset {};
+ 
+diff --git a/FEXCore/Source/Interface/Core/OpcodeDispatcher.cpp b/FEXCore/Source/Interface/Core/OpcodeDispatcher.cpp
+index 7e86e3703..23c1ae227 100644
+--- a/FEXCore/Source/Interface/Core/OpcodeDispatcher.cpp
++++ b/FEXCore/Source/Interface/Core/OpcodeDispatcher.cpp
+@@ -401,7 +401,31 @@ void OpDispatchBuilder::PUSHSegmentOp(OpcodeArgs, uint32_t SegmentReg) {
+ }
+ 
+ void OpDispatchBuilder::POPOp(OpcodeArgs) {
+-  Ref Value = Pop(OpSizeFromSrc(Op));
++  // POP into memory: per the SDM the destination's effective address is taken
++  // *after* RSP is incremented when RSP is its base, so the naive
++  // load-then-store-memory order writes to the wrong slot.
++  const auto Size = OpSizeFromSrc(Op);
++  if (!Op->Dest.IsGPR()) {
++    Ref SP = LoadGPRRegister(X86State::REG_RSP);
++    Ref Value = _LoadMemGPRAutoTSO(Size, SP, Size);
++    auto Address = DecodeAddress(Op, Op->Dest, MemoryAccessType::DEFAULT, false);
++    const auto& Dest = Op->Dest;
++    bool StackBase = false;
++    if (Dest.IsGPRDirect()) {
++      StackBase = Dest.Data.GPR.GPR == X86State::REG_RSP;
++    } else if (Dest.IsGPRIndirect() || Dest.IsGPRIndirectRelocation()) {
++      StackBase = Dest.Data.GPRIndirect.GPR == X86State::REG_RSP;
++    } else if (Dest.IsSIB() || Dest.IsSIBRelocation()) {
++      StackBase = Dest.Data.SIB.Base == X86State::REG_RSP;
++    }
++    if (StackBase) {
++      Address.Offset += IR::OpSizeToSize(Size);
++    }
++    _StoreMemGPRAutoTSO(Size, Address, Value, Size);
++    StoreGPRRegister(X86State::REG_RSP, Add(OpSize::i64Bit, SP, IR::OpSizeToSize(Size)));
++    return;
++  }
++  Ref Value = Pop(Size);
+   StoreResultGPR(Op, Value);
+ }
  
 diff --git a/FEXCore/Source/Interface/Core/SharedCodeBufferManager.cpp b/FEXCore/Source/Interface/Core/SharedCodeBufferManager.cpp
 index eee502364..e1d5398bb 100644
@@ -594,13 +667,18 @@ index 01e5bb22e..a285b4639 100644
      ClearICache(&PC[-1], 8);
      // Back up one instruction and have another go
 diff --git a/FEXCore/include/FEXCore/HLE/SyscallHandler.h b/FEXCore/include/FEXCore/HLE/SyscallHandler.h
-index 0ba0218e3..cf6fbda20 100644
+index 0ba0218e3..cb4a614b5 100644
 --- a/FEXCore/include/FEXCore/HLE/SyscallHandler.h
 +++ b/FEXCore/include/FEXCore/HLE/SyscallHandler.h
-@@ -21,6 +21,7 @@ struct ExecutableRangeInfo {
+@@ -21,6 +21,12 @@ struct ExecutableRangeInfo {
    uint64_t Base;
    uint64_t Size;
    bool Writable;
++  // Whether writes to the range are tracked by the host, so that a write ends
++  // up in InvalidationTracker instead of in memory no one was told about.
++  // Defaults to false, which is the honest answer everywhere it is not filled
++  // in: a range that is writable and not tracked can be self-modified without
++  // any notification, and code translated from it has to be checked for that.
 +  bool WriteTracked {};
  };
  
@@ -719,9 +797,18 @@ index af59a6efb..2c48d140f 100644
  }
  
 diff --git a/Source/Windows/ARM64EC/Module.cpp b/Source/Windows/ARM64EC/Module.cpp
-index 80752f1b8..6f3a73657 100644
+index 80752f1b8..99f04c7a6 100644
 --- a/Source/Windows/ARM64EC/Module.cpp
 +++ b/Source/Windows/ARM64EC/Module.cpp
+@@ -209,7 +209,7 @@ void WriteModuleRVA(HMODULE Module, LONG RVA, T Data) {
+   ULONG Prot;
+   NtProtectVirtualMemoryNative(NtCurrentProcess(), &ProtAddress, &ProtSize, PAGE_READWRITE, &Prot);
+   *reinterpret_cast<T*>(Address) = Data;
+-  NtProtectVirtualMemoryNative(NtCurrentProcess(), &ProtAddress, &ProtSize, Prot, nullptr);
++  NtProtectVirtualMemoryNative(NtCurrentProcess(), &ProtAddress, &ProtSize, Prot, &Prot);
+ }
+ 
+ void PatchCallChecker() {
 @@ -694,6 +694,11 @@ NTSTATUS ProcessInit() {
  
    FEX::Windows::Allocator::SetupHooks(NtDll);
@@ -734,7 +821,19 @@ index 80752f1b8..6f3a73657 100644
    if (FEX::Windows::UnixLib::Available()) {
      FEXCore::DiskCache::SetFileMapper(FEX::Windows::UnixLib::MapFile);
    }
-@@ -1025,6 +1030,17 @@ void BTCpu64NotifyReadFile(HANDLE Handle, void* Address, SIZE_T Size, BOOL After
+@@ -788,7 +793,10 @@ bool ResetToConsistentStateImpl(const ThreadCPUArea CPUArea, EXCEPTION_RECORD* E
+     }
+ 
+     std::scoped_lock Lock(ThreadCreationMutex);
+-    if (InvalidationTracker && InvalidationTracker->HandleRWXAccessViolation(Thread, NativeContext->Pc, FaultAddress)) {
++    // ExceptionInformation[0] is 0 read, 1 write, 8 execute: only a write can
++    // have changed the code the block was translated from.
++    if (Exception->ExceptionInformation[0] == 1 && InvalidationTracker &&
++        InvalidationTracker->HandleRWXAccessViolation(Thread, NativeContext->Pc, FaultAddress)) {
+       FEXCORE_PROFILE_INSTANT_INCREMENT(Thread, AccumulatedSMCCount, 1);
+       if (CTX->IsAddressInCodeBuffer(Thread, NativeContext->Pc) && !CTX->IsCurrentBlockSingleInst(CPUArea.ThreadState()) &&
+           CTX->IsAddressInCurrentBlock(Thread, FaultAddress & FEXCore::Utils::FEX_PAGE_MASK, FEXCore::Utils::FEX_PAGE_SIZE)) {
+@@ -1025,6 +1033,17 @@ void BTCpu64NotifyReadFile(HANDLE Handle, void* Address, SIZE_T Size, BOOL After
      return;
    }
  
@@ -752,7 +851,7 @@ index 80752f1b8..6f3a73657 100644
    if (After && Status == STATUS_SUCCESS) {
      std::scoped_lock Lock(ThreadCreationMutex);
      InvalidationTracker->InvalidateAlignedInterval(reinterpret_cast<uint64_t>(Address), static_cast<uint64_t>(Size), false);
-@@ -1032,6 +1048,11 @@ void BTCpu64NotifyReadFile(HANDLE Handle, void* Address, SIZE_T Size, BOOL After
+@@ -1032,6 +1051,11 @@ void BTCpu64NotifyReadFile(HANDLE Handle, void* Address, SIZE_T Size, BOOL After
  }
  
  NTSTATUS ThreadInit() {
@@ -764,6 +863,24 @@ index 80752f1b8..6f3a73657 100644
    std::scoped_lock Lock(ThreadCreationMutex);
    FEX::Windows::InitCRTThread();
    const auto CPUArea = GetCPUArea();
+@@ -1126,6 +1150,9 @@ NTSTATUS ThreadTerm(HANDLE Thread, LONG ExitCode) {
+ 
+   const auto [Err, CPUArea] = GetThreadCPUArea(*ThreadDup);
+   if (Err) {
++    // We suspended it: put it back the way we found it rather than leaving a
++    // thread of the program frozen for the rest of the session.
++    if (!Self) NtResumeThread(*ThreadDup, nullptr);
+     return Err;
+   }
+ 
+@@ -1134,6 +1161,7 @@ NTSTATUS ThreadTerm(HANDLE Thread, LONG ExitCode) {
+     auto it = Threads.find(ThreadTID);
+     if (it == Threads.end()) {
+       // Thread already terminated
++      if (!Self) NtResumeThread(*ThreadDup, nullptr);
+       return STATUS_SUCCESS;
+     }
+ 
 diff --git a/Source/Windows/Common/CRT/CMakeLists.txt b/Source/Windows/Common/CRT/CMakeLists.txt
 index 3cbee918c..b470d0988 100644
 --- a/Source/Windows/Common/CRT/CMakeLists.txt
@@ -1379,7 +1496,7 @@ index ded646b0c..8d803fdb4 100644
    if (Status) {
      SetLastError(RtlNtStatusToDosError(Status));
 diff --git a/Source/Windows/WOW64/Module.cpp b/Source/Windows/WOW64/Module.cpp
-index 8c6b7f76e..d139f76e7 100644
+index 8c6b7f76e..6f2a040ca 100644
 --- a/Source/Windows/WOW64/Module.cpp
 +++ b/Source/Windows/WOW64/Module.cpp
 @@ -519,6 +519,14 @@ void BTCpuProcessInit() {
@@ -1397,7 +1514,21 @@ index 8c6b7f76e..d139f76e7 100644
    if (FEX::Windows::UnixLib::Available()) {
      FEXCore::DiskCache::SetFileMapper(FEX::Windows::UnixLib::MapFile);
    }
-@@ -581,6 +589,13 @@ void BTCpuProcessTerm(HANDLE Handle, BOOL After, ULONG Status) {}
+@@ -547,7 +555,12 @@ void BTCpuProcessInit() {
+   // Allocate the syscall/unixcall trampolines in the lower 2GB of the address space
+   SIZE_T Size = 4;
+   void* Addr = nullptr;
+-  NtAllocateVirtualMemory(NtCurrentProcess(), &Addr, (1U << 31) - 1, &Size, MEM_RESERVE | MEM_COMMIT, PAGE_EXECUTE_READWRITE);
++  // A bridge that is missing or above 2 GB cannot hold the 32-bit entry the
++  // guest jumps to, and the write below would be to null.
++  if (NtAllocateVirtualMemory(NtCurrentProcess(), &Addr, (1U << 31) - 1, &Size, MEM_RESERVE | MEM_COMMIT, PAGE_EXECUTE_READWRITE) || !Addr ||
++      reinterpret_cast<uintptr_t>(Addr) > 0x7ffffffb) {
++    ERROR_AND_DIE_FMT("FEX syscall bridge allocation failed");
++  }
+   InvalidationTracker->HandleMemoryProtectionNotification(reinterpret_cast<uint64_t>(Addr), Size, PAGE_EXECUTE);
+   *reinterpret_cast<uint32_t*>(Addr) = 0x2ecd2ecd;
+   BridgeInstrs::Syscall = Addr;
+@@ -581,6 +594,13 @@ void BTCpuProcessTerm(HANDLE Handle, BOOL After, ULONG Status) {}
  
  void BTCpuThreadInit() {
    static constexpr size_t DefaultWow64CS {4};
@@ -1411,7 +1542,35 @@ index 8c6b7f76e..d139f76e7 100644
    std::scoped_lock Lock(ThreadCreationMutex);
    FEX::Windows::InitCRTThread();
    auto* Thread = CTX->CreateThread();
-@@ -884,6 +899,17 @@ void BTCpuNotifyReadFile(HANDLE Handle, void* Address, SIZE_T Size, BOOL After,
+@@ -643,6 +663,7 @@ void BTCpuThreadTerm(HANDLE Thread, LONG ExitCode) {
+ 
+   auto [Err, TLS] = GetThreadTLS(*ThreadDup);
+   if (Err) {
++    if (!Self) NtResumeThread(*ThreadDup, nullptr);
+     return;
+   }
+ 
+@@ -651,6 +672,7 @@ void BTCpuThreadTerm(HANDLE Thread, LONG ExitCode) {
+     auto it = Threads.find(ThreadTID);
+     if (it == Threads.end()) {
+       // Thread already terminated
++      if (!Self) NtResumeThread(*ThreadDup, nullptr);
+       return;
+     }
+ 
+@@ -750,7 +772,10 @@ bool BTCpuResetToConsistentStateImpl(EXCEPTION_POINTERS* Ptrs) {
+     if (Thread) {
+       std::scoped_lock Lock(ThreadCreationMutex);
+       FEXCORE_PROFILE_INSTANT_INCREMENT(Thread, AccumulatedSMCCount, 1);
+-      if (InvalidationTracker->HandleRWXAccessViolation(Thread, Context->Pc, FaultAddress)) {
++      // Only a write (ExceptionInformation[0] == 1) can have changed the code
++      // the block was translated from; an execute fault must reach the
++      // handlers below rather than be taken for self-modifying code.
++      if (Exception->ExceptionInformation[0] == 1 && InvalidationTracker->HandleRWXAccessViolation(Thread, Context->Pc, FaultAddress)) {
+         if (CTX->IsAddressInCodeBuffer(Thread, Context->Pc) && !CTX->IsCurrentBlockSingleInst(Thread) &&
+             CTX->IsAddressInCurrentBlock(Thread, FaultAddress & FEXCore::Utils::FEX_PAGE_MASK, FEXCore::Utils::FEX_PAGE_SIZE)) {
+           Context::ReconstructThreadState(Context);
+@@ -884,6 +909,17 @@ void BTCpuNotifyReadFile(HANDLE Handle, void* Address, SIZE_T Size, BOOL After,
      return;
    }
  

@@ -77,6 +77,21 @@ What it does, in one line each:
   `HorizonAttachThread()` in the WOW64/ARM64EC thread init, plus the
   read-file halves (`PrepareNativeWrite` before, `InvalidateAlignedInterval`
   after) that keep self-modifying code honest where there are no signals.
+- **Self-modifying code that nothing announces** (`Frontend.cpp`,
+  `SyscallHandler.h`): the console has no hardware write tracking and no
+  page protection to fault on, so a writable range that the host does not
+  track can change under a translated block in silence. Decoding a block in
+  such a range sets `ForceFullSMCDetection` and drops the data masks that
+  were derived from the old bytes. FEX-2610 kept the field, the loop and the
+  check and lost the assignment -- `ExecutableRangeWriteTracked` is written
+  nowhere in that tree, which is how the omission shows.
+- **Four module bugs the port carries** (`WOW64/Module.cpp`,
+  `ARM64EC/Module.cpp`): `POP` into memory takes its effective address after
+  the `RSP` increment (SDM), an execute fault is no longer taken for a write
+  before the SMC check, the module write restores protection from the value
+  it read back instead of an uninitialised one, the 32-bit bridge is refused
+  when it does not land below 2 GB, and a thread suspended for teardown is
+  resumed if the teardown then gives up.
 - **`CMakeLists.txt`**: one `FEX_HORIZON` option (there were two), usable
   without `FEX_HORIZON_ABI_DIR` (the bundled headers are the same files), and
   no `FATAL_ERROR` that made the fallback unreachable.
@@ -131,19 +146,52 @@ stem, so the `-opt` names are all it needs.
 - **Checked**: the runtime builds and its host tests pass (CI on
   `arena/97e282a9-autorun`); the patch applies to `6ec29a2e` on a clean tree;
   the ABI headers it carries are identical to this repository's; FEXCore
-  itself builds for AArch64 from that source.
+  itself builds for AArch64 from that source, unpatched.
 - **Not checked**: the two Windows modules have not been built here, and no
   card carrying them has been booted. The patch ports a memory layer that is
   proven in FEX-2609 (`horizon.patch`) onto FEX-2610's source, and FEX-2610
   moved under it — `CodeBuffer` grew a `ShouldBeNamed` argument, the CRT
   allocator selection changed, the ARM64EC thread entry is a different
   function. Each of those was placed by reading the target tree, not by
-  compiling it.
+  compiling it -- and the same is true of every hunk above that FEX-2610 did
+  not already have, including the decoder rule and the four module fixes. The
+  first compile of the patched tree is the builder's.
 - So: **do not promise the card will carry a faster translator until a card
   with these modules has started a 32-bit program and its log shows `[CPU]
   FEX (libwow64fex-opt.dll)`**. Until then the honest sentence is "the
   runtime is fixed; the tuned translator needs its own build and its own
   run".
+
+## What came from the FEX-2609 port, and what did not
+
+The port this patch is derived from (`horizon.patch`, FEX-2609) is not a
+subset of FEX-2610: the two trees carry different Windows modules, and
+FEX-2610's is the newer of the two. Everything below was compared file by
+file, and what is *not carried* is listed with the reason rather than left
+for someone to rediscover.
+
+Carried, because FEX-2610 has the scaffolding but not the use: the
+self-modifying-code rule and its `WriteTracked` field; `POP` into memory.
+Carried, because they are small and wrong in every tree: the protection
+value read back after `WriteModuleRVA`, the write/execute distinction before
+`HandleRWXAccessViolation`, the 2 GB check on the bridge allocation, and the
+resume of a thread suspended for teardown.
+
+Not carried, with the reason:
+
+- **`BTCpuSuspendLocalThread`'s error paths** and **`BTCpuThreadTerm`'s
+  `TLS.ThreadState() = nullptr`**: FEX-2610 replaced that function and that
+  thread-state accessor (`GetTLS().ThreadState()`, `TLS.CpuArea()`), so the
+  2609 hunks describe code that is not there.
+- **The `FEXCORE_PROFILE_ACCUMULATION` → `SHMStats::AccumulationBlock`
+  rewrite**: FEX-2610 still has the macro, and the rewrite exists to guard a
+  null `ThreadStats` that only the 2609 shape produces.
+- **`ReturnRAX` as `uint32_t`**: the call it receives is `uint32_t` and is
+  assigned to a 64-bit register either way, so the two spellings agree.
+- **`FEXUnixLib::Init`'s early return**: `HorizonInitialize()` only calls it
+  when `Available()` is false, which is the same guard from the other side.
+- **`CPUFeatures`' hardcoded `DCZID`**: FEX-2610 reads `DCZID_EL0` directly,
+  which the console answers, and forces the feature flags afterwards anyway.
 
 ## When it does not start
 

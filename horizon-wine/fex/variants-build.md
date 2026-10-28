@@ -141,7 +141,10 @@ works: JIT buffers allocated through the runtime's unixlib
 in `jit_registry.h`'s registry), writes through `HorizonWritableAddress` to
 the alias, an I-cache flush through `WINE_NX_FEX_FLUSH`, the W^X transition
 through `WINE_NX_FEX_PROTECT_CODE` (the SMC hooks `InvalidationTracker`
-needs), and the CRT heap over `WINE_NX_FEX_HEAP_ALLOC`. It is the layer
+needs), the CRT heap over `WINE_NX_FEX_HEAP_ALLOC`, and the decoder rule that
+sends a block in a writable, untracked range through the full SMC check --
+the console has neither hardware write tracking nor a page protection to
+fault on, and FEX-2610 kept that field without ever setting it. It is the layer
 `horizon.patch` carries for FEX-2609, ported onto FEX-2610's source: the
 `CodeBuffer` constructor grew a `ShouldBeNamed` argument, the CRT allocator
 selection moved into `HorizonHeap.cpp`, and the ARM64EC thread entry is a
