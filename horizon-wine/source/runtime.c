@@ -58,6 +58,7 @@
 #include "horizon_dll_features.h"
 #include "game_fixes.h"
 #include "screen_fit.h"
+#include "nxgl_verdict.h"
 #ifdef WINE_NX_SWAP_POC
 #include "swap_file.h"
 #include "horizon_swap.h"
@@ -294,6 +295,9 @@ static void runtime_report_swap_io(void)
 #endif
 
 static volatile int stall_watch_quit;
+/* Who holds the screen now (defined with the presenter flags below), for the
+ * stall report's verdict on a swap that has not come back. */
+static int wine_nx_screen_owner( void );
 static int stall_watch_running;
 static Thread stall_watch_thread;
 
@@ -708,36 +712,37 @@ static void stall_watch( void *arg )
                           &wine_nx_gl_program_version ? wine_nx_gl_program_version() : "unknown" );
             /* A program inside a swap that never returns is not a program
              * waiting for an event: the one call is where it stopped, and how
-             * long it has been there says whether it is stuck or slow. */
+             * long it has been there says whether it is stuck or slow. The
+             * window's own books say whose fault it is -- the program's buffers
+             * never reached it, one is out and never came back, they were
+             * registered at another size, or the driver simply did not return
+             * -- and nxgl_verdict.h is the one place that picks. A stuck first
+             * swap used to leave the numbers and no verdict, which is one more
+             * run to read. */
             {
                 extern unsigned int wine_nx_gl_swap_stuck_ms( void ) __attribute__((weak));
-
-                if (&wine_nx_gl_swap_stuck_ms)
-                {
-                    unsigned int stuck = wine_nx_gl_swap_stuck_ms();
-
-                    if (stuck >= 2000)
-                        log_line( "[STALL] the program's swap has been inside the driver for "
-                                  "%u.%u s: eglSwapBuffers has not come back",
-                                  stuck / 1000, stuck % 1000 / 100 );
-                }
-            }
-            /* The window the program draws into, as libnx keeps it. A screen
-             * that never shows a frame is one of three things, and three of
-             * these numbers say which: the program's buffers never reached
-             * the window (no slots, or slots at somebody else's size), a
-             * buffer is out of it and has not come back (stuck in the queue),
-             * or it has none out and is waiting for one (stuck in the
-             * dequeue). */
-            {
+                extern void wine_nx_gl_swap_surface( int *width, int *height, int *has_screen )
+                    __attribute__((weak));
+                char line[512];
+                struct nxgl_swap_state state;
                 NWindow *window = nwindowGetDefault();
 
+                memset( &state, 0, sizeof(state) );
+                if (&wine_nx_gl_swap_stuck_ms) state.stuck_ms = wine_nx_gl_swap_stuck_ms();
+                state.owner = wine_nx_screen_owner();
+                if (&wine_nx_gl_swap_surface)
+                    wine_nx_gl_swap_surface( &state.surface_w, &state.surface_h, &state.surface_has_screen );
+                state.window_w = (int)window->width;
+                state.window_h = (int)window->height;
+                state.slots = (unsigned int)__builtin_popcountll( (unsigned long long)window->slots_configured );
+                state.slot_out = window->cur_slot >= 0;
+                state.connected = window->is_connected;
                 log_line( "[STALL] the screen's window: %u slots registered, %dx%d format %u, %s, %s",
-                          (unsigned)__builtin_popcountll( (unsigned long long)window->slots_configured ),
-                          (unsigned)window->width, (unsigned)window->height, (unsigned)window->format,
-                          window->is_connected ? "connected" : "not connected",
-                          window->cur_slot >= 0 ? "a buffer is out and has not come back"
-                                                : "no buffer is out" );
+                          state.slots, (unsigned)window->width, (unsigned)window->height,
+                          (unsigned)window->format,
+                          state.connected ? "connected" : "not connected",
+                          state.slot_out ? "a buffer is out and has not come back" : "no buffer is out" );
+                if (nxgl_swap_report( line, sizeof(line), &state )) log_line( "[STALL] %s", line );
             }
             /* A program waiting for a moment in time and one waiting for an
              * event look the same from outside; the two clocks tell them
@@ -1451,6 +1456,19 @@ void *wine_nx_gl_acquire_window_vulkan( int width, int height )
 int wine_nx_vulkan_owns_screen( void )
 {
     return wine_nx_vulkan_window;
+}
+
+/* Who holds the screen, for the stall report's verdict on a swap that has not
+ * come back: the program's own OpenGL, a Vulkan surface, the compositor, or
+ * nobody at all (the framebuffer or the console). The flags are read without
+ * the display lock, because a report that waits for it on a stuck run would
+ * never be written; each is a word, and the answer only has to be close. */
+static int wine_nx_screen_owner( void )
+{
+    if (wine_nx_vulkan_window) return NXGL_OWNER_VULKAN;
+    if (wine_nx_gl_window) return NXGL_OWNER_GL;
+    if (wine_nx_compositor_running()) return NXGL_OWNER_COMPOSITOR;
+    return NXGL_OWNER_NONE;
 }
 
 /* The screen goes back to the framebuffer or the compositor once the last

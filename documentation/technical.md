@@ -215,7 +215,15 @@ runtime; the full package now ships the Mesa 26 one.
   which also prints the screen's window as libnx keeps it -- slots registered,
   size and format, whether a buffer is out -- so "never registered", "stuck
   waiting for a buffer" and "stuck handing one back" are told apart by reading
-  one line.
+  one line. That line now carries the verdict too (`source/nxgl_verdict.h`,
+  host-tested by `tests/nxgl_verdict.c`): the swap's surface never held the
+  screen, the window is not connected, nothing is registered on it, a buffer is
+  out and never came back, the buffers were configured for another size than
+  the surface presents at, or none of those and the driver did not return --
+  each named with the size, slot count and seconds it was decided on, and the
+  size the surface presents at read from the swap itself
+  (`wine_nx_gl_swap_surface`, `dlls/win32u/winnx_opengl.c`). A stuck first swap
+  used to leave the numbers and no conclusion, which cost a run to read.
 - **The message loop's clock is not free.** Every message loop turn asks for a
   performance counter tick to decide whether to poll the driver, and on Horizon
   a read of that counter is the one system call the runtime deliberately makes

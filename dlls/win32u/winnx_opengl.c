@@ -397,6 +397,11 @@ static unsigned long long nx_swap_begun_at;
 static unsigned int nx_swap_named;
 static unsigned int nx_swap_api_calls;
 static __thread unsigned int nx_swap_api_number;
+/* The surface the open swap presents into, published for the stall report: how
+ * large it is and whether it holds the screen. A verdict on a stuck swap needs
+ * the size the picture is being handed over at, and only this side knows it;
+ * the runtime reads it a few words at a time and never calls back in here. */
+static int nx_swap_surface_w, nx_swap_surface_h, nx_swap_surface_screen;
 
 static const char *const nx_gl_swap_stage_names[] =
 {
@@ -421,6 +426,16 @@ void wine_nx_gl_swap_stage( unsigned int stage )
     if (stage < ARRAY_SIZE( nx_gl_swap_stage_names ) && nx_swap_api_number <= 3)
         nx_log( "[NXGL] WGL swap #%u: %s", nx_swap_api_number, nx_gl_swap_stage_names[stage] );
     if (stage == NX_GL_SWAP_STAGE_RETURN) nx_swap_api_number = 0;
+}
+
+/* The size the open swap presents at and whether its surface holds the screen,
+ * for the stall report (runtime.c, over nxgl_verdict.h): 0,0 when no swap has
+ * opened yet. */
+void wine_nx_gl_swap_surface( int *width, int *height, int *has_screen )
+{
+    if (width) *width = __atomic_load_n( &nx_swap_surface_w, __ATOMIC_RELAXED );
+    if (height) *height = __atomic_load_n( &nx_swap_surface_h, __ATOMIC_RELAXED );
+    if (has_screen) *has_screen = __atomic_load_n( &nx_swap_surface_screen, __ATOMIC_RELAXED );
 }
 
 /* Milliseconds the program's swap has been inside the driver, 0 if none is.
@@ -648,9 +663,19 @@ static BOOL nx_drawable_swap( struct opengl_drawable *base )
      * a program that shows nothing stops: a swap the driver never returns used
      * to leave the log with no line between the context and the stall report,
      * and the window it was swapped on was the question. */
+    /* A query the driver did not answer leaves the size at zero, and zero is not
+     * a size the stall report can compare; the window it draws into is. */
+    if ((!width || !height) && base->client)
+    {
+        width = base->client->virtual_rect.right - base->client->virtual_rect.left;
+        height = base->client->virtual_rect.bottom - base->client->virtual_rect.top;
+    }
     index = __atomic_add_fetch( &nx_swap_named, 1, __ATOMIC_RELAXED );
     if (index <= 3)
         nx_log( "[NXGL] swap #%u began on the program's %dx%d surface", index, width, height );
+    __atomic_store_n( &nx_swap_surface_w, (int)width, __ATOMIC_RELAXED );
+    __atomic_store_n( &nx_swap_surface_h, (int)height, __ATOMIC_RELAXED );
+    __atomic_store_n( &nx_swap_surface_screen, 1, __ATOMIC_RELAXED );
     start = horizon_interrupt_time();
     /* The first one in, not the last: two windows can swap at once, and the
      * one worth naming is the one that has been in there the longest. */

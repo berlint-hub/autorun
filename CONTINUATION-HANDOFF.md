@@ -1,7 +1,7 @@
 # Autorun continuation handoff
 
-**Updated:** 2026-10-28  
-**Branch:** `arena/97e282a9-autorun` (keep working on this branch)  
+**Updated:** 2026-10-28 (continued on `arena/16b1334a-autorun`, see "Riddick" below)
+**Branch:** `arena/97e282a9-autorun`, continued on `arena/16b1334a-autorun`
 **Purpose:** preserve the current task, implementation state, test/build results, and open issues for a later AI or developer.
 
 ## User request and scope
@@ -80,6 +80,56 @@ Verification performed for this review:
 - The host `horizon_threads.c` test passed under GCC ASan/UBSan and GCC ThreadSanitizer. The encompassing script then stopped because `check_select_wait.py` requires missing `clang`.
 - `check_horizon_thread_fds.py` and `check_horizon_thread_handles.py` could not compile/run their generated/static fixtures against the current source (stale symbol/layout assumptions); TLS/suspend/fast-sync/FEX memory scripts also need missing `clang`. These are test-harness/environment limitations, not runtime failures.
 - No code was changed by this review, and no Switch execution or memory-reuse/repeated-launch test was performed.
+
+## Riddick (The Chronicles of Riddick: Assault on Dark Athena): stuck first OpenGL swap (2026-10-28, continued)
+
+**State: not fixed.** The user's most informative run ends with the program's first
+OpenGL `eglSwapBuffers` never returning. Everything below is static reading of this
+tree; no log from that run, no hardware and no Switch toolchain were available here,
+so no cause is claimed.
+
+What the tree already does about it (all before this session): the first three WGL
+swaps log the last stage that returned (`NX_GL_SWAP_STAGE_*`, `winnx_opengl.c`), the
+drawable's swap names its surface size and how long it took, `wine_nx_gl_swap_stuck_ms()`
+exposes the time inside the driver, and `[STALL]` prints the screen's window as libnx
+keeps it (slots, size, format, connected, `cur_slot`).
+
+What was added in this session (`arena/16b1334a-autorun`):
+
+- `horizon-wine/source/nxgl_verdict.h` turns those numbers into one of six verdicts:
+  no swap open, the surface never held the screen, the window is not connected,
+  nothing registered, a buffer out and never returned, the buffers are another size
+  than the surface, or the driver itself did not return. Each verdict writes one
+  `[STALL]` line with the size, slot count and seconds behind it.
+- `dlls/win32u/winnx_opengl.c` publishes the swapping surface's size and whether it
+  holds the screen (`wine_nx_gl_swap_surface()`), with the client rect as the fallback
+  when the driver does not answer `eglQuerySurface`.
+- `runtime.c`'s stall watch builds that state and prints the verdict under the raw
+  window line; `tests/nxgl_verdict.c` is the host test, wired into the CI "Host tests"
+  job as "Swap stall verdict" (passes locally under GCC).
+
+Reading the next run (the log is `logs/NAME.log`; `[NXGL]` and `[STALL]` lines):
+
+1. Last `[NXGL] WGL swap #1:` stage says where inside win32u it stopped, before EGL.
+2. `[NXGL] swap #1 began on the program's NxM surface` then no "came back" means it is
+   inside the driver's present; N x M is what the driver says the surface is.
+3. The `[STALL]` verdict then names which of the six it is. If it says the driver did
+   not return while the window looks right (slots > 0, none out, sizes equal), the
+   remaining question is inside Mesa's Switch WSI (dequeue, fence wait or queue), which
+   lives in mesa-switch, not here; the next step there is to instrument that repo's
+   `nwindowDequeueBuffer`/`nwindowQueueBuffer` boundaries with the same bounded lines.
+4. If it says the buffers are another size, or nothing is registered, the handover in
+   `wine_nx_screen_acquire()` (`runtime.c`) is the place: `screen_take_dimensions()`
+   logs that it released the compositor's registrations, and its failure is still only
+   logged, not unwound (finding 2 in the display review below).
+
+Not done, still open: the GL scaling mismatch (finding 1), Vulkan screen ownership
+(finding 3), the shutdown-timeout findings, and stale harnesses
+`check_gl_surfaces.py`, `check_pointer_events.py`, `check_popup_restore.py`,
+`check_render_overhead.py`, `check_capture_context.py`, `check_horizon_thread_fds.py`,
+`check_horizon_thread_handles.py`, `check_wow64_unix_tables.py` (the 14 vendored meson/
+cmake harnesses aside, they no longer match the sources they slice; none of them runs in
+CI, which is why it went unnoticed).
 
 ## Next actions
 

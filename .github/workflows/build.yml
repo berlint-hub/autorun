@@ -62,6 +62,16 @@ jobs:
             horizon-wine/tests/screen_fit.c -o screen_fit
           ./screen_fit
 
+      # A screen that shows no frame, read from the numbers the stall report
+      # already has: which of the ways a stuck swap leaves it empty is, so the
+      # log says why and not only how many slots there are.
+      - name: Swap stall verdict
+        run: |
+          cc -std=gnu11 -Wall -Wextra -Werror -O1 -g \
+            -I horizon-wine/source \
+            horizon-wine/tests/nxgl_verdict.c -o nxgl_verdict
+          ./nxgl_verdict
+
       # Which panel rate a measured frame rate asks for: the policy behind
       # SaltyNX's handheld 45-60 Hz display sync, which needs no console to test.
       - name: Display sync rate policy
