@@ -797,7 +797,7 @@ index af59a6efb..2c48d140f 100644
  }
  
 diff --git a/Source/Windows/ARM64EC/Module.cpp b/Source/Windows/ARM64EC/Module.cpp
-index 80752f1b8..99f04c7a6 100644
+index 80752f1b8..38a267d0c 100644
 --- a/Source/Windows/ARM64EC/Module.cpp
 +++ b/Source/Windows/ARM64EC/Module.cpp
 @@ -209,7 +209,7 @@ void WriteModuleRVA(HMODULE Module, LONG RVA, T Data) {
@@ -863,21 +863,41 @@ index 80752f1b8..99f04c7a6 100644
    std::scoped_lock Lock(ThreadCreationMutex);
    FEX::Windows::InitCRTThread();
    const auto CPUArea = GetCPUArea();
-@@ -1126,6 +1150,9 @@ NTSTATUS ThreadTerm(HANDLE Thread, LONG ExitCode) {
+@@ -1115,17 +1139,25 @@ NTSTATUS ThreadTerm(HANDLE Thread, LONG ExitCode) {
+ 
+   const auto ThreadTID = reinterpret_cast<uint64_t>(Info.ClientId.UniqueThread);
+   bool Self = ThreadTID == GetCurrentThreadId();
++  bool Suspended = false;
+   if (!Self) {
+     CONTEXT TmpContext;
+-    // If we are suspending a thread that isn't ourselves, try to suspend it first so we know internal JIT locks aren't being held.
+-    NtSuspendThread(*ThreadDup, NULL);
+-    // This will wait for the thread to be suspended
++    // If we are suspending a thread that isn't ourselves, suspend it first so we know internal JIT locks aren't being held.
++    if (auto Err = NtSuspendThread(*ThreadDup, NULL); Err) return Err;
++    Suspended = true;
++    // This will wait for the thread to be suspended.
+     TmpContext.ContextFlags = CONTEXT_CONTROL;
+-    NtGetContextThread(*ThreadDup, &TmpContext);
++    if (auto Err = NtGetContextThread(*ThreadDup, &TmpContext); Err) {
++      NtResumeThread(*ThreadDup, nullptr);
++      return Err;
++    }
+   }
  
    const auto [Err, CPUArea] = GetThreadCPUArea(*ThreadDup);
    if (Err) {
 +    // We suspended it: put it back the way we found it rather than leaving a
 +    // thread of the program frozen for the rest of the session.
-+    if (!Self) NtResumeThread(*ThreadDup, nullptr);
++    if (Suspended) NtResumeThread(*ThreadDup, nullptr);
      return Err;
    }
  
-@@ -1134,6 +1161,7 @@ NTSTATUS ThreadTerm(HANDLE Thread, LONG ExitCode) {
+@@ -1134,6 +1166,7 @@ NTSTATUS ThreadTerm(HANDLE Thread, LONG ExitCode) {
      auto it = Threads.find(ThreadTID);
      if (it == Threads.end()) {
        // Thread already terminated
-+      if (!Self) NtResumeThread(*ThreadDup, nullptr);
++      if (Suspended) NtResumeThread(*ThreadDup, nullptr);
        return STATUS_SUCCESS;
      }
  
@@ -1496,7 +1516,7 @@ index ded646b0c..8d803fdb4 100644
    if (Status) {
      SetLastError(RtlNtStatusToDosError(Status));
 diff --git a/Source/Windows/WOW64/Module.cpp b/Source/Windows/WOW64/Module.cpp
-index 8c6b7f76e..6f2a040ca 100644
+index 8c6b7f76e..1eff3a561 100644
 --- a/Source/Windows/WOW64/Module.cpp
 +++ b/Source/Windows/WOW64/Module.cpp
 @@ -519,6 +519,14 @@ void BTCpuProcessInit() {
@@ -1542,23 +1562,43 @@ index 8c6b7f76e..6f2a040ca 100644
    std::scoped_lock Lock(ThreadCreationMutex);
    FEX::Windows::InitCRTThread();
    auto* Thread = CTX->CreateThread();
-@@ -643,6 +663,7 @@ void BTCpuThreadTerm(HANDLE Thread, LONG ExitCode) {
+@@ -632,17 +652,23 @@ void BTCpuThreadTerm(HANDLE Thread, LONG ExitCode) {
+   LogMan::Msg::IFmt("Terminating {}", Info.ClientId.UniqueThread);
+   const auto ThreadTID = reinterpret_cast<uint64_t>(Info.ClientId.UniqueThread);
+   bool Self = ThreadTID == GetCurrentThreadId();
++  bool Suspended = false;
+   if (!Self) {
+     CONTEXT TmpContext;
+-    // If we are suspending a thread that isn't ourselves, try to suspend it first so we know internal JIT locks aren't being held.
+-    RtlWow64SuspendThread(*ThreadDup, NULL);
+-    // This will wait for the thread to be suspended
++    // If we are suspending a thread that isn't ourselves, suspend it first so we know internal JIT locks aren't being held.
++    if (auto Err = RtlWow64SuspendThread(*ThreadDup, NULL); Err) return;
++    Suspended = true;
++    // This will wait for the thread to be suspended.
+     TmpContext.ContextFlags = CONTEXT_CONTROL;
+-    NtGetContextThread(*ThreadDup, &TmpContext);
++    if (auto Err = NtGetContextThread(*ThreadDup, &TmpContext); Err) {
++      NtResumeThread(*ThreadDup, nullptr);
++      return;
++    }
+   }
  
    auto [Err, TLS] = GetThreadTLS(*ThreadDup);
    if (Err) {
-+    if (!Self) NtResumeThread(*ThreadDup, nullptr);
++    if (Suspended) NtResumeThread(*ThreadDup, nullptr);
      return;
    }
  
-@@ -651,6 +672,7 @@ void BTCpuThreadTerm(HANDLE Thread, LONG ExitCode) {
+@@ -651,6 +677,7 @@ void BTCpuThreadTerm(HANDLE Thread, LONG ExitCode) {
      auto it = Threads.find(ThreadTID);
      if (it == Threads.end()) {
        // Thread already terminated
-+      if (!Self) NtResumeThread(*ThreadDup, nullptr);
++      if (Suspended) NtResumeThread(*ThreadDup, nullptr);
        return;
      }
  
-@@ -750,7 +772,10 @@ bool BTCpuResetToConsistentStateImpl(EXCEPTION_POINTERS* Ptrs) {
+@@ -750,7 +777,10 @@ bool BTCpuResetToConsistentStateImpl(EXCEPTION_POINTERS* Ptrs) {
      if (Thread) {
        std::scoped_lock Lock(ThreadCreationMutex);
        FEXCORE_PROFILE_INSTANT_INCREMENT(Thread, AccumulatedSMCCount, 1);
@@ -1570,7 +1610,7 @@ index 8c6b7f76e..6f2a040ca 100644
          if (CTX->IsAddressInCodeBuffer(Thread, Context->Pc) && !CTX->IsCurrentBlockSingleInst(Thread) &&
              CTX->IsAddressInCurrentBlock(Thread, FaultAddress & FEXCore::Utils::FEX_PAGE_MASK, FEXCore::Utils::FEX_PAGE_SIZE)) {
            Context::ReconstructThreadState(Context);
-@@ -884,6 +909,17 @@ void BTCpuNotifyReadFile(HANDLE Handle, void* Address, SIZE_T Size, BOOL After,
+@@ -884,6 +914,17 @@ void BTCpuNotifyReadFile(HANDLE Handle, void* Address, SIZE_T Size, BOOL After,
      return;
    }
  

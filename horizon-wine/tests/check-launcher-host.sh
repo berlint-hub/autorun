@@ -72,6 +72,9 @@ else
     echo "forwarder: skipped, no hbl-main.npdm in any build directory"
 fi
 "$build/launcher_catalog"
+clang -std=gnu11 -Wall -Wextra -Werror -O1 -g -fsanitize=address,undefined \
+    "$horizon_wine/tests/launcher_run_report.c" -o "$build/launcher_run_report"
+"$build/launcher_run_report"
 
 clang -std=gnu11 -Wall -Wextra -Werror -O1 -g -fsanitize=address,undefined \
     $(sdl2-config --cflags) "$horizon_wine/tests/launcher_audio.c" $(sdl2-config --libs) -lm -o "$build/launcher_audio"
@@ -121,7 +124,12 @@ clang -std=gnu11 -Wall -Wextra -Werror -O1 -g -fsanitize=address,undefined -fno-
 "$build/controls_overlay" "$font" "$shots"
 
 card="$build/card/sdmc:"
-mkdir -p "$card/switch/wine/drive_c/openttd" "$card/games/deep/er/still"
+mkdir -p "$card/switch/wine/drive_c/openttd" "$card/switch/wine/drive_c/windows" "$card/games/deep/er/still"
+# The dependency preflight checks the same Wine system32 directory as the
+# runtime loader; stage the real DLLs so the host run tests game imports too.
+if [ -d "$root/horizon-dlls/switch/wine/drive_c/windows/system32" ]; then
+    ln -s "$root/horizon-dlls/switch/wine/drive_c/windows/system32" "$card/switch/wine/drive_c/windows/system32"
+fi
 ln -s "$notepad" "$card/switch/wine/drive_c/"
 ln -s "$notepad" "$card/switch/wine/drive_c/7zr.exe"
 ln -s "$notepad" "$card/switch/wine/drive_c/openttd/openttd.exe"

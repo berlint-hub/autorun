@@ -287,7 +287,15 @@ config/keys.txt the keys the controller sends. Both are set from the launcher
 (Settings, Defaults, Controls, and a program's own Controls row), so neither
 has to be written by hand.
 
-Logs: switch/wine/logs/autorun_runtime.log holds the last run.
+Before launch, Autorun checks the executable's direct DLL imports against the
+same folders the runtime loader searches. Missing files are listed, and you can
+cancel or try anyway. Missing Visual C++ 2015–2022 DLLs are identified, but the
+Microsoft redistributable is not installed automatically; install it into this
+Wine prefix on a PC or copy the matching DLLs beside the game.
+
+Logs: switch/wine/logs/autorun_runtime.log is the current runtime log. Each game
+attempt also gets a timestamped .log and a readable .report.txt in that folder;
+open Game Settings > Diagnostics > Run reports for the saved history.
 ''')
 
 

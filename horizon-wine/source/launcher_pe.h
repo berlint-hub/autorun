@@ -33,7 +33,13 @@ struct launcher_pe
     struct launcher_pe_section sections[LAUNCHER_PE_MAX_SECTIONS];
     unsigned int section_count;
     uint32_t resource_rva, resource_size;
+    uint32_t import_rva, import_size;
 };
+
+typedef int (*launcher_pe_import_fn)( void *opaque, const char *name );
+
+#define LAUNCHER_PE_MAX_IMPORTS 1024
+#define LAUNCHER_PE_MAX_DLL_NAME 260
 
 enum launcher_icon_kind
 {
@@ -116,6 +122,11 @@ static inline int launcher_pe_open( struct launcher_pe *pe, const char *path )
     if (optional_size < directories_offset || !launcher_pe_read_at( pe, nt_offset, nt, 24 + optional_size )) goto fail;
 
     directory_count = launcher_u32( nt + 24 + directories_offset - 4 );
+    if (directory_count > 1 && directories_offset + 2 * 8 <= optional_size)
+    {
+        pe->import_rva = launcher_u32( nt + 24 + directories_offset + 1 * 8 );
+        pe->import_size = launcher_u32( nt + 24 + directories_offset + 1 * 8 + 4 );
+    }
     if (directory_count > 2 && directories_offset + 3 * 8 <= optional_size)
     {
         pe->resource_rva = launcher_u32( nt + 24 + directories_offset + 2 * 8 );
@@ -141,6 +152,53 @@ static inline int launcher_pe_open( struct launcher_pe *pe, const char *path )
 fail:
     launcher_pe_close( pe );
     return 0;
+}
+
+/* Visit the imported DLL names in a PE image. An image without an import
+ * directory is valid and reports zero entries; malformed tables fail closed.
+ * Names are bounded to LAUNCHER_PE_MAX_DLL_NAME bytes and callbacks run only
+ * after the full name has been checked. */
+static inline int launcher_pe_imports( struct launcher_pe *pe, launcher_pe_import_fn visit,
+                                      void *opaque, unsigned int *count )
+{
+    unsigned int i, found = 0, descriptors;
+    unsigned char entry[20];
+
+    if (count) *count = 0;
+    if (!pe->import_rva && !pe->import_size) return 1;
+    if (!pe->import_rva || pe->import_size < sizeof(entry) || pe->import_size % sizeof(entry)) return 0;
+    descriptors = pe->import_size / sizeof(entry);
+    if (descriptors > LAUNCHER_PE_MAX_IMPORTS) return 0;
+
+    for (i = 0; i < descriptors; i++)
+    {
+        uint64_t rva = (uint64_t)pe->import_rva + (uint64_t)i * sizeof(entry);
+        char name[LAUNCHER_PE_MAX_DLL_NAME];
+        unsigned int j;
+        int terminated = 0;
+
+        if (rva > UINT32_MAX || !launcher_pe_read_rva( pe, (uint32_t)rva, entry, sizeof(entry) )) return 0;
+        if (!launcher_u32( entry ) && !launcher_u32( entry + 4 ) && !launcher_u32( entry + 8 ) &&
+            !launcher_u32( entry + 12 ) && !launcher_u32( entry + 16 ))
+        {
+            if (count) *count = found;
+            return 1;
+        }
+        if (!launcher_u32( entry + 12 )) return 0;
+        for (j = 0; j < sizeof(name); j++)
+        {
+            uint64_t name_rva = (uint64_t)launcher_u32( entry + 12 ) + j;
+            unsigned char c;
+
+            if (name_rva > UINT32_MAX || !launcher_pe_read_rva( pe, (uint32_t)name_rva, &c, 1 )) return 0;
+            name[j] = c;
+            if (!c) { terminated = 1; break; }
+        }
+        if (!terminated || !name[0] || strchr( name, '/' ) || strchr( name, '\\' )) return 0;
+        if (visit && !visit( opaque, name )) return 0;
+        found++;
+    }
+    return 0; /* The directory must end with its null descriptor. */
 }
 
 /* The OffsetToData of an entry in the resource directory at dir (relative to the

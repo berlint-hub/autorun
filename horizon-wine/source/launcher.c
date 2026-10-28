@@ -41,6 +41,7 @@
 #include "launcher_icons.h"
 #include "launcher_list.h"
 #include "launcher_pe.h"
+#include "launcher_run_report.h"
 #include "launcher_input.h"
 #include "launcher_preset.h"
 #include "launcher_settings.h"
@@ -1838,8 +1839,143 @@ enum program_row
     ROW_LSFG, ROW_LSFG_DLL, ROW_LSFG_PERFORMANCE, ROW_LSFG_FLOW,
     ROW_UPSCALING, ROW_UPSCALING_SHARPNESS, ROW_GL_THREAD, ROW_GL_YEAR, ROW_GL_DRIVER,
     ROW_INPUT, ROW_INPUT_END = ROW_INPUT + INPUT_ROW_COUNT - 1, ROW_BOX64, ROW_FEX, ROW_SYNC, ROW_CPU, ROW_FEX_CACHE, ROW_FOUR_CORES, ROW_LAZY_FILE_VIEWS,
-    ROW_HIDE, ROW_LIBRARY, ROW_GAME_FIX, PROGRAM_ROWS
+    ROW_HIDE, ROW_LIBRARY, ROW_GAME_FIX, ROW_RUN_REPORTS, PROGRAM_ROWS
 };
+
+#define LAUNCHER_RUN_REPORTS_MAX 32
+struct launcher_run_report_entry
+{
+    char filename[192];
+    char path[768];
+    char started[64];
+    char outcome[128];
+    char runtime_log[768];
+    unsigned int modules, missing;
+};
+
+static int compare_run_reports( const void *a, const void *b )
+{
+    const struct launcher_run_report_entry *left = a, *right = b;
+    return strcmp( right->filename, left->filename );
+}
+
+static int launcher_run_reports( struct launcher *l, struct program *p,
+                                 struct launcher_run_report_entry *reports, int capacity )
+{
+    char name[128], directory[768], prefix[140];
+    struct dirent *entry;
+    DIR *handle;
+    int count = 0, i;
+    size_t prefix_length;
+
+    launcher_run_report_name( p->path, name, sizeof(name) );
+    if (!name[0] || snprintf( directory, sizeof(directory), "%s/logs", l->options->runtime_dir ) >= sizeof(directory))
+        return 0;
+    if (snprintf( prefix, sizeof(prefix), "%s_", name ) >= sizeof(prefix)) return 0;
+    prefix_length = strlen( prefix );
+    if (!(handle = opendir( directory ))) return 0;
+    while ((entry = readdir( handle )))
+    {
+        static const char suffix[] = ".report.txt";
+        size_t length = strlen( entry->d_name );
+        int position;
+
+        if (length <= prefix_length + sizeof(suffix) - 1 || length >= sizeof(reports[0].filename) ||
+            strncmp( entry->d_name, prefix, prefix_length ) ||
+            strcmp( entry->d_name + length - sizeof(suffix) + 1, suffix )) continue;
+        position = 0;
+        while (position < count && strcmp( entry->d_name, reports[position].filename ) < 0) position++;
+        if (position >= capacity) continue;
+        if (count < capacity) count++;
+        if (position + 1 < count)
+            memmove( reports + position + 1, reports + position,
+                     (count - position - 1) * sizeof(*reports) );
+        memset( reports + position, 0, sizeof(*reports) );
+        snprintf( reports[position].filename, sizeof(reports[position].filename), "%s", entry->d_name );
+    }
+    closedir( handle );
+    qsort( reports, count, sizeof(*reports), compare_run_reports );
+
+    for (i = 0; i < count; i++)
+    {
+        FILE *file;
+        char line[1024];
+
+        if (snprintf( reports[i].path, sizeof(reports[i].path), "%s/%s", directory,
+                      reports[i].filename ) >= sizeof(reports[i].path)) continue;
+        if (!(file = fopen( reports[i].path, "r" ))) continue;
+        while (fgets( line, sizeof(line), file ))
+        {
+            char *end;
+
+            if (!strncmp( line, "Started: ", 9 ))
+            {
+                snprintf( reports[i].started, sizeof(reports[i].started), "%.*s",
+                          (int)strcspn( line + 9, "\r\n" ), line + 9 );
+            }
+            else if (!strncmp( line, "Outcome: ", 9 ))
+            {
+                snprintf( reports[i].outcome, sizeof(reports[i].outcome), "%.*s",
+                          (int)strcspn( line + 9, "\r\n" ), line + 9 );
+            }
+            else if (!strncmp( line, "Runtime log: ", 13 ))
+            {
+                snprintf( reports[i].runtime_log, sizeof(reports[i].runtime_log), "%.*s",
+                          (int)strcspn( line + 13, "\r\n" ), line + 13 );
+            }
+            else if (!strncmp( line, "Loaded modules: ", 16 ))
+                reports[i].modules = (unsigned int)strtoul( line + 16, &end, 10 );
+            else if (!strncmp( line, "Missing import records: ", 24 ))
+                reports[i].missing = (unsigned int)strtoul( line + 24, &end, 10 );
+        }
+        fclose( file );
+        if (!reports[i].outcome[0]) snprintf( reports[i].outcome, sizeof(reports[i].outcome), "Incomplete or ended unexpectedly" );
+        if (!reports[i].started[0]) snprintf( reports[i].started, sizeof(reports[i].started), "Unknown time" );
+    }
+    return count;
+}
+
+static void launcher_run_reports_menu( struct launcher *l, struct program *p )
+{
+    static const char *const groups[] = { "Runs" };
+    struct launcher_run_report_entry reports[LAUNCHER_RUN_REPORTS_MAX] = {0};
+    struct ui_row rows[LAUNCHER_RUN_REPORTS_MAX] = {0};
+    int i, count, group = 0;
+    struct ui_list list = {0};
+    enum ui_action action;
+
+    count = launcher_run_reports( l, p, reports, LAUNCHER_RUN_REPORTS_MAX );
+    if (!count)
+    {
+        ui_message( &l->ui, "Run reports", "There are no reports for this program yet. Each new launch creates a separate report and log in switch/wine/logs." );
+        return;
+    }
+    for (i = 0; i < count; i++)
+    {
+        rows[i].group = 0;
+        rows[i].kind = UI_ROW_ACTION;
+        snprintf( rows[i].label, sizeof(rows[i].label), "%s", reports[i].started );
+        snprintf( rows[i].value, sizeof(rows[i].value), "%s", reports[i].outcome );
+        rows[i].help = reports[i].outcome;
+    }
+    action = ui_settings_run( &l->ui, &list, "Run reports", p->title, groups, 1,
+                              rows, count, 0, &group );
+    if (action == UI_ACTION_BACK || action == UI_ACTION_QUIT || list.selection < 0 || list.selection >= count) return;
+    {
+        const struct launcher_run_report_entry *report = reports + list.selection;
+        const char *log_name = strrchr( report->runtime_log, '/' );
+        char summary[768];
+
+        if (log_name) log_name++;
+        else log_name = report->runtime_log;
+        snprintf( summary, sizeof(summary),
+                  "Started: %s\nOutcome: %s\nLoaded modules: %u\nMissing import records: %u\n\n"
+                  "Report: switch/wine/logs/%s\nRuntime log: %s",
+                  report->started, report->outcome, report->modules, report->missing,
+                  report->filename, log_name[0] ? log_name : "not recorded" );
+        ui_message( &l->ui, "Run report", summary );
+    }
+}
 
 static int file_browser_pick( struct launcher *l, char *target, size_t size );
 static int pick_forwarder_icon( void *opaque, char *target, size_t size );
@@ -2086,6 +2222,114 @@ static int prepare_program_graphics( struct launcher *l, struct program *p )
 }
 
 
+struct launcher_dependency_scan
+{
+    const char *program_dir;
+    const char *runtime_dir;
+    char missing[16][LAUNCHER_PE_MAX_DLL_NAME];
+    unsigned int missing_count;
+    unsigned int missing_total;
+    int vc_runtime_missing;
+};
+
+static int launcher_vc_runtime_name( const char *dll );
+
+static int launcher_dependency_exists( const struct launcher_dependency_scan *scan, const char *dll )
+{
+    static const char *const relative[] = {
+        "drive_c/windows/system32", "drive_c", ""
+    };
+    char path[768];
+    unsigned int i;
+
+    if ((size_t)snprintf( path, sizeof(path), "%s/%s", scan->program_dir, dll ) < sizeof(path) &&
+        !access( path, F_OK )) return 1;
+    for (i = 0; i < sizeof(relative) / sizeof(relative[0]); i++)
+    {
+        int length = relative[i][0]
+                     ? snprintf( path, sizeof(path), "%s/%s/%s", scan->runtime_dir, relative[i], dll )
+                     : snprintf( path, sizeof(path), "%s/%s", scan->runtime_dir, dll );
+        if (length > 0 && (size_t)length < sizeof(path) && !access( path, F_OK )) return 1;
+    }
+    return 0;
+}
+
+static int launcher_dependency_import( void *opaque, const char *dll )
+{
+    struct launcher_dependency_scan *scan = opaque;
+    unsigned int i;
+
+    if (launcher_dependency_exists( scan, dll )) return 1;
+    for (i = 0; i < scan->missing_count; i++)
+        if (!strcasecmp( scan->missing[i], dll )) return 1;
+    scan->missing_total++;
+    scan->vc_runtime_missing |= launcher_vc_runtime_name( dll );
+    if (scan->missing_count < sizeof(scan->missing) / sizeof(scan->missing[0]))
+        snprintf( scan->missing[scan->missing_count++], LAUNCHER_PE_MAX_DLL_NAME, "%s", dll );
+    return 1;
+}
+
+static int launcher_vc_runtime_name( const char *dll )
+{
+    static const char *const prefixes[] = {
+        "vcruntime140", "msvcp140", "concrt140", "vcomp140", "mfc140", "atl140", "api-ms-win-crt-"
+    };
+    unsigned int i;
+
+    for (i = 0; i < sizeof(prefixes) / sizeof(prefixes[0]); i++)
+        if (!strncasecmp( dll, prefixes[i], strlen( prefixes[i] ) )) return 1;
+    return 0;
+}
+
+/* The runtime's loader searches the executable's directory, drive_c/windows/
+ * system32, drive_c, then the runtime root. Check those same locations before
+ * handing control to Wine, and let the owner choose whether to try anyway. */
+static int launcher_dependency_preflight( struct launcher *l, struct program *p )
+{
+    struct launcher_dependency_scan scan = {0};
+    struct launcher_pe pe;
+    char dir[512], text[1200];
+    unsigned int imports = 0, i;
+    size_t used;
+    int vc_runtime;
+
+    if (!launcher_pe_open( &pe, p->path )) return 1;
+    snprintf( dir, sizeof(dir), "%s", p->path );
+    parent_dir( dir );
+    scan.program_dir = dir;
+    scan.runtime_dir = l->options->runtime_dir;
+    if (!launcher_pe_imports( &pe, launcher_dependency_import, &scan, &imports ))
+    {
+        launcher_log( "[LAUNCHER] Could not read the PE import table for %s; DLL preflight skipped", p->path );
+        launcher_pe_close( &pe );
+        return 1;
+    }
+    launcher_pe_close( &pe );
+    if (!scan.missing_total) return 1;
+
+    vc_runtime = scan.vc_runtime_missing;
+    used = (size_t)snprintf( text, sizeof(text),
+                             "The runtime could not find %u imported DLL%s before launch:\n",
+                             scan.missing_total, scan.missing_total == 1 ? "" : "s" );
+    for (i = 0; i < scan.missing_count && used < sizeof(text); i++)
+    {
+        int length = snprintf( text + used, sizeof(text) - used, "\n%s", scan.missing[i] );
+        if (length < 0 || (size_t)length >= sizeof(text) - used) { used = sizeof(text); break; }
+        used += length;
+    }
+    if (scan.missing_total > scan.missing_count && used < sizeof(text))
+        snprintf( text + used, sizeof(text) - used, "\n…and %u more", scan.missing_total - scan.missing_count );
+    if (vc_runtime && used < sizeof(text))
+    {
+        size_t left = sizeof(text) - strlen( text );
+        snprintf( text + strlen(text), left,
+                  "\n\nSome missing files look like Microsoft Visual C++ 2015–2022. "
+                  "Autorun cannot safely install Microsoft's Windows redistributable on Switch; "
+                  "copy the matching DLLs beside the game or install them into this Wine prefix on a PC." );
+    }
+    return ui_confirm( &l->ui, "Missing game DLLs", text, "Try anyway" );
+}
+
 /* Below this charge a game started now can outlast the battery. */
 #define LAUNCHER_LOW_BATTERY 15
 
@@ -2148,6 +2392,7 @@ static int start_program( struct launcher *l, struct program *p, char *target, s
             (api == 12 && p->settings.dxvk_source == DXVK_SOURCE_SAREK)) return 0;
     }
     if (p->settings.d3d != LAUNCHER_D3D_WINE && !prepare_program_graphics( l, p )) return 0;
+    if (!launcher_dependency_preflight( l, p )) return 0;
     p->missing = 0;
     p->launched_order = l->catalog.next_order++;
     /* The run is timed from here, and counted when the launcher is next up:
@@ -2703,6 +2948,10 @@ static int program_menu_run( struct launcher *l, struct program *p, char *target
         snprintf( row->value, sizeof(row->value), "%s",
                   state_text( p->settings.profile, l->options->profile, "On", "Off", buffer, sizeof(buffer) ) );
 
+        ADD_ROW( ROW_RUN_REPORTS, SECTION_DIAGNOSTICS, "Run reports",
+                 "Each attempt has its own readable summary and runtime log. Browse this program's run history, "
+                 "including incomplete reports when a run did not return to Autorun." );
+
         ADD_ROW( ROW_WINDOWS, SECTION_GRAPHICS, "Windows shown by",
                  "The compositor draws every window through OpenGL: the picture, dialogs, the on-screen "
                  "keyboard and the pointer. The framebuffer copies window pixels straight to the screen "
@@ -2854,8 +3103,9 @@ static int program_menu_run( struct launcher *l, struct program *p, char *target
         ADD_ROW( ROW_GL_DRIVER, SECTION_GRAPHICS, "OpenGL renderer",
                  "NVC0 is Mesa's native OpenGL driver. Zink runs the same OpenGL API over Mesa's NVK Vulkan "
                  "driver, an alternate route for compatibility when a game stalls or renders incorrectly on "
-                 "NVC0. Zink is available in this runtime's Mesa 26.2.3 SDK; this changes only this game's "
-                 "OpenGL backend and is selected before EGL initializes." );
+                 "NVC0. Zink is available in this runtime's Mesa 26.2.3 SDK; the choice is made before EGL "
+                 "initializes and applies to all OpenGL in this run, including the runtime compositor. "
+                 "Vulkan games continue to use NVK." );
         row->kind = UI_ROW_DROPDOWN;
         row->choices = LAUNCHER_GL_DRIVER_COUNT;
         snprintf( row->value, sizeof(row->value), "%s", launcher_gl_driver_labels[p->settings.gl_driver] );
@@ -2987,6 +3237,10 @@ static int program_menu_run( struct launcher *l, struct program *p, char *target
                 break;
             }
             return start_program( l, p, target, size );
+
+        case ROW_RUN_REPORTS:
+            launcher_run_reports_menu( l, p );
+            break;
 
         case ROW_GAME_FIX:
             if (action != UI_ACTION_CHOOSE) break;

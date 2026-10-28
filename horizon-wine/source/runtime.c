@@ -12,6 +12,7 @@
 #include <strings.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#include <time.h>
 #include <png.h>
 
 #include "ntstatus.h"
@@ -25,6 +26,7 @@
 #include "horizon_private.h"
 #include "horizon_runtime_paths.h"
 #include "launcher.h"
+#include "launcher_run_report.h"
 #include "low_window.h"
 #include "autorun_install.h"
 #include "forwarder.h"
@@ -150,11 +152,12 @@ extern int wine_nx_usb_list( struct wine_nx_launcher_usb_volume *volumes, int ma
 #endif
 
 static FILE *log_file;
-/* A second copy, kept from the moment a program starts. The next run of the
- * launcher opens autorun_runtime.log afresh and what the program did is gone
- * with it, so a program's own log is a file of its own, which only the next
- * run of that same program writes over. */
+/* A per-run copy, kept from the moment a program starts. The launcher opens
+ * autorun_runtime.log afresh next time, so each attempt gets a unique log and
+ * report instead of replacing the previous run's evidence. */
 static FILE *game_log_file;
+static FILE *game_report_file;
+static char game_log_path[512], game_report_path[512];
 
 struct runtime_module
 {
@@ -512,37 +515,53 @@ static void log_repeat_flush_now( void )
  * next run opens autorun_runtime.log afresh, and without this the run that
  * mattered is gone before it can be read off the card. */
 extern int wine_nx_runtime_verbose;
+extern unsigned int wine_nx_program_exit_code;
 
 static void open_game_log( const char *target )
 {
-    char path[512], name[128];
-    const char *base = strrchr( target, '/' );
+    char name[128], stamp[32] = "unknown", suffix[16], started[32] = "unknown";
     FILE *sofar;
-    size_t i, len;
+    time_t now = time( NULL );
+    struct tm local;
+    unsigned int sequence;
 
     if (!log_file) return;
-    base = base ? base + 1 : target;
-    if (!base[0]) return;
-    for (i = 0; base[i] && i < sizeof(name) - 1; i++)
+    launcher_run_report_name( target, name, sizeof(name) );
+    if (!name[0]) return;
+    if (now != (time_t)-1 && localtime_r( &now, &local ))
     {
-        char c = base[i];
-
-        /* A name a card can hold, and one word: "Halo - Combat Evolved" is a
-         * folder, but HALO.EXE is what the file is called. */
-        name[i] = (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') ||
-                  c == '.' || c == '-' || c == '_' ? c : '-';
+        strftime( stamp, sizeof(stamp), "%Y%m%d-%H%M%S", &local );
+        strftime( started, sizeof(started), "%Y-%m-%d %H:%M:%S", &local );
     }
-    name[i] = 0;
-    if ((len = strlen( name )) > 4 && !strcasecmp( name + len - 4, ".exe" )) name[len - 4] = 0;
-    /* Beside the runtime's own log, named after the program and the diagnostics
-     * the run had on, so a verbose or profiled run does not replace the plain
-     * one it is being compared with: Sims2EP9.log, Sims2EP9_verbose_profiler.log. */
-    snprintf( path, sizeof(path), "%s/%s%s%s.log", RUNTIME_LOGS, name,
-              wine_nx_runtime_verbose ? "_verbose" : "", runtime_profile ? "_profiler" : "" );
+
+    /* One log and one readable report per attempt. A same-second relaunch gets
+     * a numeric suffix instead of overwriting the previous run's evidence. */
+    for (sequence = 0; sequence < 1000; sequence++)
+    {
+        int log_length, report_length;
+
+        if (sequence) snprintf( suffix, sizeof(suffix), "_%u", sequence );
+        else suffix[0] = 0;
+        log_length = snprintf( game_log_path, sizeof(game_log_path), "%s/%s_%s%s%s%s.log",
+                               RUNTIME_LOGS, name, stamp, suffix,
+                               wine_nx_runtime_verbose ? "_verbose" : "",
+                               runtime_profile ? "_profiler" : "" );
+        report_length = snprintf( game_report_path, sizeof(game_report_path), "%s/%s_%s%s.report.txt",
+                                  RUNTIME_LOGS, name, stamp, suffix );
+        if (log_length > 0 && (size_t)log_length < sizeof(game_log_path) &&
+            report_length > 0 && (size_t)report_length < sizeof(game_report_path) &&
+            access( game_log_path, F_OK ) && access( game_report_path, F_OK )) break;
+    }
+    if (sequence == 1000)
+    {
+        game_log_path[0] = game_report_path[0] = 0;
+        log_line( "[LOG] could not choose a unique per-run log name for %s", target );
+        return;
+    }
 
     pthread_mutex_lock( &log_mutex );
     fflush( log_file );
-    if ((game_log_file = fopen( path, "w" )))
+    if ((game_log_file = fopen( game_log_path, "w" )))
     {
         /* What was said before this point, so the file stands on its own. */
         if ((sofar = fopen( RUNTIME_LOGS "/autorun_runtime.log", "r" )))
@@ -556,8 +575,95 @@ static void open_game_log( const char *target )
         fflush( game_log_file );
     }
     pthread_mutex_unlock( &log_mutex );
-    log_line( "[LOG] this run is kept in %s", path );
+
+    game_report_file = fopen( game_report_path, "w" );
+    if (game_report_file)
+    {
+        fprintf( game_report_file, "Autorun run report\nProgram: %s\nStarted: %s\nRuntime log: %s\n\n"
+                 "If this report has no outcome section, the runtime did not return normally to Autorun.\n",
+                 target, started, game_log_path );
+        fflush( game_report_file );
+    }
+    if (game_log_file) log_line( "[LOG] this run is kept in %s", game_log_path );
+    else log_line( "[LOG] could not create the per-run log %s", game_log_path );
+    if (game_report_file) log_line( "[REPORT] this run's summary is kept in %s", game_report_path );
+    else log_line( "[REPORT] could not create the per-run report %s", game_report_path );
     log_repeat_flush_now();
+}
+
+static int run_report_log_line( const char *line )
+{
+    static const char *const prefixes[] = {
+        "[BUILD]", "[TARGET]", "[SETTINGS]", "[DXVK]", "[VKD3D]", "[FEX]", "[BOX64]",
+        "[SYNC]", "[GL]", "[UPSCALE]", "[LSFG]", "[FRAME]", "[CPU]", "[VULKAN]",
+        "[MISS]", "[FAIL]", "[EXCEPTION]"
+    };
+    unsigned int i;
+
+    for (i = 0; i < sizeof(prefixes) / sizeof(prefixes[0]); i++)
+        if (!strncmp( line, prefixes[i], strlen( prefixes[i] ) )) return 1;
+    return 0;
+}
+
+/* The report is append-only while a game is running: if the runtime is lost,
+ * its header still identifies the attempt and the unique log. On a normal
+ * return, add the actual loaded modules, outcome, settings and loader misses. */
+static void finish_game_report(void)
+{
+    FILE *log;
+    char line[2048], outcome[128], context[8192];
+    size_t context_size = 0;
+    unsigned int i, misses = 0;
+    int context_truncated = 0;
+
+    if (!game_report_file) return;
+    if (wine_nx_program_exit_code == ~0u)
+        snprintf( outcome, sizeof(outcome), "No Windows exit code was reported" );
+    else if (!wine_nx_program_exit_code)
+        snprintf( outcome, sizeof(outcome), "Completed with exit code 0x00000000" );
+    else
+        snprintf( outcome, sizeof(outcome), "Exited with code 0x%08x", wine_nx_program_exit_code );
+
+    if (game_log_file)
+    {
+        pthread_mutex_lock( &log_mutex );
+        fflush( game_log_file );
+        pthread_mutex_unlock( &log_mutex );
+    }
+    if ((log = game_log_path[0] ? fopen( game_log_path, "r" ) : NULL))
+    {
+        while (fgets( line, sizeof(line), log ))
+        {
+            size_t length;
+
+            if (!strncmp( line, "[MISS]", 6 )) misses++;
+            if (!run_report_log_line( line )) continue;
+            length = strlen( line );
+            if (context_size > sizeof(context) - 3 || length > sizeof(context) - context_size - 3)
+            {
+                context_truncated = 1;
+                continue;
+            }
+            memcpy( context + context_size, "- ", 2 );
+            context_size += 2;
+            memcpy( context + context_size, line, length );
+            context_size += length;
+            if (!length || line[length - 1] != '\n') context[context_size++] = '\n';
+        }
+        fclose( log );
+    }
+
+    fprintf( game_report_file, "\nStatus: Finished\nOutcome: %s\nLoaded modules: %u\nMissing import records: %u\n",
+             outcome, module_count, misses );
+    fprintf( game_report_file, "\nLoaded modules:\n" );
+    for (i = 0; i < module_count; i++) fprintf( game_report_file, "- %s\n", modules[i].path );
+    fprintf( game_report_file, "\nEffective settings and runtime notices (from the run log):\n" );
+    if (context_size) fwrite( context, 1, context_size, game_report_file );
+    else fputs( "- No matching settings or diagnostic lines were recorded.\n", game_report_file );
+    if (context_truncated) fputs( "- Additional matching lines were omitted from this summary; see the runtime log.\n", game_report_file );
+    fflush( game_report_file );
+    fclose( game_report_file );
+    game_report_file = NULL;
 }
 
 static void stall_watch( void *arg )
@@ -4709,6 +4815,7 @@ static int return_to_launcher( void )
             game_fixes_finish( RUNTIME_DIR, runtime_program, wine_nx_program_exit_code, line, sizeof(line) ))
             log_line( "%s", line );
     }
+    finish_game_report();
     /* A program waiting in run-next.txt (after the components setup) is started
      * by the runtime started again, whether or not the launcher would be. */
     if (!still_lent && (runtime_reopen_launcher || !access( WINE_NX_RUNTIME_ROOT "/run-next.txt", F_OK )) &&
@@ -5026,7 +5133,7 @@ int main( int argc, char **argv )
     {
         int vulkan_probe = config_bool( "vulkan-probe", 0, "vulkan-probe.txt", 0 );
 
-        log_line( "[INIT] Mesa from mesa-switch: OpenGL through nvc0, Vulkan through NVK; Vulkan probe %s",
+        log_line( "[INIT] Mesa from mesa-switch: OpenGL available, Vulkan through NVK; Vulkan probe %s",
                   vulkan_probe ? "on" : "off" );
         if (vulkan_probe)
         {
@@ -5630,8 +5737,8 @@ int main( int argc, char **argv )
                       shaders.kept >> 20, shaders.buckets, shaders.buckets_removed );
     }
     /* mesa-switch embeds Zink alongside NVC0. Choose per game before the
-     * first EGL initialization: this changes the OpenGL implementation only,
-     * leaving Vulkan applications and the rest of the runtime alone. */
+     * first EGL initialization: this selects OpenGL for the game and the
+     * runtime compositor; Vulkan applications continue to use NVK. */
     if (runtime_gl_driver == 1)
     {
         setenv( "MESA_SWITCH_GL_DRIVER", "zink", 1 );

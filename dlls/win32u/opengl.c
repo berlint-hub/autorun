@@ -3095,6 +3095,7 @@ static BOOL win32u_wglSwapBuffers( HDC hdc )
     else if (!(draw = get_window_current_drawable( hwnd )))
     {
 #ifdef __SWITCH__
+        wine_nx_gl_swap_stage( NX_GL_SWAP_STAGE_RETURN );
         wine_nx_gl_leave( NX_GL_SWAP_BUFFERS, FALSE );
 #endif
         return FALSE;

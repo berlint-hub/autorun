@@ -129,7 +129,7 @@ static void test_settings( const char *dir )
      * it grew out of (gl-2003) still reads as its own. */
     load_text( &kv, "" );
     launcher_settings_read( &kv, &settings );
-    assert( !settings.gl_thread && !settings.gl_year );
+    assert( !settings.gl_thread && !settings.gl_year && !settings.gl_driver );
     load_text( &kv, "gl-thread=1\ngl-year=2009\ngl-driver=zink\n" );
     launcher_settings_read( &kv, &settings );
     assert( settings.gl_thread && settings.gl_year == 3 && settings.gl_driver == 1 );

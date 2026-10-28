@@ -242,7 +242,66 @@ static void make_pe( struct buffer *pe, const struct buffer *rsrc )
     pe->size = 0x400 + raw;
 }
 
-static void write_file( const char *path, const struct buffer *b )
+static void write_file( const char *path, const struct buffer *b );
+static void build_program( struct buffer *pe, int with_description, int with_icons );
+
+static void make_imports( struct buffer *pe )
+{
+    static const char name[] = "KERNEL32.dll";
+    size_t section = 64 + 24 + 224, descriptor = 0x400 + 0x200, dll_name = 0x400 + 0x240;
+
+    /* Make the one section large enough to hold an import table and its names. */
+    set32( pe, section + 8, 0x800 );
+    set32( pe, section + 16, 0x800 );
+    memset( pe->data + 0x400, 0, 0x800 );
+    pe->size = 0xc00;
+    set32( pe, 64 + 24 + 96 + 8, 0x1200 );
+    set32( pe, 64 + 24 + 96 + 12, 40 );
+    set32( pe, descriptor + 12, 0x1240 );
+    memcpy( pe->data + dll_name, name, sizeof(name) );
+}
+
+struct import_names
+{
+    char names[4][LAUNCHER_PE_MAX_DLL_NAME];
+    unsigned int count;
+};
+
+static int collect_import( void *opaque, const char *name )
+{
+    struct import_names *imports = opaque;
+
+    assert( imports->count < 4 );
+    snprintf( imports->names[imports->count++], LAUNCHER_PE_MAX_DLL_NAME, "%s", name );
+    return 1;
+}
+
+static void test_imports( const char *dir )
+{
+    static struct buffer pe;
+    struct launcher_pe image;
+    struct import_names imports = {0};
+    char path[512];
+    unsigned int count = 0, reported = 0;
+
+    snprintf( path, sizeof(path), "%s/imports.exe", dir );
+    build_program( &pe, 0, 0 );
+    make_imports( &pe );
+    write_file( path, &pe );
+    assert( launcher_pe_open( &image, path ) );
+    assert( launcher_pe_imports( &image, collect_import, &imports, &reported ) );
+    assert( reported == 1 && imports.count == 1 && !strcmp( imports.names[0], "KERNEL32.dll" ) );
+    launcher_pe_close( &image );
+
+    /* The directory without its zero descriptor is not silently accepted. */
+    set32( &pe, 64 + 24 + 96 + 12, 20 );
+    write_file( path, &pe );
+    assert( launcher_pe_open( &image, path ) );
+    assert( !launcher_pe_imports( &image, NULL, NULL, &count ) );
+    launcher_pe_close( &image );
+}
+
+static void write_file( const char *path, const struct buffer *b)
 {
     FILE *f = fopen( path, "wb" );
     assert( f && fwrite( b->data, 1, b->size, f ) == b->size );
@@ -428,6 +487,7 @@ int main( int argc, char **argv )
     test_dibs();
     test_pick();
     test_program( dir );
+    test_imports( dir );
     test_damaged( dir );
     if (argc > 1)
     {

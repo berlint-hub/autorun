@@ -118,6 +118,17 @@ for needle, why in [
 ]:
     want(needle in patch, why)
 
+wow64_module = section('Source/Windows/WOW64/Module.cpp')
+arm64ec_module = section('Source/Windows/ARM64EC/Module.cpp')
+want('if (auto Err = RtlWow64SuspendThread(*ThreadDup, NULL); Err) return;' in wow64_module,
+     'WOW64 teardown continues when suspending its remote thread failed')
+want('if (auto Err = NtSuspendThread(*ThreadDup, NULL); Err) return Err;' in arm64ec_module,
+     'ARM64EC teardown continues when suspending its remote thread failed')
+want(wow64_module.count('if (Suspended) NtResumeThread(*ThreadDup, nullptr);') >= 2,
+     'WOW64 teardown can resume a suspend count it did not acquire')
+want(arm64ec_module.count('if (Suspended) NtResumeThread(*ThreadDup, nullptr);') >= 2,
+     'ARM64EC teardown can resume a suspend count it did not acquire')
+
 want('__builtin___clear_cache' not in patch.split('jit_registry.h')[0] or
      'HorizonFlushICache' in patch,
      'the patch flushes the instruction cache with __builtin___clear_cache alone')

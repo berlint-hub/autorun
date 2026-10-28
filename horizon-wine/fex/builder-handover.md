@@ -85,13 +85,14 @@ What it does, in one line each:
   were derived from the old bytes. FEX-2610 kept the field, the loop and the
   check and lost the assignment -- `ExecutableRangeWriteTracked` is written
   nowhere in that tree, which is how the omission shows.
-- **Four module bugs the port carries** (`WOW64/Module.cpp`,
-  `ARM64EC/Module.cpp`): `POP` into memory takes its effective address after
-  the `RSP` increment (SDM), an execute fault is no longer taken for a write
-  before the SMC check, the module write restores protection from the value
-  it read back instead of an uninitialised one, the 32-bit bridge is refused
-  when it does not land below 2 GB, and a thread suspended for teardown is
-  resumed if the teardown then gives up.
+- **Decoder fix** (`OpcodeDispatcher.cpp`): `POP` into memory takes its
+  effective address after the `RSP` increment (SDM).
+- **Four Windows-module fixes** (`WOW64/Module.cpp`, `ARM64EC/Module.cpp`):
+  an execute fault is not treated as a write before the SMC check, the module
+  write restores protection from the value it read back, the 32-bit bridge is
+  refused when it does not land below 2 GB, and thread teardown checks that
+  suspension/context acquisition succeeded and resumes only a thread it
+  actually suspended if teardown then gives up.
 - **`CMakeLists.txt`**: one `FEX_HORIZON` option (there were two), usable
   without `FEX_HORIZON_ABI_DIR` (the bundled headers are the same files), and
   no `FATAL_ERROR` that made the fallback unreachable.
