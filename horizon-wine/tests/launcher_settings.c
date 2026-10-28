@@ -374,6 +374,14 @@ static void test_settings( const char *dir )
     assert( !strcmp( back.title, settings.title ) && back.hidden == 1 && back.verbose == -1 && back.profile == 1 );
     assert( back.framebuffer == 0 && back.d3d == LAUNCHER_D3D_DXVK && !strcmp( back.dxvk_version, "2.7.1" ) );
 
+    /* A cached start that did not return removes only the opt-in, preserving
+     * the rest of the game's settings across a write to its settings file. */
+    assert( launcher_kv_set( &kv, "fex-cache", "1" ) && launcher_kv_save( &kv, path ) );
+    assert( launcher_kv_load( &kv, path ) && strstr( kv.text, "fex-cache=1" ) );
+    assert( launcher_kv_set( &kv, "fex-cache", NULL ) && launcher_kv_save( &kv, path ) );
+    assert( launcher_kv_load( &kv, path ) && !strstr( kv.text, "fex-cache=" ) &&
+            strstr( kv.text, "title=Need for Speed" ) );
+
     /* Back to the global settings: only the comment stays; without it the file goes. */
     memset( &settings, 0, sizeof(settings) );
     settings.fex = -1;

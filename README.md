@@ -20,8 +20,9 @@ copies to the SD card and start them from Autorun's library.
   second translator for 32-bit programs. A game can keep what FEX has
   translated on the card (**Translated code cache**), so a second start does
   not translate the same blocks all over again — experimental in the FEX
-  release the runtime ships, off by default, and a start that does not come
-  back turns it off for the next one.
+  release the runtime ships, off by default. If a cached start does not come
+  back, Autorun switches it off for that game until it is deliberately enabled
+  again.
 - **The Switch's GPU.** OpenGL and Vulkan come from Mesa 26
   ([mesa-switch](https://github.com/danfromtico/mesa-switch)), and Direct3D 8
   to 11 run through [DXVK](https://github.com/doitsujin/dxvk), Direct3D 12

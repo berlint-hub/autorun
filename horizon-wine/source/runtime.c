@@ -5578,15 +5578,11 @@ int main( int argc, char **argv )
         }
     }
 
-    /* The translator's code, kept on the card (fex-cache=1). FEX 2609 writes
-     * every block it translates to a database and reads it back before
-     * translating again, which is what makes a second run of a game start
-     * quicker. The release has no size limit of its own and a program that
-     * changes its own code can make the cache grow without end, so it is
-     * measured here and the oldest configurations are given back first. The
-     * database is under the user's profile, where the module's own environment
-     * points it; the roaming half is looked at too, for a module that puts it
-     * there. */
+    /* The translator's code, kept on the card (fex-cache=1). FEX writes each
+     * translated block to a database and reads it back on later starts. Because
+     * a cache-enabled start may keep the program from launching, a leftover
+     * marker now disables the per-program setting as well as this attempt: the
+     * fallback must remain off until the user explicitly tries it again. */
     if (runtime_fex && runtime_fex_disk_cache)
     {
         unsigned long long kept = 0;
@@ -5595,16 +5591,26 @@ int main( int argc, char **argv )
         int marking = 0;
         int roaming;
 
-        /* A marker left behind means the last start with the cache never came
-         * back -- it crashed, or the program did not start at all. The cache is
-         * the newest and most experimental thing here, so it is what is given
-         * up: this start runs without it, and says so. */
+        /* A marker left behind means the last start with the cache did not
+         * return. Stop retrying it automatically; otherwise every other launch
+         * would fail with the cache and only the intervening one would recover. */
         if (fex_cache_marker_path( marker, sizeof(marker), RUNTIME_DIR, target ))
         {
             if (fex_cache_marker_take( marker ))
             {
-                log_line( "[FEX] the last start of this program with the code cache did not come back; "
-                          "it is off for this one" );
+                char settings_path[520];
+                struct launcher_kv settings_kv = {{0}, 0};
+                int saved = target[1] != ':' &&
+                            launcher_program_settings_path( RUNTIME_DIR, target, settings_path,
+                                                            sizeof(settings_path) ) &&
+                            launcher_kv_load( &settings_kv, settings_path ) &&
+                            launcher_kv_set( &settings_kv, "fex-cache", NULL ) &&
+                            launcher_kv_save( &settings_kv, settings_path );
+
+                log_line( "[FEX] the last cached start of this program did not come back; "
+                          "the cache is off for this and future starts%s",
+                          saved ? " (re-enable it manually to try again)" :
+                                  " (this start only; its setting could not be saved)" );
                 runtime_fex_disk_cache = 0;
             }
             else

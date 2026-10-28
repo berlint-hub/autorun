@@ -281,8 +281,9 @@ runtime; the full package now ships the Mesa 26 one.
   plainly (`FEX_DISKCACHEFILEMAPPING=0`): the release maps a fixed, very large
   window onto the file, which on a card is a copy of it page by page. A marker
   in `program-settings/` names the start that is under way, so one that never
-  comes back — a program that could not start with the cache, a crash — has the
-  cache off for the next start rather than leaving its owner to find the switch
+  comes back — a program that could not start with the cache, a crash — removes
+  `fex-cache=1` from that program's settings as it falls back. This keeps the
+  cache off for later starts too, until the owner deliberately re-enables it
   (`fex_cache_marker_*`).
 - **Two environments, one per kind of library.** The translator's switches
   (`FEX_*`) are read by FEX's own Windows CRT, which takes them from the
