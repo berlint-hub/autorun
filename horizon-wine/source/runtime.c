@@ -790,6 +790,7 @@ static const char *runtime_fex_variant;
  * module keys its own directory by its settings rather than by itself. */
 static char runtime_fex_module_tag[48];
 static int runtime_four_cores;
+static int runtime_windows_xp;
 static int runtime_dxvk_hud;
 static char runtime_vkd3d_version[32];
 static char runtime_dxvk_version[32];
@@ -2600,6 +2601,10 @@ static const char runtime_environment[] =
     "WINE_D3D_CONFIG=cs_spin_count=64,explicit_buffer_flush=1\0"
     "WINE_NX_GRAPHICS_PATH=\0";
 
+/* ntdll reads this Wine-specific process setting while initializing its
+ * version APIs; child processes inherit it, while unrelated launches do not. */
+static const char runtime_windows_version_environment[] = "WINE_NX_WINDOWS_VERSION=winxp";
+
 static size_t runtime_fex_environment( const char *target, char *buffer, size_t size )
 {
     struct launcher_kv kv = {{0}, 0};
@@ -3030,6 +3035,7 @@ static RTL_USER_PROCESS_PARAMETERS *runtime_create_process_params( const char *t
     chars += strlen( dos_path ) + 1;
     chars += strlen( nt_path ) + 1;
     chars += sizeof(runtime_environment) + 2 * strlen( graphics_path ) + strlen( dxvk_hud ) - 1;
+    if (runtime_windows_xp) chars += sizeof(runtime_windows_version_environment);
     chars += fex_environment_size;
     if (left4dead) chars += sizeof(LEFT4DEAD_ENVIRONMENT) - 1;
     size = sizeof(*params) + chars * sizeof(WCHAR);
@@ -3077,6 +3083,9 @@ static RTL_USER_PROCESS_PARAMETERS *runtime_create_process_params( const char *t
         }
         do *cursor++ = (unsigned char)*value; while (*value++);
     }
+    if (runtime_windows_xp)
+        for (i = 0; i < sizeof(runtime_windows_version_environment); i++)
+            *cursor++ = (unsigned char)runtime_windows_version_environment[i];
     for (i = 0; i < fex_environment_size; i++) *cursor++ = (unsigned char)fex_environment[i];
     if (left4dead)
         for (i = 0; i < sizeof(LEFT4DEAD_ENVIRONMENT) - 1; i++)
@@ -5368,6 +5377,7 @@ int main( int argc, char **argv )
         runtime_fex = 0;
 #endif
         runtime_four_cores = 1;
+        runtime_windows_xp = 0;
         horizon_fast_sync_enabled = 0;
         wine_nx_scaling_mode = SCREEN_SCALING_ASPECT;
 #ifdef WINE_NX_MESA_SWITCH
@@ -5389,6 +5399,9 @@ int main( int argc, char **argv )
         {
             launcher_settings_read( &kv, &settings );
             horizon_fast_sync_enabled = settings.fast_sync;
+            runtime_windows_xp = settings.windows_xp;
+            if (runtime_windows_xp)
+                log_line( "[VERSION] Windows XP SP3 version APIs enabled for %s", target );
             wine_nx_lazy_file_views = settings.lazy_file_views;
 #ifdef WINE_NX_FEX
             runtime_fex = settings.fex != 0;

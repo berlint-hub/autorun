@@ -41,6 +41,9 @@ static void test_defaults_match_an_empty_file(void)
     /* The defaults are what the reader makes of a file without keys: the two
      * cannot drift apart without this failing. */
     assert( !memcmp( &read, &defaults, sizeof(read) ) );
+    defaults.windows_xp = 1;
+    launcher_preset_defaults( &defaults );
+    assert( !defaults.windows_xp );
 }
 
 static void test_apply_leaves_what_it_does_not_own(void)
@@ -60,11 +63,13 @@ static void test_apply_leaves_what_it_does_not_own(void)
     settings.resolution = 3;
     settings.voodoo = 1;
     settings.voodoo_msaa = 2;
+    settings.windows_xp = 1;
     before = settings;
 
     assert( launcher_preset_apply( &settings, LAUNCHER_PRESET_PERFORMANCE, LAUNCHER_TRANSLATOR_ANY ) );
     assert( !strcmp( settings.title, "Need for Speed" ) && settings.hidden == 1 && settings.verbose == 1 );
     assert( settings.d3d == LAUNCHER_D3D_WINE && settings.upscaling == 2 );
+    assert( settings.windows_xp ); /* a performance preset does not own the Windows version */
     assert( settings.upscaling_sharpness == 4 && settings.lsfg_enabled == 1 && settings.lsfg_flow == 2 );
     assert( settings.dxvk_hud == 2 && settings.resolution == 3 && settings.voodoo == 1 );
     assert( settings.voodoo_msaa == 2 );

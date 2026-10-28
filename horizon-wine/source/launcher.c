@@ -1835,7 +1835,7 @@ enum program_row
 {
     ROW_START, ROW_PRESET, ROW_COPY, ROW_FAVORITE, ROW_ARTWORK, ROW_FORWARDER, ROW_LOCATE, ROW_PLAYED, ROW_TITLE,
     ROW_ARGS, ROW_RESET, ROW_VERBOSE, ROW_PROFILE,
-    ROW_WINDOWS, ROW_SCALING, ROW_RESOLUTION, ROW_D3D9, ROW_VKD3D_VERSION, ROW_DXVK_VERSION, ROW_DXVK_OPTIONS, ROW_DXVK_HUD, ROW_FRAME_LIMIT, ROW_FRAME_LIMIT_SYNC, ROW_VSYNC,
+    ROW_WINDOWS, ROW_WINDOWS_VERSION, ROW_SCALING, ROW_RESOLUTION, ROW_D3D9, ROW_VKD3D_VERSION, ROW_DXVK_VERSION, ROW_DXVK_OPTIONS, ROW_DXVK_HUD, ROW_FRAME_LIMIT, ROW_FRAME_LIMIT_SYNC, ROW_VSYNC,
     ROW_VOODOO,
     ROW_LSFG, ROW_LSFG_DLL, ROW_LSFG_PERFORMANCE, ROW_LSFG_FLOW,
     ROW_UPSCALING, ROW_UPSCALING_SHARPNESS, ROW_GL_THREAD, ROW_GL_YEAR, ROW_GL_DRIVER,
@@ -2914,6 +2914,17 @@ static int program_menu_run( struct launcher *l, struct program *p, char *target
             snprintf( row->value, sizeof(row->value), "%s", p->settings.fex_disk_cache ? "Enabled" : "Disabled" );
         }
 #endif
+        if (x86 || x64)
+        {
+            static const char *const names[] = { "Default", "Windows XP SP3" };
+
+            ADD_ROW( ROW_WINDOWS_VERSION, SECTION_EMULATION, "Windows version",
+                     "Reports Windows XP SP3 to this game's version APIs. This may get past old version checks; "
+                     "it does not restore removed Windows APIs or guarantee compatibility." );
+            row->kind = UI_ROW_DROPDOWN;
+            row->choices = 2;
+            snprintf( row->value, sizeof(row->value), "%s", names[p->settings.windows_xp != 0] );
+        }
         ADD_ROW( ROW_FOUR_CORES, SECTION_EMULATION, "4-core support",
                  l->options->four_cores_available
                  ? "Moves graphics workers to core 3. Game threads stay on cores 0-2."
@@ -3570,6 +3581,25 @@ static int program_menu_run( struct launcher *l, struct program *p, char *target
             break;
         }
 #endif
+        case ROW_WINDOWS_VERSION:
+        {
+            static const char *const names[] = { "Default", "Windows XP SP3" };
+            struct ui_row items[2] = {0};
+            int selected;
+
+            if (action == UI_ACTION_RESET) selected = 0;
+            else if (action == UI_ACTION_CHOOSE)
+            {
+                for (i = 0; i < 2; i++) snprintf( items[i].label, sizeof(items[i].label), "%s", names[i] );
+                selected = ui_settings_dropdown( ui, &list, items, 2, p->settings.windows_xp );
+                if (selected < 0) break;
+            }
+            else break;
+            p->settings.windows_xp = selected;
+            save_program_settings( l, p );
+            break;
+        }
+
         case ROW_FOUR_CORES:
             if (action == UI_ACTION_RESET) p->settings.four_cores = 1;
             else if (p->settings.four_cores) p->settings.four_cores = 0;

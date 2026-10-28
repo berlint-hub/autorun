@@ -527,6 +527,25 @@ done:
             current_version = &registry_version;
     }
 
+    /* Autorun adds this only to a game's launch environment.  It takes
+     * precedence over Wine's registry defaults without changing the user's
+     * persistent AppDefaults settings. */
+    {
+        UNICODE_STRING env_name = RTL_CONSTANT_STRING( L"WINE_NX_WINDOWS_VERSION" );
+        WCHAR env_value[16] = {0};
+        UNICODE_STRING env_value_string = { 0, sizeof(env_value), env_value };
+
+        if (!RtlQueryEnvironmentVariable_U( NULL, &env_name, &env_value_string ) &&
+            env_value_string.Length < sizeof(env_value))
+        {
+            env_value[env_value_string.Length / sizeof(WCHAR)] = 0;
+            if (!wcsicmp( env_value, L"winxp" ))
+            {
+                current_version = &VersionData[WINXP];
+                TRACE( "overriding version with Autorun's Windows XP SP3 setting\n" );
+            }
+        }
+    }
 
     NtCurrentTeb()->Peb->OSMajorVersion = current_version->dwMajorVersion;
     NtCurrentTeb()->Peb->OSMinorVersion = current_version->dwMinorVersion;

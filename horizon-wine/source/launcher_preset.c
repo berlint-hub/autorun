@@ -96,6 +96,7 @@ void launcher_preset_defaults( struct launcher_settings *settings )
     /* Every field a settings file can leave out, at the value its reader gives
      * it when the key is missing. */
     settings->verbose = settings->profile = settings->framebuffer = -1;
+    settings->windows_xp = 0;
     settings->fex = -1;
     settings->four_cores = 1;
     settings->d3d = LAUNCHER_D3D_DXVK;

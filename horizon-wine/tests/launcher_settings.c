@@ -71,7 +71,18 @@ static void test_settings( const char *dir )
     load_text( &kv, "" );
     launcher_settings_read( &kv, &settings );
     assert( !settings.fast_sync && settings.fex && settings.four_cores &&
-            settings.d3d == LAUNCHER_D3D_DXVK && !settings.resolution );
+            settings.d3d == LAUNCHER_D3D_DXVK && !settings.resolution && !settings.windows_xp );
+    load_text( &kv, "windows-version=winxp\n" );
+    launcher_settings_read( &kv, &settings );
+    assert( settings.windows_xp && launcher_settings_write( &kv, &settings ) &&
+            strstr( kv.text, "windows-version=winxp" ) );
+    launcher_settings_read( &kv, &back );
+    assert( back.windows_xp );
+    settings.windows_xp = 0;
+    assert( launcher_settings_write( &kv, &settings ) && !strstr( kv.text, "windows-version=" ) );
+    load_text( &kv, "windows-version=win7\n" );
+    launcher_settings_read( &kv, &settings );
+    assert( !settings.windows_xp );
     load_text( &kv, "four-cores=0\n" );
     launcher_settings_read( &kv, &settings );
     assert( !settings.four_cores && launcher_settings_write( &kv, &settings ) );
@@ -410,6 +421,10 @@ static void test_write_refuses_what_it_cannot_say(void)
     settings.d3d = LAUNCHER_D3D_DXVK_VKD3D + 1;
     assert( !launcher_settings_write( &kv, &settings ) );
     settings.d3d = LAUNCHER_D3D_DXVK;
+
+    settings.windows_xp = 2;
+    assert( !launcher_settings_write( &kv, &settings ) );
+    settings.windows_xp = 0;
 
     assert( launcher_settings_write( &kv, &settings ) );
 }
