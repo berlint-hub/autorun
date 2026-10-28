@@ -42,6 +42,22 @@ WINE_DECLARE_DEBUG_CHANNEL(globalmem);
 
 static const struct _KUSER_SHARED_DATA *user_shared_data = (struct _KUSER_SHARED_DATA *)0x7ffe0000;
 
+#ifdef __SWITCH__
+/* sync.c's init_user_shared_data resolves where ntdll put the page, and only
+ * for its own pointer; Wine-NX moves the page off 0x7ffe0000 (Horizon keeps no
+ * page there), so this file has to ask the same question or read a page that
+ * is not mapped. */
+static void resolve_user_shared_data(void)
+{
+    const UNICODE_STRING name = RTL_CONSTANT_STRING( L"ntdll.dll" );
+    const struct _KUSER_SHARED_DATA **ptr;
+    HMODULE ntdll;
+
+    if (LdrGetDllHandle( NULL, 0, &name, &ntdll )) return;
+    if ((ptr = RtlFindExportedRoutineByName( ntdll, "wine_nx_user_shared_data" ))) user_shared_data = *ptr;
+}
+#endif
+
 static CRITICAL_SECTION memstatus_section;
 static CRITICAL_SECTION_DEBUG critsect_debug =
 {
@@ -151,6 +167,9 @@ BOOL WINAPI DECLSPEC_HOTPATCH FlushInstructionCache( HANDLE process, LPCVOID add
  */
 SIZE_T WINAPI GetLargePageMinimum(void)
 {
+#ifdef __SWITCH__
+    if (user_shared_data == (const struct _KUSER_SHARED_DATA *)0x7ffe0000) resolve_user_shared_data();
+#endif
     return user_shared_data->LargePageMinimum;
 }
 

@@ -17765,29 +17765,6 @@ unsigned int horizon_server_protocol_version(void)
     return SERVER_PROTOCOL_VERSION;
 }
 
-/* Whether [addr, addr+size) is already mapped and writable according to the
- * kernel. KUSER_SHARED_DATA has to sit at 0x7ffe0000, which on a 32-bit
- * address space is inside the heap region -- this runtime's whole memory
- * budget -- and those pages cannot be taken away (the loader's lent pages in
- * the same region block every heap shrink). The shared data adopts the page
- * where it stands instead of mapping its own. */
-int horizon_page_is_mapped_rw( void *addr, size_t size )
-{
-    unsigned long long a = (unsigned long long)(uintptr_t)addr, end = a + size;
-
-    while (a < end)
-    {
-        MemoryInfo info = {0};
-        u32 page_info = 0;
-
-        if (R_FAILED( svcQueryMemory( &info, &page_info, a ) )) return 0;
-        if (info.type == MemType_Unmapped || (info.perm & Perm_Rw) != Perm_Rw) return 0;
-        if (info.addr + info.size <= a) return 0;
-        a = info.addr + info.size;
-    }
-    return 1;
-}
-
 int horizon_server_connect(void)
 {
     int control_pipe[2] = {-1, -1};
@@ -17902,15 +17879,15 @@ static BOOL
 horizon_commit_lazy_fault( unsigned long long address, unsigned int esr );
 
 #if defined(__aarch64__)
-/* KUSER_SHARED_DATA is not always at 0x7ffe0000 on Horizon (virtual_alloc_first_teb).
- * Wine reads it through user_shared_data, but a program can read the Windows
- * address directly: serve the read from the real page and carry on. Windows maps
- * the page read-only, so a write stays an access violation. Each read costs an
- * exception, so the log shows how often it happens. */
+/* KUSER_SHARED_DATA is not at 0x7ffe0000 on Horizon (virtual_alloc_first_thread_data
+ * moves it). Wine reads it through user_shared_data, but a program can read the
+ * Windows address directly: serve the read from the real page and carry on.
+ * Windows maps the page read-only, so a write stays an access violation. Each
+ * read costs an exception, so the log shows how often it happens. */
 static BOOL horizon_redirect_user_shared_data( ThreadExceptionDump *ctx )
 {
     static const ULONG_PTR address = 0x7ffe0000;
-    static unsigned int count;
+    static unsigned int count, translated;
     const unsigned char *page = (const unsigned char *)user_shared_data;
     unsigned int exception_class = ctx->esr >> 26, i;
     struct horizon_read_regs regs;
@@ -17921,6 +17898,23 @@ static BOOL horizon_redirect_user_shared_data( ThreadExceptionDump *ctx )
     if ((exception_class != 0x24 && exception_class != 0x25) || (ctx->esr & ((1u << 10) | 0x40)) ||
         ctx->far.x - address >= 0x1000)
         return FALSE;
+    /* A load in translated code is the program's own: the instruction at pc is
+     * the translator's, not one that reads the Windows address, so decoding it
+     * would carry the guest past an instruction it never ran. The guest takes
+     * the fault instead, as it would on Windows without the page mapped; the
+     * first few are named, since that is the program asking for the page. */
+    if (horizon_fex_exception( ctx ) ||
+        (wine_nx_box64_is_translated_pc && wine_nx_box64_is_translated_pc( ctx->pc.x )))
+    {
+        if (__atomic_add_fetch( &translated, 1, __ATOMIC_RELAXED ) <= 8)
+        {
+            snprintf( buf, sizeof(buf),
+                      "[USD] a translated read of 0x%llx at pc=0x%llx goes to the program: the page lives at %p",
+                      (unsigned long long)ctx->far.x, (unsigned long long)ctx->pc.x, page );
+            wine_nx_runtime_trace( buf );
+        }
+        return FALSE;
+    }
     for (i = 0; i < 29; i++) regs.x[i] = ctx->cpu_gprs[i].x;
     regs.x[29] = ctx->fp.x;
     regs.x[30] = ctx->lr.x;

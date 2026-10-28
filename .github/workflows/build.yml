@@ -100,6 +100,15 @@ jobs:
             horizon-wine/tests/log_repeat.c -o log_repeat
           ./log_repeat
 
+      # Where KUSER_SHARED_DATA ends up under the 32-bit forwarder: whether a
+      # page found for it can carry the pointer the guest's ntdll is given, and
+      # that the Windows address is never the page the reads are served from.
+      - name: Shared data placement
+        run: |
+          cc -std=gnu11 -Wall -Wextra -Werror -O1 -g \
+            horizon-wine/tests/shared_data_place.c -o shared_data_place
+          ./shared_data_place
+
       # The profiler's sample handling, and the i386 CONTEXT offsets the stall
       # report reads a program's own registers through.
       - name: Thread profiler

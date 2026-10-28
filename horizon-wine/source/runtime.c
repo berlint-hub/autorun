@@ -366,9 +366,14 @@ static void *log_flusher( void *arg )
  * reads it. Under the 32-bit address space the kernel heap region -- this
  * runtime's whole memory budget -- runs straight past that address, and the
  * page cannot be taken away again: the loader's lent pages share the region,
- * and the kernel refuses to shrink the heap through them. What is left is to
- * keep the pool from ever handing that page out -- the shared data adopts it
- * where it stands -- by ending the pool below it. */
+ * and the kernel refuses to shrink the heap through them. Wine does not map
+ * the page either way -- Horizon refuses to, and a build that adopted the page
+ * standing there lost it to the allocator that owned it (see
+ * dlls/ntdll/unix/horizon_shared_data.h) -- so what is left here is to keep
+ * the address out of the way of everything else: end the heap pool below it
+ * where the pool straddles it, and where the pool already lies above it, keep
+ * the address out of the virtmem search that places arenas, thread stacks and
+ * the translator's code. */
 static void cap_heap_pool_for_shared_data(void)
 {
     u64 heap_base = 0, heap_size = 0;
@@ -378,7 +383,23 @@ static void cap_heap_pool_for_shared_data(void)
     svcGetInfo( &heap_base, InfoType_HeapRegionAddress, CUR_PROCESS_HANDLE, 0 );
     svcGetInfo( &heap_size, InfoType_HeapRegionSize, CUR_PROCESS_HANDLE, 0 );
     if (!heap_size || heap_base >= shared || heap_base + heap_size <= shared + 0x1000) return;
-    if ((uintptr_t)fake_heap_start >= end) return;
+    if ((uintptr_t)fake_heap_start >= end)
+    {
+        VirtmemReservation *reservation;
+
+        /* Above the address already, so the pool cannot hand it out, but the
+         * rest of the runtime maps through libnx's search: an arena or a stack
+         * that lands on the page holds it, and takes it back when it goes. */
+        virtmemLock();
+        reservation = virtmemAddReservation( (void *)shared, 0x1000 );
+        virtmemUnlock();
+        log_line( reservation ?
+                  "[INIT] 0x7ffe0000 is reserved, so no arena, stack or code mapping is placed on it; "
+                  "the shared data lives on a page of its own and reads of the old address are served "
+                  "from it" :
+                  "[INIT] 0x7ffe0000 could not be reserved; a mapping may still be placed on it" );
+        return;
+    }
     if ((uintptr_t)fake_heap_end > end)
     {
         fake_heap_end = (char *)end;

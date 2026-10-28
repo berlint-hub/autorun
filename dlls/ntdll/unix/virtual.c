@@ -102,6 +102,7 @@
 #include "wine/unixlib.h"
 #include "unix_private.h"
 #include "horizon_private.h"
+#include "horizon_shared_data.h"
 #include "horizon_unixlib_names.h"
 #include "wine/debug.h"
 
@@ -2865,29 +2866,7 @@ static NTSTATUS map_view( struct file_view **view_ret, void *base, size_t size,
         if (limit_low && base < (void *)limit_low) return STATUS_CONFLICTING_ADDRESSES;
         if (limit_high && is_beyond_limit( base, size, (void *)limit_high )) return STATUS_CONFLICTING_ADDRESSES;
         if (is_beyond_limit( base, size, host_addr_space_limit )) return STATUS_CONFLICTING_ADDRESSES;
-        if ((status = map_fixed_area( base, size, unix_prot )))
-        {
-#ifdef __SWITCH__
-            /* KUSER_SHARED_DATA has to sit at 0x7ffe0000, where on a 32-bit
-             * address space the kernel heap region already holds a page (the
-             * runtime's whole memory budget lives in that region, and the
-             * loader's lent pages keep the heap from being shrunk away from
-             * this one). The pool is kept from handing the page out, so it is
-             * ours and idle: the shared data takes it where it stands. */
-            if (status == STATUS_CONFLICTING_ADDRESSES && base == (void *)user_shared_data &&
-                size == page_size && horizon_page_is_mapped_rw( base, size ))
-            {
-                extern void wine_nx_runtime_trace( const char *msg ) __attribute__((weak));
-
-                memset( base, 0, size );
-                if (&wine_nx_runtime_trace)
-                    wine_nx_runtime_trace( "[INIT] the shared data page adopted where the heap already holds it" );
-                ptr = base;
-                goto done;
-            }
-#endif
-            return status;
-        }
+        if ((status = map_fixed_area( base, size, unix_prot ))) return status;
         if (is_beyond_limit( base, size, working_set_limit )) working_set_limit = address_space_limit;
         ptr = base;
     }
@@ -5100,6 +5079,73 @@ static void native_only_limits( ULONG_PTR *low, ULONG_PTR *high )
     }
 }
 
+#ifdef __SWITCH__
+/* The shared data takes a page of its own.
+ *
+ * Under the 32-bit forwarder 0x7ffe0000 lies inside the pages the kernel gave
+ * this process for its heap, and this runtime refuses to map Wine's memory
+ * there (horizon.c: a mapping would claim pages the kernel gave away). An
+ * earlier build took whatever page stood at the address instead -- a page of
+ * the runtime's allocator, as it turned out -- and a run of Dark Athena showed
+ * what that costs: the allocator took the page back while the loader was still
+ * working, the clock thread that writes the shared data every millisecond took
+ * a translation fault on it, was parked as unhandled, and the program never
+ * swapped a frame.
+ *
+ * So the address is left a hole and the shared data goes to a page Wine maps
+ * itself, below 4 GB so the pointer fits in the guest's ntdll. Reads of the
+ * Windows address are served from that page by
+ * horizon_redirect_user_shared_data, which is why the moved page must not be
+ * the address itself.
+ */
+static NTSTATUS move_user_shared_data( struct file_view **view, unsigned int fixed_status )
+{
+    extern void wine_nx_runtime_trace( const char *msg ) __attribute__((weak));
+    unsigned long long limit = 0x100000000ULL;  /* what a 32-bit program can hold */
+    char msg[224];
+    void *hole = NULL, *moved = NULL;
+    unsigned int status;
+
+    /* No kernel page at the address, and the runtime's own tables keep it for
+     * nobody: neither an arena nor a thread's stack can be placed there. It is
+     * best effort -- the address may already be spoken for, in which case a
+     * program reading it sees whoever holds it, and the log says so. */
+    if (anon_mmap_tryfixed( user_shared_data, page_size, PROT_NONE, 0 ) == user_shared_data)
+        hole = user_shared_data;
+
+    status = map_view( view, NULL, page_size, 0, VPROT_READ | VPROT_WRITE | VPROT_COMMITTED,
+                       0, (ULONG_PTR)limit - 1, 0 );
+    if (!status) moved = (*view)->base;
+
+    if (horizon_shared_data_place_for( 0, moved &&
+                                       horizon_shared_data_move_usable( (ULONG_PTR)moved, page_size, limit ) )
+        != HORIZON_SHARED_DATA_MOVED)
+    {
+        if (status) return status;
+        /* A page out of 32-bit reach is no use to the guest; give it back and
+         * report the mapping that failed, so the caller stops as it always did. */
+        {
+            SIZE_T released = 0;
+
+            NtFreeVirtualMemory( NtCurrentProcess(), &moved, &released, MEM_RELEASE );
+        }
+        return fixed_status ? fixed_status : STATUS_NO_MEMORY;
+    }
+
+    user_shared_data = moved;
+    if (&wine_nx_runtime_trace)
+    {
+        snprintf( msg, sizeof(msg),
+                  "[INIT] the shared data moved off 0x%llx (the kernel keeps no page for it there, "
+                  "status=%08x) to %p%s; reads of the old address are served from it",
+                  HORIZON_SHARED_DATA_ADDRESS, fixed_status, moved,
+                  hole ? ", which is left a hole" : "" );
+        wine_nx_runtime_trace( msg );
+    }
+    return STATUS_SUCCESS;
+}
+#endif
+
 /***********************************************************************
  *           virtual_alloc_first_thread_data
  */
@@ -5120,6 +5166,9 @@ struct thread_data *virtual_alloc_first_thread_data(void)
                        VPROT_WRITE |
 #endif
                        VPROT_READ | VPROT_COMMITTED, 0, 0, 0 );
+#ifdef __SWITCH__
+    if (status) status = move_user_shared_data( &view, status );
+#endif
     if (status)
     {
         ERR( "wine: failed to map the shared user data: %08x\n", status );
@@ -5152,7 +5201,7 @@ struct thread_data *virtual_alloc_first_thread_data(void)
             {
                 snprintf( msg, sizeof(msg),
                           "[FAIL] map first thread data size=%#lx limits=%p-%p status=%08x",
-                          (unsigned long)size, (void *)native_low, (void *)native_high );
+                          (unsigned long)size, (void *)native_low, (void *)native_high, status );
                 wine_nx_runtime_trace( msg );
             }
         }

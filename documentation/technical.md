@@ -375,6 +375,17 @@ runtime; the full package now ships the Mesa 26 one.
   programs, and a card's game is a file on the host's disk anyway. It is not
   a way past the launcher's "Address space unavailable" dialog: that one is
   about the forwarder's own address space, and no bit in a game changes it.
+  KUSER_SHARED_DATA, the page Windows keeps at 0x7ffe0000 and every program's
+  ntdll reads for the clock, is not that page here: on a 32-bit address space
+  the address is inside the pages the kernel gave the process for its heap,
+  and the runtime keeps Wine's mappings out of those. The shared data takes a
+  page of its own below 4 GiB (`dlls/ntdll/unix/horizon_shared_data.h`,
+  `[INIT] the shared data moved off 0x7ffe0000 ...`), and a program reading
+  the Windows address directly has the read served from the real page by the
+  fault handler (`dlls/ntdll/unix/horizon.c`). A build that adopted the page
+  standing at the address instead lost it to the allocator that owned it mid
+  load, which parked the clock thread that writes the page and left the
+  program with no frames at all.
 - **Launcher.** An SDL2 launcher with a Home and a Library view, per-game
   options, a controls editor, SteamGridDB artwork, and forwarder installation
   (`horizon-wine/source/launcher*.c`, `forwarder.c`). Add Game begins with an
