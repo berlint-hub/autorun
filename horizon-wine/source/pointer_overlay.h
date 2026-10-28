@@ -38,44 +38,51 @@ struct pointer_overlay_run
     int x0, x1, y0, y1;
 };
 
-/* The panel pixel the surface's pixel x shows: the surface is the panel's
- * picture scaled to it, and nearest is what a copy of the sprite scales with. */
-static inline int pointer_overlay_column( int x, int panel, int surface )
+/* The panel pixel a pixel of the picture shows: the picture is the panel's own
+ * scaled to it, and nearest is what a copy of the sprite scales with. */
+static inline int pointer_overlay_column( int x, int panel, int picture )
 {
-    return (int)(((long long)x * 2 + 1) * panel / ((long long)surface * 2));
+    return (int)(((long long)x * 2 + 1) * panel / ((long long)picture * 2));
 }
 
-/* The arrow's opaque runs for a surface of surface_w x surface_h, its tip at
- * the panel pixel (px, py). Returns how many there are, at most
- * POINTER_OVERLAY_MAX_RUNS; 0 when the arrow is off the surface. */
+/* The arrow's opaque runs, its tip at the panel pixel (px, py), for the
+ * picture the panel shows: the rectangle [picture_x, picture_x + picture_w) x
+ * [picture_y, picture_y + picture_h) of the surface.  That is the whole surface
+ * for a Vulkan swapchain image; for an OpenGL window with the widescreen hack
+ * on, the display shows the central 4:3 of the buffer and the panel's pixels
+ * are those of that rectangle, not of the whole surface -- the arrow belongs
+ * where the panel shows it, at the scale the panel shows it with.
+ *
+ * Returns how many runs there are, at most POINTER_OVERLAY_MAX_RUNS; 0 when
+ * the arrow is off the picture. */
 static inline int pointer_overlay_runs( int px, int py, int panel_w, int panel_h,
-                                        int surface_w, int surface_h,
+                                        int picture_x, int picture_y, int picture_w, int picture_h,
                                         struct pointer_overlay_run *runs )
 {
     int count = 0, x, y, x_begin, x_end, y_begin, y_end;
 
-    if (panel_w < 1 || panel_h < 1 || surface_w < 1 || surface_h < 1) return 0;
+    if (panel_w < 1 || panel_h < 1 || picture_w < 1 || picture_h < 1) return 0;
     /* The arrow's own rectangle, a pixel either side: this runs on every
-     * present of a whole screen, and a surface pixel on the edge of it may
+     * present of a whole screen, and a picture pixel on the edge of it may
      * show a panel pixel inside. */
-    x_begin = (int)((long long)px * surface_w / panel_w) - 1;
-    x_end = (int)((long long)(px + POINTER_CURSOR_W) * surface_w / panel_w) + 1;
-    y_begin = (int)((long long)py * surface_h / panel_h) - 1;
-    y_end = (int)((long long)(py + POINTER_CURSOR_H) * surface_h / panel_h) + 1;
-    if (x_begin < 0) x_begin = 0;
-    if (y_begin < 0) y_begin = 0;
-    if (x_end > surface_w) x_end = surface_w;
-    if (y_end > surface_h) y_end = surface_h;
+    x_begin = picture_x + (int)((long long)px * picture_w / panel_w) - 1;
+    x_end = picture_x + (int)((long long)(px + POINTER_CURSOR_W) * picture_w / panel_w) + 1;
+    y_begin = picture_y + (int)((long long)py * picture_h / panel_h) - 1;
+    y_end = picture_y + (int)((long long)(py + POINTER_CURSOR_H) * picture_h / panel_h) + 1;
+    if (x_begin < picture_x) x_begin = picture_x;
+    if (y_begin < picture_y) y_begin = picture_y;
+    if (x_end > picture_x + picture_w) x_end = picture_x + picture_w;
+    if (y_end > picture_y + picture_h) y_end = picture_y + picture_h;
 
     for (y = y_begin; y < y_end; y++)
     {
-        int row = pointer_overlay_column( y, panel_h, surface_h ) - py;
+        int row = pointer_overlay_column( y - picture_y, panel_h, picture_h ) - py;
         int open = 0;
 
         if (row < 0 || row >= POINTER_CURSOR_H) continue;
         for (x = x_begin; x <= x_end; x++)
         {
-            int column = pointer_overlay_column( x, panel_w, surface_w ) - px;
+            int column = pointer_overlay_column( x - picture_x, panel_w, picture_w ) - px;
             int inside = x < x_end && column >= 0 && column < POINTER_CURSOR_W &&
                          pointer_cursor_shape[row][column] != '.';
 

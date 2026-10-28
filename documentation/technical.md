@@ -73,10 +73,15 @@ runtime; the full package now ships the Mesa 26 one.
   in a run of opaque sprite pixels at a time
   (`horizon-wine/source/pointer_overlay.h`, `horizon-wine/tests/
   pointer_overlay.c`); the runs are the panel's own arrow scaled onto the
-  picture, so it lands where the compositor would have put it. Both copies are
+  picture, so it lands where the compositor would have put it; where the
+  display shows only part of a surface -- the widescreen hack crops an OpenGL
+  window's buffer to its central 4:3 -- the arrow goes on that part, at that
+  part's scale (`wine_nx_surface_picture`). Both copies are
   host-tested without a console: `tests/check_cursor_overlay.py` and
   `tests/check_cursor_vulkan.py` take the code out of `winnx_opengl.c` and
-  `vulkan.c` as it is and run it against mocks. The arrow
+  `vulkan.c` as it is and run it against mocks, and
+  `tests/check_cursor_mapping.py` does the same for the runtime's own placement,
+  against the real `screen_fit.h`. The arrow
   follows the pointer in the desktop's coordinates and is mapped through the
   present's fit every time it is drawn, so a display mode or a surface that
   changes the screen moves it with the picture, and the stick's cursor keeps

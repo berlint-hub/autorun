@@ -928,13 +928,23 @@ static int wine_nx_fit_ready;
 
 static void wine_nx_desktop_init( void )
 {
+    /* Called from the poll thread, from a program setting a display mode and
+     * from the thread that takes the screen, so it has to be a once: two of
+     * them at the same time would set the desktop up twice, and the second
+     * would put its own default over the mode the first had just taken. */
+    static pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
     static int done;
     char text[64] = {0};
     FILE *f;
     int w, h;
 
-    if (done) return;
-    done = 1;
+    if (__atomic_load_n( &done, __ATOMIC_ACQUIRE )) return;
+    pthread_mutex_lock( &mutex );
+    if (done)
+    {
+        pthread_mutex_unlock( &mutex );
+        return;
+    }
     if (wine_nx_desktop_wanted_w)
     {
         wine_nx_desktop_w = wine_nx_desktop_wanted_w;
@@ -955,6 +965,8 @@ static void wine_nx_desktop_init( void )
     wine_nx_desktop_default_h = wine_nx_desktop_h;
     log_line( "[INIT] the desktop is %dx%d, the panel %dx%d", wine_nx_desktop_w, wine_nx_desktop_h,
               WINE_NX_FB_W, WINE_NX_FB_H );
+    __atomic_store_n( &done, 1, __ATOMIC_RELEASE );
+    pthread_mutex_unlock( &mutex );
 }
 
 /* The stick's cursor lives on the desktop (runtime.c, wine_nx_pointer): when
@@ -971,6 +983,12 @@ static void wine_nx_cursor_place_locked( void );
 void wine_nx_desktop_set( int width, int height )
 {
     if (width <= 0 || height <= 0) return;
+    /* The desktop is settled first, before a size is put in it: the first
+     * poll would otherwise still be able to set it up afterwards, from the
+     * Resolution setting or desktop.txt, and quietly put the default back over
+     * the mode the program has just asked for (wine_nx_pointer_rebound is what
+     * first runs that set-up when no poll has yet). */
+    wine_nx_desktop_init();
     if (!wine_nx_desktop_default_w)
     {
         wine_nx_desktop_default_w = wine_nx_desktop_w;
@@ -1021,16 +1039,19 @@ void wine_nx_desktop_size( int *width, int *height )
     if (height) *height = wine_nx_desktop_h;
 }
 
+/* Set while the window presents only the central 4:3 of an OpenGL buffer: the
+ * crop is cut into the buffer before the display's scaler sees it, so the fit
+ * input maps through has to cut the same part of the source.  Written where
+ * the screen is taken, read where a present is placed and where the arrow
+ * looks for its picture, on other threads: atomics, as loading a torn int is
+ * not a thing the C standard promises. */
+static int wine_nx_screen_crop_4_3;
+
 /* Where a src_w x src_h picture lands on the panel for a Scaling mode
  * (screen_fit.h): the rectangle it is drawn in, and the desktop -> panel
  * transform input maps through -- scale plus offset from the rectangle, so a
  * picture with bars at the sides is touched where it is drawn.  src_x/src_y are
  * the presented window's origin in desktop coordinates. */
-/* Set while the window presents only the central 4:3 of an OpenGL buffer: the
- * crop is cut into the buffer before the display's scaler sees it, so the fit
- * input maps through has to cut the same part of the source. */
-static int wine_nx_screen_crop_4_3;
-
 static void wine_nx_present_fit_mode( int mode, int src_w, int src_h, int src_x, int src_y,
                                       int *dst_x, int *dst_y, int *dst_w, int *dst_h )
 {
@@ -1101,7 +1122,8 @@ void wine_nx_present_fit_stretched( int src_w, int src_h, int src_x, int src_y )
                       src_w, src_h, WINE_NX_FB_W, WINE_NX_FB_H );
         }
     }
-    wine_nx_present_fit_mode( wine_nx_screen_crop_4_3 ? SCREEN_SCALING_STRETCH_43 : SCREEN_SCALING_FULL,
+    wine_nx_present_fit_mode( __atomic_load_n( &wine_nx_screen_crop_4_3, __ATOMIC_RELAXED ) ?
+                              SCREEN_SCALING_STRETCH_43 : SCREEN_SCALING_FULL,
                               src_w, src_h, src_x, src_y, NULL, NULL, NULL, NULL );
 }
 
@@ -1438,6 +1460,10 @@ static void *wine_nx_screen_acquire( int width, int height, int vulkan )
     NWindow *window = NULL;
     int taken_over = 0, took_dimensions = 1;
 
+    /* As in wine_nx_desktop_set: the set-up before the size, or it would land
+     * on top of the size the surface is taking the screen with. */
+    wine_nx_desktop_init();
+
     /* An exclusive D3D game expects the screen to take on its mode, the way a
      * real display modeset would: its ClipCursor, centring and cursor maths
      * all measure against the monitor size.  We do not modeset, so pretend the
@@ -1531,7 +1557,7 @@ static void *wine_nx_screen_acquire( int width, int height, int vulkan )
             log_line( "[NXGL] the surface presents at %dx%d in the window's %ux%u", width, height, kept_w, kept_h );
         took_dimensions = 0;
     }
-    wine_nx_screen_crop_4_3 = 0;
+    __atomic_store_n( &wine_nx_screen_crop_4_3, 0, __ATOMIC_RELAXED );
     if (window && vulkan)
         nwindowSetCrop( window, 0, 0, 0, 0 );  /* the Vulkan buffers carry their own crop */
     else if (window && took_dimensions && screen_scaling_crops_4_3( wine_nx_scaling_mode ))
@@ -1544,7 +1570,7 @@ static void *wine_nx_screen_acquire( int width, int height, int vulkan )
         Result rc = nwindowSetCrop( window, left, top, left + crop_w, top + crop_h );
 
         if (R_FAILED(rc)) log_line( "[NXGL] the crop would not take: error 0x%x", rc );
-        else wine_nx_screen_crop_4_3 = 1;
+        else __atomic_store_n( &wine_nx_screen_crop_4_3, 1, __ATOMIC_RELAXED );
         log_line( "[NXGL] the crop is %d,%d-%d,%d", left, top, left + crop_w, top + crop_h );
     }
     else if (window) nwindowSetCrop( window, 0, 0, 0, 0 );
@@ -1808,16 +1834,11 @@ static void wine_nx_cursor_move( int x, int y )
     wine_nx_compositor_cursor( x, y, visible );
 }
 
-/* Where the arrow goes on the panel, for a picture the compositor does not
- * draw: a program's own OpenGL or Vulkan frame has no compositor over it, so
- * the arrow is copied into that picture just before it is shown
- * (dlls/win32u/winnx_opengl.c and vulkan.c).  Worked out from the desktop
- * point and the fit in force now, so the arrow is where the compositor would
- * have drawn it; 0 when the program hid it. */
 /* The arrow's panel pixel, from the desktop point and the fit in force now.
  * Called with wine_nx_fb_mutex held, which takes wine_nx_fit_mutex inside it:
- * nothing takes them the other way round (wine_nx_cursor_move maps first and
- * locks the arrow after), so the two cannot deadlock. */
+ * nothing takes them the other way round (wine_nx_cursor_move maps before it
+ * locks the arrow, and the fit is only ever taken on its own), so a frame
+ * cannot deadlock on the two. */
 static void wine_nx_cursor_place_locked( void )
 {
     int px, py;
@@ -1826,6 +1847,12 @@ static void wine_nx_cursor_place_locked( void )
     pointer_cursor_place( &wine_nx_cursor, px, py );
 }
 
+/* Where the arrow goes on the panel, for a picture the compositor does not
+ * draw: a program's own OpenGL or Vulkan frame has no compositor over it, so
+ * the arrow is copied into that picture just before it is shown
+ * (dlls/win32u/winnx_opengl.c and vulkan.c).  Worked out from the desktop
+ * point and the fit in force now, so the arrow is where the compositor would
+ * have drawn it; 0 when the program hid it. */
 int wine_nx_cursor_panel( int *x, int *y )
 {
     double screen_x, screen_y;
@@ -1846,6 +1873,33 @@ int wine_nx_cursor_panel( int *x, int *y )
     if (py < 0) py = 0;
     if (x) *x = px;
     if (y) *y = py;
+    return 1;
+}
+
+/* Which rectangle of a surface the panel shows, in the surface's own pixels:
+ * all of it, except for an OpenGL window with the widescreen hack on, where the
+ * display shows only the central 4:3 of the buffer stretched over the panel
+ * (wine_nx_screen_acquire).  The picture the arrow goes into is that rectangle
+ * (wine_nx_cursor_panel, pointer_overlay.h).  Returns 0 when there is no
+ * picture to speak of. */
+int wine_nx_surface_picture( int surface_w, int surface_h, int *x, int *y, int *w, int *h )
+{
+    int crop_w, crop_h;
+
+    if (surface_w < 1 || surface_h < 1) return 0;
+    *x = 0;
+    *y = 0;
+    *w = surface_w;
+    *h = surface_h;
+    if (!__atomic_load_n( &wine_nx_screen_crop_4_3, __ATOMIC_RELAXED )) return 1;
+    crop_w = surface_w;
+    crop_h = surface_h;
+    screen_crop_4_3( &crop_w, &crop_h );
+    if (crop_w < 1 || crop_h < 1) return 1;
+    *x = (surface_w - crop_w) / 2;
+    *y = (surface_h - crop_h) / 2;
+    *w = crop_w;
+    *h = crop_h;
     return 1;
 }
 

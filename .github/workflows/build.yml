@@ -92,6 +92,14 @@ jobs:
       - name: Hardware cursor over a Vulkan picture
         run: python3 horizon-wine/tests/check_cursor_vulkan.py
 
+      # Where the runtime draws the arrow: the panel pixel, through the fit in
+      # force, for a display mode, a surface that took the screen, a picture
+      # with bars at the sides; and the pointer following a screen that changed
+      # size under it. runtime.c's own functions against mocks and the real
+      # screen_fit.h.
+      - name: Hardware cursor placement
+        run: python3 horizon-wine/tests/check_cursor_mapping.py
+
       # A screen that shows no frame, read from the numbers the stall report
       # already has: which of the ways a stuck swap leaves it empty is, so the
       # log says why and not only how many slots there are.

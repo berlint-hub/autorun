@@ -50,8 +50,11 @@ extern void wine_nx_runtime_trace( const char *msg ) __attribute__((weak));
 extern int wine_nx_screenshot_requested( void ) __attribute__((weak));
 extern int wine_nx_screenshot_take( const void *pixels, int width, int height, int stride_px, int format ) __attribute__((weak));
 /* The arrow whose tip is at this panel pixel (pointer_cursor.h), for a picture
- * the compositor does not draw. */
+ * the compositor does not draw, and which part of the surface the panel shows
+ * (all of it, except for the widescreen hack's crop). */
 extern int wine_nx_cursor_panel( int *x, int *y ) __attribute__((weak));
+extern int wine_nx_surface_picture( int surface_w, int surface_h, int *x, int *y, int *w, int *h )
+    __attribute__((weak));
 
 static const struct egl_platform *egl;
 static const struct opengl_funcs *funcs;
@@ -763,13 +766,21 @@ static void nx_cursor_draw( struct opengl_drawable *base )
     EGLint width = 0, height = 0;
     EGLContext context;
     int px, py, count, i, created;
+    int picture_x = 0, picture_y = 0, picture_w, picture_h;
 
     if (!&wine_nx_cursor_panel || !wine_nx_cursor_panel( &px, &py )) return;
     if (!funcs->p_eglQuerySurface( egl->display, base->surface, EGL_WIDTH, &width ) ||
         !funcs->p_eglQuerySurface( egl->display, base->surface, EGL_HEIGHT, &height ) ||
         width < 1 || height < 1)
         return;
-    if (!(count = pointer_overlay_runs( px, py, 1280, 720, width, height, runs ))) return;
+    /* The panel shows this rectangle of the surface: the whole of it, or the
+     * central 4:3 the display is cropping to when the widescreen hack is on. */
+    picture_w = width;
+    picture_h = height;
+    if (&wine_nx_surface_picture)
+        wine_nx_surface_picture( width, height, &picture_x, &picture_y, &picture_w, &picture_h );
+    if (!(count = pointer_overlay_runs( px, py, 1280, 720, picture_x, picture_y, picture_w, picture_h, runs )))
+        return;
     if (!(context = funcs->p_eglGetCurrentContext())) return;
     if (!p_glBlitFramebuffer)
     {

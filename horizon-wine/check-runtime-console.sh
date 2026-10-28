@@ -25,6 +25,9 @@ CC="${CC:-clang}" python3 "$root/horizon-wine/tests/check_static_unix_libs.py"
 "${CC:-clang}" $flags -I"$root/horizon-wine/source" \
     "$root/horizon-wine/tests/pointer_overlay.c" -o "$build/pointer_overlay"
 "$build/pointer_overlay"
+# Where the arrow lands on the panel, and the pointer following a screen that
+# changed size under it.
+CC="${CC:-clang}" python3 "$root/horizon-wine/tests/check_cursor_mapping.py"
 "${CC:-clang}" $flags "$root/horizon-wine/tests/horizon_message_queue.c" -o "$build/message_queue"
 "$build/message_queue"
 "${CC:-clang}" $flags "$root/horizon-wine/tests/horizon_win_timers.c" -o "$build/win_timers"

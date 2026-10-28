@@ -115,6 +115,10 @@ extern int wine_nx_screenshot_take( const void *pixels, int width, int height, i
 /* The arrow whose tip is at this panel pixel (pointer_cursor.h): the compositor
  * has stepped aside for this program's surface, so nothing else draws it. */
 extern int wine_nx_cursor_panel( int *x, int *y ) __attribute__((weak));
+/* Which part of a surface the panel shows (all of it, unless the display is
+ * cropping: the widescreen hack's central 4:3). */
+extern int wine_nx_surface_picture( int surface_w, int surface_h, int *x, int *y, int *w, int *h )
+    __attribute__((weak));
 #endif
 
 /* The per-game "panel follows the game" bridge (horizon-wine/source/
@@ -4205,6 +4209,10 @@ struct nx_cursor_image
     void *pixels;
     int recorded;             /* the command buffer holds these runs */
     int recorded_px, recorded_py, recorded_count;
+    /* The picture the runs were worked out for: the whole image, or the part
+     * of it the panel shows.  The arrow's own rectangle is the same size in
+     * either, so the runs moving is what says the last copy is stale. */
+    int recorded_picture_x, recorded_picture_y, recorded_picture_w, recorded_picture_h;
 };
 
 struct nx_cursor_overlay
@@ -4246,7 +4254,8 @@ static void nx_cursor_free( struct vulkan_device *device, struct nx_cursor_overl
 /* The runs, in the image: each one copied from the arrow's own buffer. */
 static VkResult nx_cursor_record( struct vulkan_device *device, struct swapchain *swapchain, uint32_t i,
                                   const struct pointer_overlay_run *runs, int count, int px, int py,
-                                  int origin_x, int origin_y, struct mempool *pool )
+                                  int origin_x, int origin_y, int picture_x, int picture_y,
+                                  int picture_w, int picture_h, struct mempool *pool )
 {
     struct nx_cursor_overlay *cursor = swapchain->nx_cursor;
     struct nx_cursor_image *per = &cursor->per[i];
@@ -4305,6 +4314,10 @@ static VkResult nx_cursor_record( struct vulkan_device *device, struct swapchain
     per->recorded_px = px;
     per->recorded_py = py;
     per->recorded_count = count;
+    per->recorded_picture_x = picture_x;
+    per->recorded_picture_y = picture_y;
+    per->recorded_picture_w = picture_w;
+    per->recorded_picture_h = picture_h;
     return VK_SUCCESS;
 }
 
@@ -4399,27 +4412,36 @@ static void nx_cursor_present( struct vulkan_queue *queue, VkPresentInfoKHR *pre
     VkPipelineStageFlags *stages;
     uint32_t index, i;
     int px, py, count, origin_x, origin_y, width, height, r;
+    int picture_x = 0, picture_y = 0, picture_w, picture_h;
 
     if (present_info->swapchainCount != 1) return;
     swapchain = swapchain_from_handle( client_swapchains[0] );
     if (!swapchain->nx_osk_usable) return;
     if (!&wine_nx_cursor_panel || !wine_nx_cursor_panel( &px, &py )) return;
-    if (!(count = pointer_overlay_runs( px, py, 1280, 720, swapchain->nx_extent.width,
-                                        swapchain->nx_extent.height, runs )))
+    /* The panel shows this rectangle of the image: all of it, unless the
+     * display is cropping the buffer to its central 4:3. */
+    picture_w = swapchain->nx_extent.width;
+    picture_h = swapchain->nx_extent.height;
+    if (&wine_nx_surface_picture)
+        wine_nx_surface_picture( swapchain->nx_extent.width, swapchain->nx_extent.height,
+                                 &picture_x, &picture_y, &picture_w, &picture_h );
+    if (!(count = pointer_overlay_runs( px, py, 1280, 720, picture_x, picture_y, picture_w, picture_h, runs )))
         return;
     /* Where the arrow's own rectangle starts, and how large it is before the
      * picture's edges cut it: the runs are in the image's pixels.  The size is
      * the picture's scale of the arrow and nothing else -- worked out from the
      * tip, one pixel of movement would round it up or down, and the buffers
      * behind it would be made again on every frame the arrow crossed that
-     * pixel, with the queue waited out first. */
-    origin_x = (int)((long long)px * swapchain->nx_extent.width / 1280);
-    origin_y = (int)((long long)py * swapchain->nx_extent.height / 720);
-    width = (int)(((long long)POINTER_CURSOR_W * swapchain->nx_extent.width + 1279) / 1280);
-    height = (int)(((long long)POINTER_CURSOR_H * swapchain->nx_extent.height + 719) / 720);
+     * pixel, with the queue waited out first.  The runs only reach as far as
+     * the picture goes, so rounding up here cannot ask for a column or a row
+     * the image does not have. */
+    origin_x = picture_x + (int)((long long)px * picture_w / 1280);
+    origin_y = picture_y + (int)((long long)py * picture_h / 720);
+    width = (int)(((long long)POINTER_CURSOR_W * picture_w + 1279) / 1280);
+    height = (int)(((long long)POINTER_CURSOR_H * picture_h + 719) / 720);
     if (width < 1 || height < 1) return;
-    if (origin_x + width > (int)swapchain->nx_extent.width) width = (int)swapchain->nx_extent.width - origin_x;
-    if (origin_y + height > (int)swapchain->nx_extent.height) height = (int)swapchain->nx_extent.height - origin_y;
+    if (origin_x + width > picture_x + picture_w) width = picture_x + picture_w - origin_x;
+    if (origin_y + height > picture_y + picture_h) height = picture_y + picture_h - origin_y;
     if (width < 1 || height < 1) return;
     if (!nx_cursor_prepare( device, swapchain, queue->info.queueFamilyIndex, width, height )) return;
     index = present_info->pImageIndices[0];
@@ -4445,8 +4467,15 @@ static void nx_cursor_present( struct vulkan_queue *queue, VkPresentInfoKHR *pre
                 pixels[(size_t)by * width + bx] = pointer_overlay_pixel( run, bx - bx0 );
             }
     }
-    if (!per->recorded || per->recorded_px != px || per->recorded_py != py || per->recorded_count != count)
-        if (nx_cursor_record( device, swapchain, index, runs, count, px, py, origin_x, origin_y, pool ))
+    /* The runs, in the image's pixels: they change with the arrow's place and
+     * with the picture's size, so both are what says the last copy still
+     * holds.  A picture that changed size without changing the arrow's own
+     * rectangle would otherwise be left with the copy made for the old one. */
+    if (!per->recorded || per->recorded_px != px || per->recorded_py != py || per->recorded_count != count ||
+        per->recorded_picture_x != picture_x || per->recorded_picture_y != picture_y ||
+        per->recorded_picture_w != picture_w || per->recorded_picture_h != picture_h)
+        if (nx_cursor_record( device, swapchain, index, runs, count, px, py, origin_x, origin_y,
+                              picture_x, picture_y, picture_w, picture_h, pool ))
             return;
 
     if (!(stages = mem_alloc( pool, sizeof(*stages) * (present_info->waitSemaphoreCount + 1) ))) return;

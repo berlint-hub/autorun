@@ -92,6 +92,8 @@ static struct opengl_funcs *funcs;
  * must leave the overlay doing nothing rather than not link. */
 extern int wine_nx_cursor_panel( int *x, int *y ) __attribute__((weak));
 extern void wine_nx_runtime_trace( const char *msg ) __attribute__((weak));
+extern int wine_nx_surface_picture( int surface_w, int surface_h, int *x, int *y, int *w, int *h )
+    __attribute__((weak));
 
 typedef void (*PFN_glGenFramebuffers)(GLint, GLuint *);
 typedef void (*PFN_glBindFramebuffer)(GLenum, GLuint);
@@ -277,13 +279,26 @@ int wine_nx_cursor_panel( int *x, int *y )
     *y = cursor_panel_y;
     return 1;
 }
+
+/* Which part of the surface the panel shows: all of it, unless the test says
+ * the display is cropping it (the widescreen hack's central 4:3). */
+static int shown_x, shown_y, shown_w, shown_h;
+int wine_nx_surface_picture( int surface_w, int surface_h, int *x, int *y, int *w, int *h )
+{
+    *x = shown_x;
+    *y = shown_y;
+    *w = shown_w ? shown_w : surface_w;
+    *h = shown_h ? shown_h : surface_h;
+    return 1;
+}
 '''
 
 checks = r'''
 static void check_runs( int px, int py, int width, int height )
 {
     struct pointer_overlay_run runs[POINTER_OVERLAY_MAX_RUNS];
-    int count = pointer_overlay_runs( px, py, 1280, 720, width, height, runs ), i;
+    int count = pointer_overlay_runs( px, py, 1280, 720, shown_x, shown_y,
+                                      shown_w ? shown_w : width, shown_h ? shown_h : height, runs ), i;
 
     assert(count > 0 && (unsigned int)count == program.copies);
     for (i = 0; i < count; i++)
@@ -300,8 +315,10 @@ static void check_runs( int px, int py, int width, int height )
         assert(program.copy_dst[i][1] == height - run->y1);
         assert(program.copy_dst[i][2] == run->x1);
         assert(program.copy_dst[i][3] == height - run->y0);
-        /* Nothing of the arrow is copied twice or onto the picture's edge. */
-        assert(run->x0 >= 0 && run->x1 <= width && run->y0 >= 0 && run->y1 <= height);
+        /* Nothing of the arrow is copied onto the surface's edge, and inside
+         * the part of it the panel shows. */
+        assert(run->x0 >= shown_x && run->x1 <= shown_x + (shown_w ? shown_w : width));
+        assert(run->y0 >= shown_y && run->y1 <= shown_y + (shown_h ? shown_h : height));
         assert(run->x0 < run->x1 && run->y0 < run->y1);
     }
 }
@@ -372,6 +389,23 @@ int main(void)
     nx_cursor_draw( &drawable );
     check_runs( 300, 200, 800, 600 );
     check_state_restored();
+
+    /* The widescreen hack: the display shows the central 4:3 of a 1280x720
+     * buffer, stretched over the panel.  The arrow belongs on that rectangle,
+     * at that rectangle's scale, not on the whole buffer. */
+    program.copies = 0;
+    surface_width = 1280; surface_height = 720;
+    shown_x = 160; shown_w = 960;
+    nx_cursor_draw( &drawable );
+    check_runs( cursor_panel_x, cursor_panel_y, 1280, 720 );
+    check_state_restored();
+    /* A panel pixel at the far side is a pixel of the picture, never past it. */
+    program.copies = 0;
+    cursor_panel_x = 1279;
+    nx_cursor_draw( &drawable );
+    check_runs( 1279, cursor_panel_y, 1280, 720 );
+    cursor_panel_x = 100;
+    shown_x = shown_w = 0;
 
     /* A context that is new to the overlay takes an old one's slot: the names
      * belong to the context that is gone, so they are made again, not used. */

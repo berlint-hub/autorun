@@ -129,6 +129,8 @@ static struct swapchain *swapchain_from_handle( VkSwapchainKHR handle );
 /* Weak in vulkan.c: a runtime without the arrow leaves the overlay doing
  * nothing rather than not linking. */
 extern int wine_nx_cursor_panel( int *x, int *y ) __attribute__((weak));
+extern int wine_nx_surface_picture( int surface_w, int surface_h, int *x, int *y, int *w, int *h )
+    __attribute__((weak));
 extern void nx_vk_trace( const char *format, ... ) __attribute__((weak));
 '''
 
@@ -167,6 +169,18 @@ int wine_nx_cursor_panel( int *x, int *y )
     if (!cursor_visible) return 0;
     *x = cursor_panel_x;
     *y = cursor_panel_y;
+    return 1;
+}
+
+/* Which part of the image the panel shows: all of it, unless the test says the
+ * display is cropping it (the widescreen hack's central 4:3). */
+static int shown_x, shown_y, shown_w, shown_h;
+int wine_nx_surface_picture( int surface_w, int surface_h, int *x, int *y, int *w, int *h )
+{
+    *x = shown_x;
+    *y = shown_y;
+    *w = shown_w ? shown_w : surface_w;
+    *h = shown_h ? shown_h : surface_h;
     return 1;
 }
 
@@ -277,8 +291,10 @@ static void check_recorded( uint32_t index, int px, int py, uint32_t width, uint
 {
     struct pointer_overlay_run runs[POINTER_OVERLAY_MAX_RUNS];
     struct nx_cursor_overlay *cursor = mock_swapchain.nx_cursor;
-    int count = pointer_overlay_runs( px, py, 1280, 720, width, height, runs ), i;
-    int origin_x = (int)((long long)px * width / 1280), origin_y = (int)((long long)py * height / 720);
+    int picture_w = shown_w ? shown_w : (int)width, picture_h = shown_h ? shown_h : (int)height;
+    int count = pointer_overlay_runs( px, py, 1280, 720, shown_x, shown_y, picture_w, picture_h, runs ), i;
+    int origin_x = shown_x + (int)((long long)px * picture_w / 1280);
+    int origin_y = shown_y + (int)((long long)py * picture_h / 720);
 
     assert(count > 0 && (uint32_t)count == recorded.regions);
     assert(recorded.image == cursor->images[index]);
@@ -313,9 +329,11 @@ static void check_pixels( uint32_t index, int px, int py, uint32_t width, uint32
     struct pointer_overlay_run runs[POINTER_OVERLAY_MAX_RUNS];
     struct nx_cursor_overlay *cursor = mock_swapchain.nx_cursor;
     const uint32_t *pixels = cursor->per[index].pixels;
-    int count = pointer_overlay_runs( px, py, 1280, 720, width, height, runs ), i;
-    int origin_x = (int)((long long)px * width / 1280), origin_y = (int)((long long)py * height / 720);
-    int exact = (width == 1280 && height == 720);
+    int picture_w = shown_w ? shown_w : (int)width, picture_h = shown_h ? shown_h : (int)height;
+    int count = pointer_overlay_runs( px, py, 1280, 720, shown_x, shown_y, picture_w, picture_h, runs ), i;
+    int origin_x = shown_x + (int)((long long)px * picture_w / 1280);
+    int origin_y = shown_y + (int)((long long)py * picture_h / 720);
+    int exact = (picture_w == 1280 && picture_h == 720);
     int opaque = 0;
 
     for (i = 0; i < count; i++)
@@ -445,6 +463,44 @@ int main(void)
     check_recorded( 0, 1270, 710, 640, 480 );
     check_pixels( 0, 1270, 710, 640, 480 );
 
+    /* The widescreen hack: the display shows the central 4:3 of the image, so
+     * the arrow goes on that rectangle, scaled with it.  A 1280x720 image
+     * cropped to 960x720 makes the arrow 9x19 pixels of it, not 12x19. */
+    mock_swapchain.nx_extent.width = 1280;
+    mock_swapchain.nx_extent.height = 720;
+    shown_x = 160; shown_w = 960;
+    cursor_panel_x = 100; cursor_panel_y = 50;
+    reset_recorded();
+    mock_swapchain.nx_cursor->per[0].recorded = 0;
+    present( 0 );
+    assert(prepare_calls == 4 && prepare_width == 9 && prepare_height == 19);
+    check_recorded( 0, 100, 50, 1280, 720 );
+    check_pixels( 0, 100, 50, 1280, 720 );
+    /* At the picture's right edge: the copy stays inside the 4:3, whichever
+     * part of the image the arrow's tip is over. */
+    cursor_panel_x = 1270; cursor_panel_y = 710;
+    mock_swapchain.nx_cursor->per[0].recorded = 0;
+    reset_recorded();
+    present( 0 );
+    assert(recorded.regions > 0 && recorded.regions <= POINTER_OVERLAY_MAX_RUNS);
+    {
+        struct pointer_overlay_run edge[POINTER_OVERLAY_MAX_RUNS];
+        int n = pointer_overlay_runs( cursor_panel_x, cursor_panel_y, 1280, 720, shown_x, shown_y,
+                                      960, 720, edge ), i;
+        assert(n > 0);
+        for (i = 0; i < n; i++)
+        {
+            assert(edge[i].x0 >= 160 && edge[i].x1 <= 160 + 960);
+            assert(edge[i].y0 >= 0 && edge[i].y1 <= 720);
+        }
+    }
+    check_recorded( 0, 1270, 710, 1280, 720 );
+    check_pixels( 0, 1270, 710, 1280, 720 );
+    cursor_panel_x = 100; cursor_panel_y = 50;
+    shown_x = shown_w = 0;
+    mock_swapchain.nx_cursor->per[0].recorded = 0;
+    reset_recorded();
+
     /* The picture's other image: its own command buffer, buffer and
      * semaphore. */
     mock_swapchain.nx_extent.width = 1280;
@@ -456,6 +512,21 @@ int main(void)
     assert(recorded.buffer == mock_swapchain.nx_cursor->per[1].buffer);
     assert(recorded.resets == 1 && recorded.copies == 1 && recorded.submits == 1);
     check_recorded( 1, cursor_panel_x, cursor_panel_y, 1280, 720 );
+
+    /* A picture that changed size without changing the arrow's own rectangle:
+     * the runs land on other pixels, so the copy is recorded again even though
+     * the arrow and the buffers behind it are the same size. */
+    mock_swapchain.nx_extent.width = 1279;
+    mock_swapchain.nx_extent.height = 720;
+    reset_recorded();
+    present( 1 );
+    assert(recorded.resets == 1 && recorded.copies == 1);
+    check_recorded( 1, cursor_panel_x, cursor_panel_y, 1279, 720 );
+    mock_swapchain.nx_extent.width = 1280;
+    mock_swapchain.nx_extent.height = 720;
+    reset_recorded();
+    present( 1 );
+    assert(recorded.resets == 1);
 
     /* The arrow moved: the same image's copy is recorded again, and one that
      * has not moved is not. */
