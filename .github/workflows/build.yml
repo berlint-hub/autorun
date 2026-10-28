@@ -29,6 +29,12 @@ jobs:
       - name: FEX payload source
         run: python3 horizon-wine/tests/check_fex_payload_source.py
 
+      # The FEX-2610 memory-layer patch: made against the pinned commit, and
+      # carrying this repository's ABI headers byte for byte rather than a
+      # second copy that can drift. No FEX tree is needed for either.
+      - name: FEX 2610 memory patch
+        run: python3 horizon-wine/tests/check_fex_2610_patch.py
+
       - name: Input profiles
         run: |
           cc -std=gnu11 -Wall -Wextra -Werror -O1 -g \

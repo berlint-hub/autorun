@@ -555,7 +555,7 @@ changes, and fails if the pinned text moves.
 | `dlls/winebox64`, `dlls/winebox64ec` | x86 WoW64 and AMD64 ARM64EC CPU DLLs |
 | `horizon-wine/source` | Runtime: startup, launcher, compositor, Box64 engine, profiler, audio and XInput backends, forwarder installer |
 | `horizon-wine/tests` | Host, PE32 and PE32+ tests |
-| `horizon-wine/tools` | Packagers and game setups |
+| `horizon-wine/fex` | The ABI the CPU modules are built against, the patches applied to FEX, and `builder-handover.md`, which is what a release builder is given |
 
 ## Limits
 

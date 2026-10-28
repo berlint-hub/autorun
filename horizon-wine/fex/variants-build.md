@@ -124,33 +124,38 @@ carry what the FEX work needs to build it on its own:
 A proposal in that shape is something the FEX work can build and publish
 without a round trip; anything less comes back as a question.
 
-## Why the FEX-2610 port is not the variant yet
+## The FEX-2610 port, and the patch that makes it usable
 
-`berlint-hub/FEX@b8674872` (the `arena/799d045b-fex` branch) is FEX-2610
-with a Horizon port whose **memory layer is still fallback stubs**, and the
-stubs fault on hardware: `Source/Windows/Common/Horizon.cpp` only answers
-address-space questions, `CRT/HorizonHeap.cpp` returns the pointer unchanged
-from `HorizonWritableAddress` (no writable alias for the W^X code buffers)
-and flushes with `__builtin___clear_cache`, which does nothing on Windows —
-so translated code is executed without the I-cache ever being synchronized
-and dies with `STATUS_ILLEGAL_INSTRUCTION` at the first translations
-(reproduced on the Switch, `libwow64fex-opt.dll` from that source).
+`berlint-hub/FEX@6ec29a2e` is FEX-2610 with the Horizon port, and its
+**memory layer is fallback stubs**: `Source/Windows/Common/Horizon.cpp` only
+answers address-space questions, `CRT/HorizonHeap.cpp` hands the pointer back
+unchanged from `HorizonWritableAddress` (there is no writable alias for the
+W^X code buffers) and flushes with `__builtin___clear_cache`, which does
+nothing on Windows -- so translated code runs without the I-cache ever being
+synchronized, and the module dies with `STATUS_ILLEGAL_INSTRUCTION` at its
+first translations (reproduced on the Switch, a module from that source).
 
-The working layer is `horizon.patch`'s `Source/Windows/Common/Horizon.cpp`:
-the JIT buffers are allocated through the runtime's unixlib
-(`WINE_NX_FEX_ALLOC`, a readable-executable mapping and its writable alias
-published to `jit_registry.h`'s registry), writes go through
-`HorizonWritableAddress` to the alias, and `HorizonFlushICache` calls
-`WINE_NX_FEX_FLUSH`, the runtime's real cache maintenance. The compile fixes
-that port still needs are kept in `tegra-x1-fixes.patch` (declarations in
-`Horizon.h` instead of inline definitions, the `SupportsAVX256` line
-FEX-2610 dropped, `CodeBuffer::Contains`); what it still owes is that
-allocation/flush/protect layer — `HorizonAllocateJit`, `HorizonFreeJit`,
-`HorizonProtectCode` (the SMC hooks `InvalidationTracker` shows in
-`horizon.patch`), and the CRT heap over `WINE_NX_FEX_ALLOC` — wired from
-`SharedCodeBufferManager` and the dispatcher. When a FEX tree carries all of
-that, it can become the `fex-opt` source the way `fex-variant-release.yml`
-describes.
+`fex-2610-horizon-memory.patch`, in this directory, supplies the layer that
+works: JIT buffers allocated through the runtime's unixlib
+(`WINE_NX_FEX_ALLOC`, a readable-executable mapping with its writable alias
+in `jit_registry.h`'s registry), writes through `HorizonWritableAddress` to
+the alias, an I-cache flush through `WINE_NX_FEX_FLUSH`, the W^X transition
+through `WINE_NX_FEX_PROTECT_CODE` (the SMC hooks `InvalidationTracker`
+needs), and the CRT heap over `WINE_NX_FEX_HEAP_ALLOC`. It is the layer
+`horizon.patch` carries for FEX-2609, ported onto FEX-2610's source: the
+`CodeBuffer` constructor grew a `ShouldBeNamed` argument, the CRT allocator
+selection moved into `HorizonHeap.cpp`, and the ARM64EC thread entry is a
+different function -- each placed by reading that tree, which is why what has
+been compiled and what has not is stated plainly.
+
+The compile fixes that port used to need on its own (`tegra-x1-fixes.patch`:
+declarations in `Horizon.h` instead of inline definitions, the
+`SupportsAVX256` line FEX-2610 dropped, `CodeBuffer::Contains`) are already
+in `6ec29a2e`, together with the Tegra X1 tuning (`FEX_TUNE_TEGRA_X1`) and
+the CMake plumbing. What a builder needs beyond the tree is the patch, the
+ABI headers from this directory, and the two compiles -- see
+`builder-handover.md`, which is the note to hand over.
+
 
 ## A/B on the Switch
 
