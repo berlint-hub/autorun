@@ -1,11 +1,13 @@
 /* Copyright 2026 Wine-NX contributors. LGPL-2.1-or-later.
  * The screen compositor; see compositor.h. */
+#include <errno.h>
 #include <limits.h>
 #include <pthread.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <unistd.h>
 
 #include "compositor.h"
@@ -238,7 +240,7 @@ void wine_nx_compositor_cursor( int x, int y, int visible )
  * wait is a join, which is also what gives its stack back to the heap: libnx
  * has no pthread_detach, and the loader cannot reset a heap that still lends
  * pages to a thread. */
-void wine_nx_compositor_stop( void )
+int wine_nx_compositor_stop( void )
 {
     pthread_t thread;
     int started, i;
@@ -254,23 +256,46 @@ void wine_nx_compositor_stop( void )
     thread = comp.thread;
     comp.thread_started = 0;
     pthread_mutex_unlock( &comp.lock );
-    if (!started) return;
+    if (!started) return 1;
     /* Outside the lock: the presenter takes it on its way out. The wait is
      * bounded, because a presenter stuck in the display driver must not stop
-     * the program from closing; its stack is then reported as still lent. */
+     * the program from closing; its stack is then reported as still lent, and
+     * the way out is told so. */
     for (i = 0; i < 300 && !__atomic_load_n( &comp.thread_ended, __ATOMIC_ACQUIRE ); i++)
         usleep( 10000 );
-    if (__atomic_load_n( &comp.thread_ended, __ATOMIC_ACQUIRE )) pthread_join( thread, NULL );
-    else comp_log( "[NXCOMP] the presenter did not end; its stack stays lent out" );
+    if (!__atomic_load_n( &comp.thread_ended, __ATOMIC_ACQUIRE ))
+    {
+        comp_log( "[NXCOMP] the presenter did not end; its stack stays lent out" );
+        return 0;
+    }
+    pthread_join( thread, NULL );
+    return 1;
 }
 
+/* Asks the presenter to hand the screen over and waits for it, but not for
+ * ever: a presenter that is stuck in the display driver -- in its own detach,
+ * or in the frame it was presenting -- would otherwise keep the program's own
+ * surface off the screen.  The screen is then taken anyway, and the log says
+ * whose picture may be left on the glass. */
 void wine_nx_compositor_suspend( void )
 {
+    struct timespec deadline;
+
+    clock_gettime( CLOCK_REALTIME, &deadline );
+    deadline.tv_sec += 3;
     pthread_mutex_lock( &comp.lock );
     comp.suspend = 1;
     pthread_cond_signal( &comp.wake );
-    while (comp.state == STATE_STARTING || (comp.state == STATE_RUNNING && !comp.suspended))
-        pthread_cond_wait( &comp.idle, &comp.lock );
+    for (;;)
+    {
+        if (comp.state != STATE_STARTING && (comp.state != STATE_RUNNING || comp.suspended)) break;
+        if (pthread_cond_timedwait( &comp.idle, &comp.lock, &deadline ) != ETIMEDOUT) continue;
+        /* Asked and not answered: the screen goes to the program anyway. */
+        if (comp.state == STATE_STARTING || (comp.state == STATE_RUNNING && !comp.suspended))
+            comp_log( "[NXCOMP] the presenter has not stepped aside in 3 s (%s); taking the screen anyway",
+                      comp.state == STATE_STARTING ? "still starting" : "still presenting" );
+        break;
+    }
     pthread_mutex_unlock( &comp.lock );
 }
 

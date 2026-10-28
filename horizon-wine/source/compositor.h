@@ -66,7 +66,8 @@ void wine_nx_compositor_redraw( void );
  * afford to wait on it. */
 unsigned int wine_nx_compositor_frames_fast( void );
 /* Ends the presenter thread and waits for it, before the program closes. */
-void wine_nx_compositor_stop( void );
+/* FALSE if the presenter did not end within its bound: its stack is still lent. */
+int wine_nx_compositor_stop( void );
 void wine_nx_compositor_suspend( void );
 void wine_nx_compositor_resume( void );
 

@@ -109,24 +109,26 @@ static void *wine_nx_input_thread( void *arg )
  * closed, and it has to be joined: libnx has no pthread_detach, and a thread
  * that was never joined keeps the heap pages of its stack, which the loader
  * cannot give back. */
-void wine_nx_input_thread_stop(void)
+/* Returns whether polling really ended. A thread stuck in the display driver
+ * must not stop the program from closing, but the way out has to know: its
+ * stack stays lent out, so the loader must not take the process back. */
+int wine_nx_input_thread_stop(void)
 {
     int i;
 
-    if (!__atomic_load_n( &wine_nx_input_thread_started, __ATOMIC_ACQUIRE )) return;
+    if (!__atomic_load_n( &wine_nx_input_thread_started, __ATOMIC_ACQUIRE )) return 1;
     __atomic_store_n( &wine_nx_input_thread_quit, 1, __ATOMIC_RELEASE );
-    /* Bounded: a thread stuck in the display driver must not stop the program
-     * from closing, and its stack is then reported as still lent out. */
     for (i = 0; i < 300 && !__atomic_load_n( &wine_nx_input_thread_ended, __ATOMIC_ACQUIRE ); i++)
         usleep( 10000 );
     if (!__atomic_load_n( &wine_nx_input_thread_ended, __ATOMIC_ACQUIRE ))
     {
         nxdrv_trace( "[NXINPUT] polling did not stop; its stack stays lent out", 0, 0, 0, 0 );
-        return;
+        return 0;
     }
     pthread_join( wine_nx_input_thread_id, NULL );
     __atomic_store_n( &wine_nx_input_thread_started, 0, __ATOMIC_RELEASE );
     nxdrv_trace( "[NXINPUT] background polling ended", 0, 0, 0, 0 );
+    return 1;
 }
 
 static void wine_nx_start_input_thread(void)

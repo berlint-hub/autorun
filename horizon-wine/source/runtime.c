@@ -1034,11 +1034,33 @@ void wine_nx_present_fit( int src_w, int src_h, int src_x, int src_y,
 
 /* An OpenGL drawable presents a buffer of its own and the display's scaler
  * stretches that over the panel, so whatever the Scaling setting says, the
- * picture on the glass is the stretched one and input has to map through it. */
+ * picture on the glass is the stretched one and input has to map through it.
+ * The one setting that does reach the glass is the 4:3 crop: nwindowSetCrop
+ * cuts the buffer before the scaler sees it (wine_nx_screen_acquire), and the
+ * fit has to cut the same part of the source. */
 void wine_nx_present_fit_stretched( int src_w, int src_h, int src_x, int src_y )
 {
-    wine_nx_present_fit_mode( SCREEN_SCALING_FULL, src_w, src_h, src_x, src_y,
-                              NULL, NULL, NULL, NULL );
+    static int told;
+
+    if (!told && wine_nx_scaling_mode != SCREEN_SCALING_FULL)
+    {
+        int x, y, w, h;
+
+        /* Said once, and only when the setting would have put the picture
+         * anywhere but over the whole panel: from the program's side an
+         * untouched setting and an ignored one look the same in the log. */
+        screen_fit_rect( wine_nx_scaling_mode, src_w, src_h, WINE_NX_FB_W, WINE_NX_FB_H, &x, &y, &w, &h );
+        if (w != WINE_NX_FB_W || h != WINE_NX_FB_H)
+        {
+            told = 1;
+            log_line( "[NXGL] the Scaling setting does not reach an OpenGL surface: the display stretches "
+                      "its %dx%d picture over the %dx%d panel, and input maps through that",
+                      src_w, src_h, WINE_NX_FB_W, WINE_NX_FB_H );
+        }
+    }
+    wine_nx_present_fit_mode( screen_scaling_crops_4_3( wine_nx_scaling_mode ) ? wine_nx_scaling_mode
+                                                                              : SCREEN_SCALING_FULL,
+                              src_w, src_h, src_x, src_y, NULL, NULL, NULL, NULL );
 }
 
 /* The transform before any present has set one: the whole desktop placed on
@@ -1135,7 +1157,13 @@ static void wine_nx_fb_update_present_hint(void)
                       __ATOMIC_RELEASE );
 }
 static int wine_nx_gl_window;  /* an OpenGL window surface owns the screen's NWindow */
-static int wine_nx_vulkan_window;  /* a Vulkan surface owns it (DXVK's presents) */
+/* Counted: a program can have more than one Vulkan surface at a time -- two
+ * windows, and the new swapchain's surface of a device reset made before the
+ * one it replaces is destroyed -- and the screen goes back only when the last
+ * of them is gone.  With one flag, destroying the older surface handed the
+ * screen to the compositor while the program was still presenting on the
+ * newer one. */
+static int wine_nx_vulkan_window;
 /* Controller and touchscreen state, guarded by wine_nx_pointer_mutex.  The
  * pointer lives in desktop coordinates (what Wine and the program see); a
  * touch arrives in panel pixels and is mapped through the present's fit. */
@@ -1357,14 +1385,17 @@ static void *wine_nx_screen_acquire( int width, int height, int vulkan )
 
     pthread_mutex_lock( &wine_nx_fb_mutex );
     if (vulkan && wine_nx_vulkan_window)
-        window = nwindowGetDefault();  /* a swapchain reset reuses the screen it has */
+    {
+        wine_nx_vulkan_window++;       /* a swapchain reset reuses the screen it has */
+        window = nwindowGetDefault();
+    }
     else if (vulkan && wine_nx_gl_window)
     {
         /* Take the screen over from the OpenGL surface holding it: it is not
          * the presenter when the program presents through Vulkan. */
         taken_over = 1;
         wine_nx_gl_window = 0;
-        wine_nx_vulkan_window = 1;
+        wine_nx_vulkan_window++;
         window = nwindowGetDefault();
     }
     else if (!wine_nx_gl_window && !wine_nx_vulkan_window && !wine_nx_fb_lock_depth)
@@ -1386,7 +1417,7 @@ static void *wine_nx_screen_acquire( int width, int height, int vulkan )
             wine_nx_console_active = 0;
         }
         window = nwindowGetDefault();
-        if (vulkan) wine_nx_vulkan_window = 1;
+        if (vulkan) wine_nx_vulkan_window++;
         else wine_nx_gl_window = 1;
     }
     pthread_mutex_unlock( &wine_nx_fb_mutex );
@@ -1523,11 +1554,8 @@ void wine_nx_vulkan_release_window(void)
     int give_back = 0;
 
     pthread_mutex_lock( &wine_nx_fb_mutex );
-    if (wine_nx_vulkan_window)
-    {
-        wine_nx_vulkan_window = 0;
+    if (wine_nx_vulkan_window && !--wine_nx_vulkan_window)
         give_back = 1;
-    }
     pthread_mutex_unlock( &wine_nx_fb_mutex );
     if (give_back) wine_nx_screen_return();
 }
@@ -4188,7 +4216,17 @@ static int device_regions( void )
  * counts as one open of the driver session. Nothing may draw afterwards. */
 static void release_screen_buffers( void )
 {
-    pthread_mutex_lock( &wine_nx_fb_mutex );
+    int i;
+
+    /* Bounded: a thread stuck in a present holds this lock, and the way out is
+     * already on its last steps. The buffers are then left with the driver,
+     * and the log says which lock kept them. */
+    for (i = 0; i < 300 && pthread_mutex_trylock( &wine_nx_fb_mutex ); i++) svcSleepThread( 10000000LL );
+    if (i == 300)
+    {
+        log_line( "[EXIT] the screen's lock is held by a thread that is stuck; its buffers stay with the driver" );
+        return;
+    }
     if (wine_nx_fb_ready)
     {
         framebufferClose( &wine_nx_fb );
@@ -4731,11 +4769,22 @@ static int return_to_launcher( void )
      * to stop at, and while it runs it holds the heap pages of its stack. */
     {
         /* dlls/win32u/winnx_drv.c: polls the sticks and presents the screen. */
-        extern void wine_nx_input_thread_stop( void ) __attribute__((weak));
+        extern int wine_nx_input_thread_stop( void ) __attribute__((weak));
 
-        if (&wine_nx_input_thread_stop) wine_nx_input_thread_stop();
+        /* A thread of either of these that would not stop is still holding the
+         * pages of its stack, and is stuck in the display driver besides: the
+         * process must not be handed back to the loader under it. */
+        if (&wine_nx_input_thread_stop && !wine_nx_input_thread_stop())
+        {
+            log_line( "[EXIT] the input thread did not stop; the process is not handed back to the loader" );
+            still_lent = 1;
+        }
     }
-    wine_nx_compositor_stop();
+    if (!wine_nx_compositor_stop())
+    {
+        log_line( "[EXIT] the compositor's presenter did not stop; the process is not handed back to the loader" );
+        still_lent = 1;
+    }
     wine_nx_profile_stop();
 #ifdef WINE_NX_USB_STORAGE
     {

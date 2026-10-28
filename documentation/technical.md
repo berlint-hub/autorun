@@ -85,7 +85,13 @@ runtime; the full package now ships the Mesa 26 one.
   over the screen, kept in proportion with bars, by whole pixel steps, or with
   the central 4:3 stretched (`source/screen_fit.h`). The same rectangle places
   the compositor's windows and maps input, so what is shown and what is touched
-  agree. Only that rectangle is dispatched: the bars are cleared once, when a
+  agree. The setting reaches the Vulkan presents and the compositor; a program
+  that draws through OpenGL puts its buffer straight on the NWindow, and the
+  display's own scaler stretches that over the panel whatever the setting
+  says, so Aspect and Integer do not apply to it. Input then maps through that
+  stretch (`wine_nx_present_fit_stretched`) instead of the setting, and the
+  first swap says so in the log when the setting asked for something else.
+  Only that rectangle is dispatched: the bars are cleared once, when a
   swapchain image is first shown, and a frame after that writes the picture
   alone, with `vkCmdDispatchBase` starting the workgroup grid where the picture
   starts (`record_compute_cmd`). The earlier runtime on
@@ -224,6 +230,24 @@ runtime; the full package now ships the Mesa 26 one.
   size the surface presents at read from the swap itself
   (`wine_nx_gl_swap_surface`, `dlls/win32u/winnx_opengl.c`). A stuck first swap
   used to leave the numbers and no conclusion, which cost a run to read.
+- **The screen goes back when the last surface does.** A program can hold more
+  than one Vulkan surface at a time -- two windows, and the surface of a device
+  reset made before the one it replaces is destroyed -- and the runtime counted
+  them with one flag. Destroying the older surface therefore handed the screen
+  to the compositor, released the window's buffers and left the newer one
+  presenting into a screen it no longer had. The holders are counted now, and
+  the screen goes back with the last of them (`wine_nx_vulkan_window`,
+  `source/runtime.c`).
+- **Nothing at the way out waits without an end.** A presenter or an input
+  thread stuck in the display driver must not keep the program from closing,
+  and one that is asked to hand the screen over must not keep a program's own
+  surface off it: the hand-over is bounded at three seconds and the screen is
+  taken anyway, with the log naming what did not step aside. A thread that
+  would not end leaves its stack lent, so the way out no longer hands the
+  process back to the loader when one does not (`wine_nx_compositor_stop` and
+  `wine_nx_input_thread_stop` answer, `return_to_launcher` acts on it), and the
+  screen's own lock is taken at the end with a bound rather than forever
+  (`release_screen_buffers`).
 - **The message loop's clock is not free.** Every message loop turn asks for a
   performance counter tick to decide whether to poll the driver, and on Horizon
   a read of that counter is the one system call the runtime deliberately makes
