@@ -82,7 +82,24 @@ int main(void)
     s.surface_has_screen = 0;
     s.owner = NXGL_OWNER_VULKAN;
     expect_verdict( "surface without the screen", s, NXGL_SWAP_NO_SCREEN );
-    expect_contains( "surface without the screen", s, "Vulkan", "offscreen" );
+    expect_contains( "surface without the screen", s, "a Vulkan surface", "offscreen" );
+
+    /* The publisher only publishes from a swap that had the screen when it
+     * began, so the live owner is what says whether it still does: a Vulkan
+     * surface taking the screen with an OpenGL swap open leaves that present
+     * nowhere to go, and that is a different bug from the driver hanging. */
+    s = healthy();
+    s.owner = NXGL_OWNER_VULKAN;
+    expect_verdict( "screen taken by Vulkan", s, NXGL_SWAP_NO_SCREEN );
+    expect_contains( "screen taken by Vulkan", s, "went to a Vulkan surface", "no present can finish" );
+    s = healthy();
+    s.owner = NXGL_OWNER_COMPOSITOR;
+    expect_verdict( "screen back to the compositor", s, NXGL_SWAP_NO_SCREEN );
+    expect_contains( "screen back to the compositor", s, "went to the compositor", NULL );
+    s = healthy();
+    s.owner = NXGL_OWNER_NONE;
+    expect_verdict( "screen given back", s, NXGL_SWAP_NO_SCREEN );
+    expect_contains( "screen given back", s, "given back since it began", NULL );
 
     s = healthy();
     s.connected = 0;

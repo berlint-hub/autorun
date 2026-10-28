@@ -1459,15 +1459,20 @@ int wine_nx_vulkan_owns_screen( void )
 }
 
 /* Who holds the screen, for the stall report's verdict on a swap that has not
- * come back: the program's own OpenGL, a Vulkan surface, the compositor, or
- * nobody at all (the framebuffer or the console). The flags are read without
- * the display lock, because a report that waits for it on a stuck run would
- * never be written; each is a word, and the answer only has to be close. */
+ * come back: the program's own OpenGL, a Vulkan surface, or nobody (the
+ * framebuffer, the console, the compositor). Two words, read without any lock:
+ * the report exists for the run where something is stuck, and a report that
+ * waits for a lock the stuck thread holds would never be written.
+ *
+ * The compositor is deliberately not asked. wine_nx_compositor_running() takes
+ * comp.lock, which the presenter holds across its work and can hold while it is
+ * stuck in the display driver -- the very case worth reporting. "Nobody" there
+ * is what the verdict needs: the screen is not the program's OpenGL, so a swap
+ * open on it cannot present, and the line says so without naming the holder. */
 static int wine_nx_screen_owner( void )
 {
-    if (wine_nx_vulkan_window) return NXGL_OWNER_VULKAN;
-    if (wine_nx_gl_window) return NXGL_OWNER_GL;
-    if (wine_nx_compositor_running()) return NXGL_OWNER_COMPOSITOR;
+    if (__atomic_load_n( &wine_nx_vulkan_window, __ATOMIC_RELAXED )) return NXGL_OWNER_VULKAN;
+    if (__atomic_load_n( &wine_nx_gl_window, __ATOMIC_RELAXED )) return NXGL_OWNER_GL;
     return NXGL_OWNER_NONE;
 }
 

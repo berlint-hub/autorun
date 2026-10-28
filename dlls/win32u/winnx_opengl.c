@@ -664,11 +664,16 @@ static BOOL nx_drawable_swap( struct opengl_drawable *base )
      * to leave the log with no line between the context and the stall report,
      * and the window it was swapped on was the question. */
     /* A query the driver did not answer leaves the size at zero, and zero is not
-     * a size the stall report can compare; the window it draws into is. */
+     * a size the stall report can compare. Ask for the size the drawable was
+     * made with -- the same expression nx_surface_create() gave the window, so a
+     * raw client's monitor rect and not its virtual one. */
     if ((!width || !height) && base->client)
     {
-        width = base->client->virtual_rect.right - base->client->virtual_rect.left;
-        height = base->client->virtual_rect.bottom - base->client->virtual_rect.top;
+        SIZE size = nx_picture_size( base->client, base->client->raw ? &base->client->monitor_rect
+                                                                    : &base->client->virtual_rect );
+
+        width = size.cx;
+        height = size.cy;
     }
     index = __atomic_add_fetch( &nx_swap_named, 1, __ATOMIC_RELAXED );
     if (index <= 3)

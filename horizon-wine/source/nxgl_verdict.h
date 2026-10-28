@@ -1,6 +1,6 @@
 /* Copyright 2026 Wine-NX contributors. LGPL-2.1-or-later.
  *
- * A screen that shows no frame is one of five things, and the numbers the stall
+ * A screen that shows no frame is one of six things, and the numbers the stall
  * report already collects tell them apart. This is the one place that decides,
  * so the stall line says which and not just how many slots there are: an
  * OpenGL program whose first eglSwapBuffers never returns leaves a log that
@@ -25,19 +25,22 @@
  * bound the stall report used before it said anything about a swap. */
 #define NXGL_SWAP_STUCK_MIN_MS 2000
 
-/* Who holds the screen while the swap is open. */
+/* Who holds the screen while the swap is open. The stall watch reads the two
+ * presenter flags and never asks the compositor -- its state is behind a lock a
+ * stuck presenter may hold -- so NXGL_OWNER_COMPOSITOR is only named in
+ * messages, by a caller that has the lock. */
 enum nxgl_owner
 {
-    NXGL_OWNER_NONE = 0,   /* nobody: the framebuffer or the console has it */
+    NXGL_OWNER_NONE = 0,   /* nobody the report can see: framebuffer, console, compositor */
     NXGL_OWNER_GL,         /* the program's own OpenGL surface */
     NXGL_OWNER_VULKAN,     /* a Vulkan surface (DXVK's presets, VKD3D) */
-    NXGL_OWNER_COMPOSITOR, /* the launcher's compositor */
+    NXGL_OWNER_COMPOSITOR, /* the launcher's compositor (see above) */
 };
 
 enum nxgl_verdict
 {
     NXGL_SWAP_NOT_STUCK = 0, /* no swap has been inside the driver long enough */
-    NXGL_SWAP_NO_SCREEN,     /* the surface that is swapping never had the screen */
+    NXGL_SWAP_NO_SCREEN,     /* the surface that is swapping does not hold the screen now */
     NXGL_SWAP_NOT_CONNECTED, /* the screen's window is not connected */
     NXGL_SWAP_NO_SLOTS,      /* nothing is registered on the window at all */
     NXGL_SWAP_SLOT_OUT,      /* a buffer is out and the display never returned it */
@@ -49,7 +52,7 @@ struct nxgl_swap_state
 {
     unsigned int stuck_ms;     /* the program's swap inside the driver, 0 if none */
     int owner;                 /* enum nxgl_owner */
-    int surface_has_screen;    /* the swapping drawable shares the screen's surface */
+    int surface_has_screen;    /* the swap began on a surface that had the screen then */
     int surface_w, surface_h;  /* the size that surface presents at, 0 if unknown */
     int window_w, window_h;    /* the screen's window as libnx has it */
     unsigned int slots;        /* slots_configured, counted */
@@ -74,9 +77,13 @@ static inline const char *nxgl_owner_name( int owner )
 static inline enum nxgl_verdict nxgl_swap_verdict( const struct nxgl_swap_state *s )
 {
     if (s->stuck_ms < NXGL_SWAP_STUCK_MIN_MS) return NXGL_SWAP_NOT_STUCK;
-    /* A swap on a surface that never got the screen returns without presenting
-     * (it is a pbuffer); one that is stuck there is stuck before the driver. */
-    if (!s->surface_has_screen) return NXGL_SWAP_NO_SCREEN;
+    /* A swap is published only by a drawable that had the screen when it
+     * began (a pbuffer's returns without presenting, and one whose screen a
+     * Vulkan surface took stands down), so that flag alone would never fire:
+     * what decides this is who holds the screen now. The screen going to
+     * Vulkan or back to the compositor with a swap open leaves that present
+     * with nowhere to go, which is a different fix from the driver hanging. */
+    if (!s->surface_has_screen || s->owner != NXGL_OWNER_GL) return NXGL_SWAP_NO_SCREEN;
     if (!s->connected) return NXGL_SWAP_NOT_CONNECTED;
     if (!s->slots) return NXGL_SWAP_NO_SLOTS;
     if (s->slot_out) return NXGL_SWAP_SLOT_OUT;
@@ -101,9 +108,17 @@ static inline int nxgl_swap_report( char *buffer, size_t size, const struct nxgl
     switch (verdict)
     {
     case NXGL_SWAP_NO_SCREEN:
-        snprintf( buffer, size, "the program's swap has been open for %u.%u s and its surface does not "
-                  "hold the screen (%s does): the picture is drawn offscreen and nothing will present it",
-                  whole, tenth, nxgl_owner_name( s->owner ) );
+        if (!s->surface_has_screen)
+            snprintf( buffer, size, "the program's swap has been open for %u.%u s on a surface that has "
+                      "no screen (%s holds it): the picture is drawn offscreen and nothing will present it",
+                      whole, tenth, nxgl_owner_name( s->owner ) );
+        else if (s->owner == NXGL_OWNER_NONE)
+            snprintf( buffer, size, "the program's swap has been open for %u.%u s and the screen has been "
+                      "given back since it began: no present can finish", whole, tenth );
+        else
+            snprintf( buffer, size, "the program's swap has been open for %u.%u s and the screen went to "
+                      "%s after it began: no present can finish", whole, tenth,
+                      nxgl_owner_name( s->owner ) );
         break;
     case NXGL_SWAP_NOT_CONNECTED:
         snprintf( buffer, size, "the screen's window is not connected: nothing the program queues there "

@@ -568,9 +568,8 @@ int dxvk_options_apply( const struct launcher_kv *kv, enum dxvk_source source, c
                         char *config, size_t size )
 {
     unsigned int release = dxvk_options_version( source, version );
-    size_t length = strnlen( config, size ), required = length;
-
     int profile = tegra_profile_applies( source, release );
+    size_t length = strnlen( config, size ), required = length;
 
     if (length == size) return 0;
     for (unsigned int i = 0; i < dxvk_option_count; i++)
