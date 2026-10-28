@@ -285,8 +285,23 @@ static void test_settings( const char *dir )
     settings.dxvk_hud = LAUNCHER_HUD_COUNT;
     assert( !launcher_settings_write( &kv, &settings ) );
     settings.dxvk_hud = 0;
-    assert( LAUNCHER_FRAME_LIMIT_COUNT == 8 );
+    assert( LAUNCHER_FRAME_LIMIT_COUNT == 10 );
+    assert( launcher_frame_limits[4] == 50 && !strcmp( launcher_frame_limit_labels[4], "50" ) );
+    assert( launcher_frame_limits[5] == 55 && !strcmp( launcher_frame_limit_labels[5], "55" ) );
+    load_text( &kv, "frame-limit=50\n" );
+    launcher_settings_read( &kv, &settings );
+    assert( settings.frame_limit == 4 && launcher_settings_write( &kv, &settings ) &&
+            strstr( kv.text, "frame-limit=50" ) );
+    assert( launcher_dxvk_config( &settings, config, sizeof(config) ) &&
+            strstr( config, "dxgi.maxFrameRate = 50" ) );
+    load_text( &kv, "frame-limit=55\n" );
+    launcher_settings_read( &kv, &settings );
+    assert( settings.frame_limit == 5 && launcher_settings_write( &kv, &settings ) &&
+            strstr( kv.text, "frame-limit=55" ) );
+    assert( launcher_dxvk_config( &settings, config, sizeof(config) ) &&
+            strstr( config, "dxgi.maxFrameRate = 55" ) );
     assert( launcher_dxvk_config( &settings, config, sizeof(config) ) );
+    settings.frame_limit = 0;
     /* A game's own dxvk.conf follows, so its lines win; one without a final
      * newline gets one, and one that does not fit is refused whole. */
     {
@@ -501,7 +516,7 @@ static void test_panel_follow(void)
 
     load_text( &kv, "frame-limit-sync=1\nframe-limit=60\n" );
     launcher_settings_read( &kv, &settings );
-    assert( settings.frame_limit_sync == 1 && settings.frame_limit == 4 );
+    assert( settings.frame_limit_sync == 1 && settings.frame_limit == 6 );
     assert( launcher_settings_write( &kv, &settings ) && strstr( kv.text, "frame-limit-sync=1" ) );
 
     load_text( &kv, "frame-limit-sync=on\n" );
@@ -519,7 +534,7 @@ static void test_panel_follow(void)
     load_text( &kv, "" );
     launcher_settings_read( &kv, &settings );
     assert( settings.frame_limit_sync == 0 );
-    settings.frame_limit = 4;
+    settings.frame_limit = 6;
     assert( launcher_settings_write( &kv, &settings ) );
     assert( strstr( kv.text, "frame-limit=60" ) && !strstr( kv.text, "frame-limit-sync" ) );
 

@@ -219,7 +219,7 @@ struct launcher_settings
 };
 
 enum {
-    LAUNCHER_FRAME_LIMIT_COUNT = 8,
+    LAUNCHER_FRAME_LIMIT_COUNT = 10,
     LAUNCHER_HUD_COUNT = 4,
     LAUNCHER_UPSCALING_COUNT = 3,
     LAUNCHER_SCALING_COUNT = 4,
@@ -230,9 +230,9 @@ enum {
     LAUNCHER_VOODOO_RESOLUTION_COUNT = 6,
     LAUNCHER_VOODOO_MSAA_COUNT = 5
 };
-static const int launcher_frame_limits[] = { 0, 30, 40, 45, 60, 75, 90, 120 };
+static const int launcher_frame_limits[] = { 0, 30, 40, 45, 50, 55, 60, 75, 90, 120 };
 static const char *const launcher_frame_limit_labels[] =
-    { "Off", "30", "40", "45", "60", "75", "90", "120" };
+    { "Off", "30", "40", "45", "50", "55", "60", "75", "90", "120" };
 /* The driver's year for the OpenGL extension list (Mesa's
  * MESA_EXTENSION_MAX_YEAR): a game is told about the extensions a driver of
  * that year had, and no newer one. Off is 0; the rest is the year itself. */
