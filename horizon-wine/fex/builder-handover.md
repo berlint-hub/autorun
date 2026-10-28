@@ -93,9 +93,21 @@ cmake -S . -B build-arm64ec -G Ninja \
   -DFEX_TUNE_TEGRA_X1=ON
 cmake --build build-arm64ec --target arm64ecfex -j"$(nproc)"
 
-cmake -S . -B build-wow64 … -DMINGW_TRIPLE=aarch64-w64-mingw32 …
+cmake -S . -B build-wow64 -G Ninja \
+  -DCMAKE_TOOLCHAIN_FILE=Data/CMake/toolchain_mingw.cmake \
+  -DMINGW_TRIPLE=aarch64-w64-mingw32 -DCMAKE_BUILD_TYPE=Release \
+  -DENABLE_LTO=OFF -DBUILD_TESTING=OFF -DBUILD_FEXCONFIG=OFF \
+  -DENABLE_JEMALLOC_GLIBC_ALLOC=OFF -DENABLE_OFFLINE_TELEMETRY=OFF \
+  -DFEX_HORIZON=ON -DFEX_HORIZON_ABI_DIR=<autorun>/horizon-wine/fex \
+  -DFEX_TUNE_TEGRA_X1=ON
 cmake --build build-wow64 --target wow64fex -j"$(nproc)"
 ```
+
+The two differ only in `MINGW_TRIPLE` and the build directory; nothing
+else in them is optional, and both need the patch and the submodules from
+step 2. `FEX_HORIZON_ABI_DIR` may be dropped -- the headers inside the tree
+are those files -- but naming this repository's directory is what keeps a
+module built against the same opcodes the runtime implements.
 
 `FEX_TUNE_TEGRA_X1=ON` sets `TUNE_CPU=cortex-a57` and
 `TUNE_ARCH=armv8-a+crc` and defines `FEX_TUNE_TEGRA_X1`, which is what the
