@@ -58,7 +58,8 @@ These are static review findings, not confirmed Switch failures. The user plays 
   - `python3 horizon-wine/tests/check_fex_2610_patch.py`: passed.
   - `python3 -m py_compile horizon-wine/tools/package-autorun.py`: passed.
   - `git diff --check`: passed.
-- The full SDL launcher host suite and Switch visual tests were not run; `clang`, SDL headers, Docker, and the Switch toolchain are absent.
+- The full SDL launcher host suite and Switch visual tests were not run locally; `clang`, SDL headers, Docker, and the Switch toolchain are absent.
+- After the handoff commit was pushed, GitHub Actions run [40679657102](https://github.com/berlint-hub/autorun/actions/runs/40679657102) ran the **Host tests** job successfully, but the runtime build failed compiling `launcher.c`: `access()` and `F_OK` were undeclared because `<unistd.h>` was missing. The include has now been added; push the follow-up commit to rerun the Actions build and update this note with its final result/artifact.
 
 ## Next actions
 
