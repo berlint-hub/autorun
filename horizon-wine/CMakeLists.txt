@@ -908,8 +908,9 @@ find_library(SWITCH_MBEDCRYPTO mbedcrypto HINTS "$ENV{DEVKITPRO}/portlibs/switch
 find_library(SWITCH_EGL EGL HINTS "$ENV{DEVKITPRO}/portlibs/switch/lib")
 find_library(SWITCH_GLAPI glapi HINTS "$ENV{DEVKITPRO}/portlibs/switch/lib")
 find_library(SWITCH_DRM_NOUVEAU drm_nouveau HINTS "$ENV{DEVKITPRO}/portlibs/switch/lib")
-# mesa-switch: Mesa 26 with OpenGL through nvc0 and loaderless NVK Vulkan, both
-# over its own Horizon backend, so without libdrm_nouveau. The switch-dev image
+# mesa-switch: Mesa 26 with OpenGL through NVC0 or Zink over loaderless NVK,
+# and Vulkan through NVK, all over its own Horizon backend without libdrm_nouveau.
+# The switch-dev image
 # has it in portlibs, where it is used unless this names another build. It is
 # linked in one archive group because EGL, GL, glapi and Vulkan share Mesa's
 # utility libraries.

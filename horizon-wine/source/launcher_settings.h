@@ -192,6 +192,7 @@ struct launcher_settings
     int fex_disk_cache;   /* translated code kept on the card between runs */
     int gl_thread;        /* OpenGL commands handed to a worker thread */
     int gl_year;          /* index into launcher_gl_years: the driver's year for the extension list */
+    int gl_driver;        /* index into launcher_gl_driver_values: native NVC0 or Zink over NVK */
     int framebuffer;  /* 1: windows go to the framebuffer, 0: through the compositor */
     int scaling;      /* how the picture is placed on the panel: launcher_scaling_values */
     enum launcher_d3d_renderer d3d;
@@ -236,6 +237,9 @@ static const char *const launcher_frame_limit_labels[] =
 static const int launcher_gl_years[] = { 0, 2003, 2006, 2009 };
 static const char *const launcher_gl_year_labels[] = { "Off", "2003", "2006", "2009" };
 enum { LAUNCHER_GL_YEAR_COUNT = 4 };
+static const char *const launcher_gl_driver_values[] = { "nvc0", "zink" };
+static const char *const launcher_gl_driver_labels[] = { "Native NVC0", "Zink (NVK/Vulkan)" };
+enum { LAUNCHER_GL_DRIVER_COUNT = 2 };
 static const char *const launcher_hud_labels[] = { "Disabled", "FPS", "Compact", "Full" };
 static const char *const launcher_hud_values[] =
     { "0", "fps", "api,fps,frametimes", "version,api,devinfo,fps,memory,frametimes,compiler" };
@@ -498,6 +502,12 @@ static inline void launcher_settings_read( const struct launcher_kv *kv, struct 
     settings->lazy_file_views = launcher_setting_state( kv, "lazy-file-views" ) == 1;
     settings->fex_disk_cache = launcher_setting_state( kv, "fex-cache" ) == 1;
     settings->gl_thread = launcher_setting_state( kv, "gl-thread" ) == 1;
+    settings->gl_driver = 0;
+    if (launcher_kv_get( kv, "gl-driver", value, sizeof(value) ))
+    {
+        for (int i = 0; i < LAUNCHER_GL_DRIVER_COUNT; i++)
+            if (!strcasecmp( value, launcher_gl_driver_values[i] )) settings->gl_driver = i;
+    }
     settings->gl_year = 0;
     if (launcher_kv_get( kv, "gl-year", value, sizeof(value) ))
     {
@@ -639,7 +649,8 @@ static inline int launcher_settings_write( struct launcher_kv *kv, const struct 
         settings->lsfg_flow < 0 || settings->lsfg_flow >= 3 ||
         settings->upscaling < 0 || settings->upscaling >= LAUNCHER_UPSCALING_COUNT ||
         settings->scaling < 0 || settings->scaling >= LAUNCHER_SCALING_COUNT ||
-        settings->upscaling_sharpness < 0 || settings->upscaling_sharpness >= LAUNCHER_SHARPNESS_COUNT) return 0;
+        settings->upscaling_sharpness < 0 || settings->upscaling_sharpness >= LAUNCHER_SHARPNESS_COUNT ||
+        settings->gl_driver < 0 || settings->gl_driver >= LAUNCHER_GL_DRIVER_COUNT) return 0;
     return launcher_kv_set( kv, "title", settings->title[0] ? settings->title : NULL ) &&
            launcher_kv_set( kv, "hidden", settings->hidden ? "1" : NULL ) &&
            launcher_kv_set( kv, "verbose", states[settings->verbose + 1] ) &&
@@ -652,6 +663,8 @@ static inline int launcher_settings_write( struct launcher_kv *kv, const struct 
            launcher_kv_set( kv, "lazy-file-views", settings->lazy_file_views ? "1" : NULL ) &&
            launcher_kv_set( kv, "fex-cache", settings->fex_disk_cache ? "1" : NULL ) &&
            launcher_kv_set( kv, "gl-thread", settings->gl_thread ? "1" : NULL ) &&
+           launcher_kv_set( kv, "gl-driver", settings->gl_driver ?
+                                               launcher_gl_driver_values[settings->gl_driver] : NULL ) &&
            launcher_kv_set( kv, "gl-year", settings->gl_year ?
                                               launcher_gl_year_labels[settings->gl_year] : NULL ) &&
            launcher_kv_set( kv, "gl-2003", NULL ) &&

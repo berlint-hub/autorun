@@ -672,6 +672,7 @@ static int runtime_fex_disk_cache;
  * only the extensions a driver of the game's own year had. */
 static int runtime_gl_thread;
 static int runtime_gl_year;
+static int runtime_gl_driver;
 /* The program's CPU translator choice: "opt", "" for the stock modules, or
  * NULL when it has none and fex-variant.txt decides. */
 static const char *runtime_fex_variant;
@@ -5260,6 +5261,7 @@ int main( int argc, char **argv )
             runtime_fex_disk_cache = settings.fex_disk_cache;
             runtime_gl_thread = settings.gl_thread;
             runtime_gl_year = settings.gl_year ? launcher_gl_years[settings.gl_year] : 0;
+            runtime_gl_driver = settings.gl_driver;
             if (settings.verbose >= 0) wine_nx_runtime_verbose = settings.verbose;
             if (settings.profile >= 0) runtime_profile = settings.profile;
             if (settings.framebuffer >= 0) wine_nx_compositor_mode = !settings.framebuffer;
@@ -5626,6 +5628,19 @@ int main( int argc, char **argv )
         else if (shaders.buckets)
             log_line( "[MESA] compiled shaders take %llu MiB in %u driver version(s), %u given back to the card",
                       shaders.kept >> 20, shaders.buckets, shaders.buckets_removed );
+    }
+    /* mesa-switch embeds Zink alongside NVC0. Choose per game before the
+     * first EGL initialization: this changes the OpenGL implementation only,
+     * leaving Vulkan applications and the rest of the runtime alone. */
+    if (runtime_gl_driver == 1)
+    {
+        setenv( "MESA_SWITCH_GL_DRIVER", "zink", 1 );
+        log_line( "[MESA] OpenGL renderer: Zink over NVK/Vulkan" );
+    }
+    else
+    {
+        setenv( "MESA_SWITCH_GL_DRIVER", "nvc0", 1 );
+        log_line( "[MESA] OpenGL renderer: native NVC0" );
     }
     /* The program's own two OpenGL switches. glthread is a DRI option, so its
      * name is the lower case one Mesa's driver reads, not the MESA_* form,

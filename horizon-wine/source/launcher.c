@@ -1836,7 +1836,7 @@ enum program_row
     ROW_WINDOWS, ROW_SCALING, ROW_RESOLUTION, ROW_D3D9, ROW_VKD3D_VERSION, ROW_DXVK_VERSION, ROW_DXVK_OPTIONS, ROW_DXVK_HUD, ROW_FRAME_LIMIT, ROW_FRAME_LIMIT_SYNC, ROW_VSYNC,
     ROW_VOODOO,
     ROW_LSFG, ROW_LSFG_DLL, ROW_LSFG_PERFORMANCE, ROW_LSFG_FLOW,
-    ROW_UPSCALING, ROW_UPSCALING_SHARPNESS, ROW_GL_THREAD, ROW_GL_YEAR,
+    ROW_UPSCALING, ROW_UPSCALING_SHARPNESS, ROW_GL_THREAD, ROW_GL_YEAR, ROW_GL_DRIVER,
     ROW_INPUT, ROW_INPUT_END = ROW_INPUT + INPUT_ROW_COUNT - 1, ROW_BOX64, ROW_FEX, ROW_SYNC, ROW_CPU, ROW_FEX_CACHE, ROW_FOUR_CORES, ROW_LAZY_FILE_VIEWS,
     ROW_HIDE, ROW_LIBRARY, ROW_GAME_FIX, PROGRAM_ROWS
 };
@@ -2851,6 +2851,15 @@ static int program_menu_run( struct launcher *l, struct program *p, char *target
         row->on = p->settings.gl_thread;
         snprintf( row->value, sizeof(row->value), "%s", p->settings.gl_thread ? "Enabled" : "Disabled" );
 
+        ADD_ROW( ROW_GL_DRIVER, SECTION_GRAPHICS, "OpenGL renderer",
+                 "NVC0 is Mesa's native OpenGL driver. Zink runs the same OpenGL API over Mesa's NVK Vulkan "
+                 "driver, an alternate route for compatibility when a game stalls or renders incorrectly on "
+                 "NVC0. Zink is available in this runtime's Mesa 26.2.3 SDK; this changes only this game's "
+                 "OpenGL backend and is selected before EGL initializes." );
+        row->kind = UI_ROW_DROPDOWN;
+        row->choices = LAUNCHER_GL_DRIVER_COUNT;
+        snprintf( row->value, sizeof(row->value), "%s", launcher_gl_driver_labels[p->settings.gl_driver] );
+
         ADD_ROW( ROW_GL_YEAR, SECTION_GRAPHICS, "Older OpenGL games",
                  "Shows the game only the extensions a driver of that year had. Games from around "
                  "then read the extension list into a buffer of its own era, and a modern driver's "
@@ -3327,6 +3336,31 @@ static int program_menu_run( struct launcher *l, struct program *p, char *target
             p->settings.gl_thread = action == UI_ACTION_RESET ? 0 : !p->settings.gl_thread;
             save_program_settings( l, p );
             break;
+
+        case ROW_GL_DRIVER:
+        {
+            struct ui_row items[LAUNCHER_GL_DRIVER_COUNT] = {0};
+            int selected;
+
+            if (action == UI_ACTION_RESET) p->settings.gl_driver = 0;
+            else if (action == UI_ACTION_CHOOSE)
+            {
+                for (int i = 0; i < LAUNCHER_GL_DRIVER_COUNT; i++)
+                    snprintf( items[i].label, sizeof(items[i].label), "%s", launcher_gl_driver_labels[i] );
+                selected = ui_settings_dropdown( ui, &list, items, LAUNCHER_GL_DRIVER_COUNT, p->settings.gl_driver );
+                if (selected < 0) break;
+                p->settings.gl_driver = selected;
+            }
+            else
+            {
+                int step = action == UI_ACTION_LEFT ? -1 : 1;
+
+                if (action != UI_ACTION_LEFT && action != UI_ACTION_RIGHT) break;
+                p->settings.gl_driver = (p->settings.gl_driver + step + LAUNCHER_GL_DRIVER_COUNT) % LAUNCHER_GL_DRIVER_COUNT;
+            }
+            save_program_settings( l, p );
+            break;
+        }
 
         case ROW_GL_YEAR:
         {

@@ -75,8 +75,10 @@ runtime; the full package now ships the Mesa 26 one.
   the setting has nothing to show for this program.
   The runtime links Mesa 26 from
   [mesa-switch](https://github.com/danfromtico/mesa-switch): OpenGL through
-  nvc0 and Vulkan through NVK, with Wine's winevulkan on top. Direct3D runs
-  through wined3d on OpenGL, or through architecture-specific DXVK payloads on
+  NVC0 by default or Zink over NVK, and Vulkan through NVK, with Wine's
+  winevulkan on top. The per-game **OpenGL renderer** setting selects between
+  those two paths before EGL starts. Direct3D runs through wined3d on OpenGL,
+  or through architecture-specific DXVK payloads on
   Vulkan for programs set to use it. Frames of another size than the screen's
   (800x600 or 640x480 in full screen) are scaled to it by the runtime's own
   compute blit, and the **Scaling** setting decides where they land: stretched

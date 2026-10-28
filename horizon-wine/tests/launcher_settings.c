@@ -130,14 +130,20 @@ static void test_settings( const char *dir )
     load_text( &kv, "" );
     launcher_settings_read( &kv, &settings );
     assert( !settings.gl_thread && !settings.gl_year );
-    load_text( &kv, "gl-thread=1\ngl-year=2009\n" );
+    load_text( &kv, "gl-thread=1\ngl-year=2009\ngl-driver=zink\n" );
     launcher_settings_read( &kv, &settings );
-    assert( settings.gl_thread && settings.gl_year == 3 );
+    assert( settings.gl_thread && settings.gl_year == 3 && settings.gl_driver == 1 );
     assert( launcher_gl_years[settings.gl_year] == 2009 );
+    assert( !strcmp( launcher_gl_driver_values[settings.gl_driver], "zink" ) );
     assert( launcher_settings_write( &kv, &settings ) && strstr( kv.text, "gl-thread=1" ) &&
-            strstr( kv.text, "gl-year=2009" ) );
+            strstr( kv.text, "gl-year=2009" ) && strstr( kv.text, "gl-driver=zink" ) );
     launcher_settings_read( &kv, &back );
-    assert( back.gl_thread && back.gl_year == 3 );
+    assert( back.gl_thread && back.gl_year == 3 && back.gl_driver == 1 );
+    /* NVC0 stays the default for old settings files, and unknown Mesa driver
+     * names fail closed to that default instead of reaching the environment. */
+    load_text( &kv, "gl-driver=unknown\n" );
+    launcher_settings_read( &kv, &settings );
+    assert( settings.gl_driver == 0 );
     /* The switch of the build before this one, which knew one year. */
     load_text( &kv, "gl-2003=on\n" );
     launcher_settings_read( &kv, &settings );
@@ -157,8 +163,9 @@ static void test_settings( const char *dir )
     assert( settings.gl_year == 2 && launcher_gl_years[settings.gl_year] == 2006 );
     settings.gl_thread = 0;
     settings.gl_year = 0;
+    settings.gl_driver = 0;
     assert( launcher_settings_write( &kv, &settings ) && !strstr( kv.text, "gl-thread=" ) &&
-            !strstr( kv.text, "gl-year=" ) );
+            !strstr( kv.text, "gl-year=" ) && !strstr( kv.text, "gl-driver=" ) );
     load_text( &kv, "resolution=1920x1080\n" );
     launcher_settings_read( &kv, &settings );
     assert( settings.resolution == 1 );
