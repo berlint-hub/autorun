@@ -389,6 +389,9 @@ const struct dxvk_option dxvk_options[] =
     OPTION( "d3d9.forceSamplerTypeSpecConstants",
             "Handle games that bind textures with a different type than their shader expects.",
             boolean, 10501, 0, 11003, 0, 1, 0, "False" ),
+    OPTION( "d3d9.splitSamplerSlots",
+            "Give each D3D9 image its own sampler binding. Auto enables this on MoltenVK; it has no effect on other drivers.",
+            tristate, 0, 0, 11400, 0, 1, 0, "Auto" ),
     OPTION( "dxgi.deferSurfaceCreation",
             "Create the DXGI surface on first Present. Can help games that change graphics APIs during startup.",
             boolean, 10000, 0, 11003, 0, 1, 0, "False" ),
@@ -459,7 +462,7 @@ unsigned int dxvk_options_version( enum dxvk_source source, const char *text )
     }
     if (*p || !part[0]) return 0;
     version = part[0] * 10000 + part[1] * 100 + part[2];
-    if (source == DXVK_SOURCE_SAREK) return version <= 11300 ? version : 0;
+    if (source == DXVK_SOURCE_SAREK) return version <= 11401 ? version : 0;
     if (source == DXVK_SOURCE_GPLASYNC && version < 20100) return 0;
     return version <= 30101 ? version : 0;
 }

@@ -48,6 +48,13 @@ jobs:
             -lm -o input_profile
           ./input_profile
 
+      - name: DXVK options and Sarek releases
+        run: |
+          cc -std=gnu11 -Wall -Wextra -Werror -O1 -g \
+            horizon-wine/tests/dxvk_options.c horizon-wine/source/dxvk_options.c \
+            -o dxvk_options
+          ./dxvk_options
+
       - name: Screen fit
         run: |
           cc -std=gnu11 -Wall -Wextra -Werror -O1 -g \

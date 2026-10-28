@@ -22,7 +22,10 @@ static void versions(void)
     assert( dxvk_options_version( DXVK_SOURCE_OFFICIAL, "v3.1.1" ) == 30101 );
     assert( dxvk_options_version( DXVK_SOURCE_GPLASYNC, "2.7.1-1" ) == 20701 );
     assert( dxvk_options_version( DXVK_SOURCE_SAREK, "1.10.3-20230507" ) == 11003 );
+    assert( dxvk_options_version( DXVK_SOURCE_SAREK, "1.14.0" ) == 11400 );
+    assert( dxvk_options_version( DXVK_SOURCE_SAREK, "1.14.1" ) == 11401 );
     assert( !dxvk_options_version( DXVK_SOURCE_OFFICIAL, "3.2" ) );
+    assert( !dxvk_options_version( DXVK_SOURCE_SAREK, "1.14.2" ) );
     assert( !dxvk_options_version( DXVK_SOURCE_SAREK, "2.0" ) );
     assert( !dxvk_options_version( DXVK_SOURCE_GPLASYNC, "2.0-1" ) );
     static const char *const invalid[] = { "", "Bundled", "../3.1", "3.", "3.1.", "3.1.1.1", "3.0-rc1", "999999999999999999999.0" };
@@ -42,6 +45,10 @@ static void versions(void)
     assert( !find( "dxvk.enableDyasync", DXVK_SOURCE_SAREK, "1.13.0" ) );
     assert( !find( "dxvk.shaderCompilationMethod", DXVK_SOURCE_SAREK, "1.12.0" ) );
     assert( find( "dxvk.shaderCompilationMethod", DXVK_SOURCE_SAREK, "1.13.0" ) );
+    assert( !find( "d3d9.splitSamplerSlots", DXVK_SOURCE_SAREK, "1.13.0" ) );
+    assert( find( "d3d9.splitSamplerSlots", DXVK_SOURCE_SAREK, "1.14.0" ) );
+    assert( find( "d3d9.splitSamplerSlots", DXVK_SOURCE_SAREK, "1.14.1" ) );
+    assert( !find( "d3d9.splitSamplerSlots", DXVK_SOURCE_OFFICIAL, "1.14.1" ) );
     assert( find( "dxvk.gplAsyncCache", DXVK_SOURCE_GPLASYNC, "2.6-1" ) );
     assert( !find( "dxvk.gplAsyncCache", DXVK_SOURCE_GPLASYNC, "2.7-1" ) );
     assert( !find( "dxvk.gplAsyncCache", DXVK_SOURCE_OFFICIAL, "2.6" ) );
@@ -80,6 +87,7 @@ static void configuration(void)
     assert( launcher_kv_set( &kv, "dxvk.gplAsyncCache", "True" ) );
     assert( launcher_kv_set( &kv, "d3d9.floatEmulation", "Strict" ) );
     assert( launcher_kv_set( &kv, "d3d9.deviceLocalConstantBuffers", "Auto" ) );
+    assert( launcher_kv_set( &kv, "d3d9.splitSamplerSlots", "True" ) );
     launcher_settings_read( &kv, &settings );
     settings.dxvk_hud = 2;
     settings.frame_limit = 1;
@@ -116,7 +124,11 @@ static void configuration(void)
     assert( dxvk_options_apply( &kv, DXVK_SOURCE_SAREK, "1.13.0", config, sizeof(config) ) );
     assert( strstr( config, "dxvk.shaderCompilationMethod = \"async\"" ) );
     assert( strstr( config, "d3d9.deviceLocalConstantBuffers = Auto" ) );
+    assert( !strstr( config, "d3d9.splitSamplerSlots" ) );
     assert( !strstr( config, "gplAsyncCache" ) );
+    config[0] = 0;
+    assert( dxvk_options_apply( &kv, DXVK_SOURCE_SAREK, "1.14.1", config, sizeof(config) ) );
+    assert( strstr( config, "d3d9.splitSamplerSlots = True" ) );
 
     option = find( "dxvk.numCompilerThreads", DXVK_SOURCE_OFFICIAL, "3.1.1" );
     assert( option && dxvk_option_value( &kv, option ) > 0 );
@@ -173,7 +185,7 @@ static void catalog(void)
     struct launcher_kv kv;
     char config[LAUNCHER_KV_MAX];
     static const char *const versions[] = { "1.0", "1.5", "1.9.2", "1.9.3", "1.10.3", "1.12.0", "1.13.0",
-        "2.0", "2.1", "2.4.1", "2.6.2", "2.7", "2.7.1", "3.0", "3.1.1" };
+        "1.14.0", "1.14.1", "2.0", "2.1", "2.4.1", "2.6.2", "2.7", "2.7.1", "3.0", "3.1.1" };
 
     for (int source = 0; source < DXVK_SOURCE_COUNT; source++)
         for (unsigned int v = 0; v < sizeof(versions) / sizeof(versions[0]); v++)
