@@ -51,6 +51,15 @@ struct nx_xinput_vibration_params
 #define NX_PAD_RIGHT  (1ull << 14)
 #define NX_PAD_DOWN   (1ull << 15)
 
+/* XInput remains the game-facing API in both modes. Some titles inspect the
+ * extended capability IDs to choose the matching button-prompt artwork. */
+static inline void nx_xinput_device_ids( int ps4, WORD *vendor_id, WORD *product_id, WORD *version_number )
+{
+    *vendor_id = ps4 ? 0x054c : 0x045e;
+    *product_id = ps4 ? 0x05c4 : 0x028e;
+    *version_number = ps4 ? 0x0100 : 0x0114;
+}
+
 static inline SHORT nx_xinput_axis( int value )
 {
     if (value > 32767) return 32767;

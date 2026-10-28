@@ -192,6 +192,7 @@ struct launcher_settings
     int four_cores;
     int lazy_file_views;  /* views of files read from the card on demand */
     int fex_disk_cache;   /* translated code kept on the card between runs */
+    int controller_prompts; /* 0: Xbox 360 XInput identity, 1: PlayStation 4 identity */
     int gl_thread;        /* OpenGL commands handed to a worker thread */
     int gl_year;          /* index into launcher_gl_years: the driver's year for the extension list */
     int gl_driver;        /* index into launcher_gl_driver_values: native NVC0 or Zink over NVK */
@@ -233,6 +234,9 @@ enum {
 static const int launcher_frame_limits[] = { 0, 30, 40, 45, 50, 55, 60, 75, 90, 120 };
 static const char *const launcher_frame_limit_labels[] =
     { "Off", "30", "40", "45", "50", "55", "60", "75", "90", "120" };
+enum { LAUNCHER_CONTROLLER_PROMPT_COUNT = 2 };
+static const char *const launcher_controller_prompt_labels[] = { "Xbox 360", "PlayStation 4" };
+static const char *const launcher_controller_prompt_values[] = { "xbox", "ps4" };
 /* The driver's year for the OpenGL extension list (Mesa's
  * MESA_EXTENSION_MAX_YEAR): a game is told about the extensions a driver of
  * that year had, and no newer one. Off is 0; the rest is the year itself. */
@@ -507,6 +511,10 @@ static inline void launcher_settings_read( const struct launcher_kv *kv, struct 
     settings->four_cores = launcher_setting_state( kv, "four-cores" ) != 0;
     settings->lazy_file_views = launcher_setting_state( kv, "lazy-file-views" ) == 1;
     settings->fex_disk_cache = launcher_setting_state( kv, "fex-cache" ) == 1;
+    settings->controller_prompts = 0;
+    if (launcher_kv_get( kv, "controller-prompts", value, sizeof(value) ))
+        for (int i = 1; i < LAUNCHER_CONTROLLER_PROMPT_COUNT; i++)
+            if (!strcasecmp( value, launcher_controller_prompt_values[i] )) settings->controller_prompts = i;
     settings->gl_thread = launcher_setting_state( kv, "gl-thread" ) == 1;
     settings->gl_driver = 0;
     if (launcher_kv_get( kv, "gl-driver", value, sizeof(value) ))
@@ -645,6 +653,7 @@ static inline int launcher_settings_write( struct launcher_kv *kv, const struct 
         settings->framebuffer < -1 || settings->framebuffer > 1 ||
         settings->d3d < LAUNCHER_D3D_WINE || settings->d3d > LAUNCHER_D3D_DXVK_VKD3D ||
         settings->dxvk_hud < 0 || settings->dxvk_hud >= LAUNCHER_HUD_COUNT ||
+        settings->controller_prompts < 0 || settings->controller_prompts >= LAUNCHER_CONTROLLER_PROMPT_COUNT ||
         settings->dxvk_source < 0 || settings->dxvk_source >= DXVK_SOURCE_COUNT ||
         settings->frame_limit < 0 || settings->frame_limit >= LAUNCHER_FRAME_LIMIT_COUNT ||
         settings->resolution < 0 || settings->resolution >= LAUNCHER_RESOLUTION_COUNT ||
@@ -672,6 +681,8 @@ static inline int launcher_settings_write( struct launcher_kv *kv, const struct 
            launcher_kv_set( kv, "four-cores", settings->four_cores ? NULL : "0" ) &&
            launcher_kv_set( kv, "lazy-file-views", settings->lazy_file_views ? "1" : NULL ) &&
            launcher_kv_set( kv, "fex-cache", settings->fex_disk_cache ? "1" : NULL ) &&
+           launcher_kv_set( kv, "controller-prompts", settings->controller_prompts ?
+                            launcher_controller_prompt_values[settings->controller_prompts] : NULL ) &&
            launcher_kv_set( kv, "gl-thread", settings->gl_thread ? "1" : NULL ) &&
            launcher_kv_set( kv, "gl-driver", settings->gl_driver ?
                                                launcher_gl_driver_values[settings->gl_driver] : NULL ) &&

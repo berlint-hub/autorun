@@ -1839,7 +1839,8 @@ enum program_row
     ROW_VOODOO,
     ROW_LSFG, ROW_LSFG_DLL, ROW_LSFG_PERFORMANCE, ROW_LSFG_FLOW,
     ROW_UPSCALING, ROW_UPSCALING_SHARPNESS, ROW_GL_THREAD, ROW_GL_YEAR, ROW_GL_DRIVER,
-    ROW_INPUT, ROW_INPUT_END = ROW_INPUT + INPUT_ROW_COUNT - 1, ROW_BOX64, ROW_FEX, ROW_SYNC, ROW_CPU, ROW_FEX_CACHE, ROW_FOUR_CORES, ROW_LAZY_FILE_VIEWS,
+    ROW_CONTROLLER_PROMPTS, ROW_INPUT, ROW_INPUT_END = ROW_INPUT + INPUT_ROW_COUNT - 1,
+    ROW_BOX64, ROW_FEX, ROW_SYNC, ROW_CPU, ROW_FEX_CACHE, ROW_FOUR_CORES, ROW_LAZY_FILE_VIEWS,
     ROW_HIDE, ROW_LIBRARY, ROW_GAME_FIX, ROW_RUN_REPORTS, PROGRAM_ROWS
 };
 
@@ -2886,8 +2887,8 @@ static int program_menu_run( struct launcher *l, struct program *p, char *target
         else snprintf( row->value, sizeof(row->value), "None" );
 
         ADD_ROW( ROW_RESET, SECTION_GENERAL, "Reset settings",
-                 "Back to the defaults for the title, whether it is hidden, the emulation, graphics "
-                 "and frame settings. Arguments, controls and artwork are separate and stay." );
+                 "Back to the defaults for the title, whether it is hidden, the emulation, graphics, "
+                 "controller prompts and frame settings. Arguments, control mappings and artwork stay." );
 
 #ifdef WINE_NX_FEX
         if (x86 || x64)
@@ -3189,6 +3190,17 @@ static int program_menu_run( struct launcher *l, struct program *p, char *target
 #endif
 
         {
+            ADD_ROW( ROW_CONTROLLER_PROMPTS, SECTION_CONTROLS, "Controller prompts",
+                     "XInput stays active. Xbox 360 is the default; DualShock 4 reports Sony's device ID for "
+                     "games that use it to choose button icons. This does not emulate the DS4 touchpad or gyro, "
+                     "and some games ignore the ID." );
+            row->kind = UI_ROW_DROPDOWN;
+            row->choices = LAUNCHER_CONTROLLER_PROMPT_COUNT;
+            snprintf( row->value, sizeof(row->value), "%s",
+                      launcher_controller_prompt_labels[p->settings.controller_prompts] );
+        }
+
+        {
             launcher_input_rows( rows + count, l->options->runtime_dir, p->path, l->options->swkbd_auto );
             for (i = 0; i < INPUT_ROW_COUNT; i++, count++)
             {
@@ -3374,9 +3386,9 @@ static int program_menu_run( struct launcher *l, struct program *p, char *target
         case ROW_RESET:
             if (action != UI_ACTION_CHOOSE) break;
             if (!ui_confirm( ui, "Reset settings",
-                             "Put this game's title, whether it is hidden, and its emulation, graphics "
-                             "and frame settings back to their defaults? Arguments, controls and "
-                             "artwork are separate files and stay.", "Reset" )) break;
+                             "Put this game's title, whether it is hidden, and its emulation, graphics, "
+                             "controller prompts and frame settings back to their defaults? Arguments, "
+                             "control mappings and artwork are separate files and stay.", "Reset" )) break;
             launcher_preset_defaults( &p->settings );
             save_program_settings( l, p );
             /* A game added today gets DXVK (Settings > Give a new game DXVK),
@@ -3592,6 +3604,26 @@ static int program_menu_run( struct launcher *l, struct program *p, char *target
             break;
         }
 #endif
+        case ROW_CONTROLLER_PROMPTS:
+        {
+            struct ui_row items[LAUNCHER_CONTROLLER_PROMPT_COUNT] = {0};
+            int selected;
+
+            if (action == UI_ACTION_RESET) selected = 0;
+            else if (action == UI_ACTION_CHOOSE)
+            {
+                for (i = 0; i < LAUNCHER_CONTROLLER_PROMPT_COUNT; i++)
+                    snprintf( items[i].label, sizeof(items[i].label), "%s", launcher_controller_prompt_labels[i] );
+                selected = ui_settings_dropdown( ui, &list, items, LAUNCHER_CONTROLLER_PROMPT_COUNT,
+                                                 p->settings.controller_prompts );
+                if (selected < 0) break;
+            }
+            else break;
+            p->settings.controller_prompts = selected;
+            save_program_settings( l, p );
+            break;
+        }
+
         case ROW_WINDOWS_VERSION:
         {
             static const char *const names[] = { "Default", "Windows XP SP3" };

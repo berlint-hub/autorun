@@ -72,7 +72,17 @@ static void test_settings( const char *dir )
     launcher_settings_read( &kv, &settings );
     assert( !settings.fast_sync && settings.fex && settings.four_cores &&
             settings.d3d == LAUNCHER_D3D_DXVK && !settings.resolution && !settings.windows_xp &&
-            !settings.windows_czech );
+            !settings.windows_czech && settings.controller_prompts == 0 );
+    assert( LAUNCHER_CONTROLLER_PROMPT_COUNT == 2 );
+    load_text( &kv, "controller-prompts=ps4\n" );
+    launcher_settings_read( &kv, &settings );
+    assert( settings.controller_prompts == 1 && launcher_settings_write( &kv, &settings ) &&
+            strstr( kv.text, "controller-prompts=ps4" ) );
+    load_text( &kv, "controller-prompts=not-a-controller\n" );
+    launcher_settings_read( &kv, &settings );
+    assert( settings.controller_prompts == 0 );
+    load_text( &kv, "" );
+    launcher_settings_read( &kv, &settings );
     load_text( &kv, "windows-version=winxp\n" );
     launcher_settings_read( &kv, &settings );
     assert( settings.windows_xp && launcher_settings_write( &kv, &settings ) &&
@@ -452,6 +462,10 @@ static void test_write_refuses_what_it_cannot_say(void)
     settings.frame_limit = LAUNCHER_FRAME_LIMIT_COUNT;
     assert( !launcher_settings_write( &kv, &settings ) );
     settings.frame_limit = 0;
+
+    settings.controller_prompts = LAUNCHER_CONTROLLER_PROMPT_COUNT;
+    assert( !launcher_settings_write( &kv, &settings ) );
+    settings.controller_prompts = 0;
 
     settings.d3d = LAUNCHER_D3D_DXVK_VKD3D + 1;
     assert( !launcher_settings_write( &kv, &settings ) );

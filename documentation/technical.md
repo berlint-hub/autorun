@@ -296,7 +296,12 @@ runtime; the full package now ships the Mesa 26 one.
   `MESA_*` in the block would say nothing to the driver.
 - **Audio.** `winenxaudio.drv` plays through audout, for mmdevapi and DirectSound.
 - **Input.** The touchscreen, the controller as a mouse or as a keyboard with
-  per-game mappings, and XInput, which sees player 1 as an Xbox 360 controller.
+  per-game mappings, and XInput, which sees player 1 as an Xbox 360 controller
+  by default. A per-game **Controller prompts** choice can report a DualShock 4
+  vendor/product ID to titles that select their button artwork from
+  `XInputGetCapabilitiesEx`; button data and the XInput API remain unchanged,
+  and games that ignore that ID still show Xbox prompts. It is not a DirectInput
+  DualShock implementation and does not provide the DS4 touchpad or gyro.
   Mouse-driven games get a recommended layout when they are recognised
   (`source/games/controls.h`): Septerra Core and Harbinger play with the right
   stick moving the mouse, ZL clicking and the right stick's click right-clicking,

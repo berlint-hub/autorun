@@ -20,12 +20,24 @@ HidAnalogStickState padGetStickPos(PadState *pad, int index) { (void)pad; return
 u64 padGetButtons(PadState *pad) { (void)pad; return mock_buttons; }
 u64 armGetSystemTick(void) { return mock_tick; }
 static int mock_keyboard;
+void wine_nx_input_profile_copy( struct input_profile *profile ) { *profile = wine_nx_input_profile; }
 int wine_nx_osk_visible( void ) { return mock_keyboard; }
+int wine_nx_controls_overlay_visible( void ) { return 0; }
 
 int main(void)
 {
     XINPUT_GAMEPAD gamepad;
     input_profile_defaults( &wine_nx_input_profile, 1 );
+
+    /* XInput stays the same API; only the extended IDs change for prompt art. */
+    {
+        WORD vendor, product, version;
+
+        nx_xinput_device_ids( 0, &vendor, &product, &version );
+        assert( vendor == 0x045e && product == 0x028e && version == 0x0114 );
+        nx_xinput_device_ids( 1, &vendor, &product, &version );
+        assert( vendor == 0x054c && product == 0x05c4 && version == 0x0100 );
+    }
 
     /* Nothing held, sticks centred. */
     memset( &gamepad, 0xcc, sizeof(gamepad) );

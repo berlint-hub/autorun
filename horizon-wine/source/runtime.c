@@ -777,6 +777,7 @@ static int runtime_fex;
 /* The program keeps the translator's code on the card between runs
  * (fex-cache=1), so a second start does not translate it again. */
 static int runtime_fex_disk_cache;
+static int runtime_xinput_ps4;
 /* Mesa's two switches for OpenGL: commands marshalled on a worker thread, and
  * only the extensions a driver of the game's own year had. */
 static int runtime_gl_thread;
@@ -2606,6 +2607,9 @@ static const char runtime_environment[] =
  * initialization; child processes inherit them, unrelated launches do not. */
 static const char runtime_windows_version_environment[] = "WINE_NX_WINDOWS_VERSION=winxp";
 static const char runtime_windows_locale_environment[] = "WINE_NX_WINDOWS_LOCALE=cs-CZ";
+/* Some games use XInputGetCapabilitiesEx's device IDs to pick controller
+ * prompts; XInput controls themselves remain the same in either mode. */
+static const char runtime_xinput_ps4_environment[] = "WINE_NX_XINPUT_DEVICE=ds4";
 
 static size_t runtime_fex_environment( const char *target, char *buffer, size_t size )
 {
@@ -3039,6 +3043,7 @@ static RTL_USER_PROCESS_PARAMETERS *runtime_create_process_params( const char *t
     chars += sizeof(runtime_environment) + 2 * strlen( graphics_path ) + strlen( dxvk_hud ) - 1;
     if (runtime_windows_xp) chars += sizeof(runtime_windows_version_environment);
     if (runtime_windows_czech) chars += sizeof(runtime_windows_locale_environment);
+    if (runtime_xinput_ps4) chars += sizeof(runtime_xinput_ps4_environment);
     chars += fex_environment_size;
     if (left4dead) chars += sizeof(LEFT4DEAD_ENVIRONMENT) - 1;
     size = sizeof(*params) + chars * sizeof(WCHAR);
@@ -3092,6 +3097,9 @@ static RTL_USER_PROCESS_PARAMETERS *runtime_create_process_params( const char *t
     if (runtime_windows_czech)
         for (i = 0; i < sizeof(runtime_windows_locale_environment); i++)
             *cursor++ = (unsigned char)runtime_windows_locale_environment[i];
+    if (runtime_xinput_ps4)
+        for (i = 0; i < sizeof(runtime_xinput_ps4_environment); i++)
+            *cursor++ = (unsigned char)runtime_xinput_ps4_environment[i];
     for (i = 0; i < fex_environment_size; i++) *cursor++ = (unsigned char)fex_environment[i];
     if (left4dead)
         for (i = 0; i < sizeof(LEFT4DEAD_ENVIRONMENT) - 1; i++)
@@ -5385,6 +5393,7 @@ int main( int argc, char **argv )
         runtime_four_cores = 1;
         runtime_windows_xp = 0;
         runtime_windows_czech = 0;
+        runtime_xinput_ps4 = 0;
         horizon_fast_sync_enabled = 0;
         wine_nx_scaling_mode = SCREEN_SCALING_ASPECT;
 #ifdef WINE_NX_MESA_SWITCH
@@ -5412,6 +5421,9 @@ int main( int argc, char **argv )
             runtime_windows_czech = settings.windows_czech;
             if (runtime_windows_czech)
                 log_line( "[LOCALE] Czech (Czechia), ANSI 1250 and OEM 852 enabled for %s", target );
+            runtime_xinput_ps4 = settings.controller_prompts == 1;
+            if (runtime_xinput_ps4)
+                log_line( "[INPUT] XInput reports a DualShock 4 identity for games that choose button prompts from device IDs" );
             wine_nx_lazy_file_views = settings.lazy_file_views;
 #ifdef WINE_NX_FEX
             runtime_fex = settings.fex != 0;

@@ -148,6 +148,14 @@ static DWORD nx_set_state(DWORD index, XINPUT_VIBRATION *vibration)
     return ERROR_SUCCESS;
 }
 
+static BOOL nx_use_ps4_identity(void)
+{
+    char device[8];
+    DWORD length = GetEnvironmentVariableA("WINE_NX_XINPUT_DEVICE", device, sizeof(device));
+
+    return length == 3 && !strcmp(device, "ds4");
+}
+
 static void check_value_caps(struct xinput_controller *controller, USHORT usage, HIDP_VALUE_CAPS *caps)
 {
     switch (usage)
@@ -1218,10 +1226,10 @@ DWORD WINAPI DECLSPEC_HOTPATCH XInputGetCapabilitiesEx(DWORD unk, DWORD index, D
         caps->Capabilities.Gamepad.sThumbLY = ~0x3f;
         caps->Capabilities.Gamepad.sThumbRX = ~0x3f;
         caps->Capabilities.Gamepad.sThumbRY = ~0x3f;
-        /* an Xbox 360 controller, which is what games expect behind XInput */
-        caps->VendorId = 0x045e;
-        caps->ProductId = 0x028e;
-        caps->VersionNumber = 0x0114;
+        /* Xbox 360 is the default. The per-game setting can report a DS4 ID
+         * for titles that use XInputGetCapabilitiesEx to choose prompt art. */
+        nx_xinput_device_ids( nx_use_ps4_identity(), &caps->VendorId, &caps->ProductId,
+                              &caps->VersionNumber );
         return ERROR_SUCCESS;
     }
 

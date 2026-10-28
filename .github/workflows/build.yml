@@ -128,6 +128,15 @@ jobs:
       - name: Boot setup and recovery
         run: python3 horizon-wine/tests/check_setup_boot.py
 
+      - name: XInput Switch controller and prompt identity
+        run: |
+          cc -std=gnu11 -Wall -Wextra -Werror -O1 -g \
+            -D__WINESRC__ -DWINE_UNIX_LIB -D_WIN64 \
+            -I horizon-wine/tests/xinput-shims -I include \
+            horizon-wine/tests/xinput_nx_pad.c horizon-wine/source/input_profile.c \
+            -lm -o xinput_pad
+          ./xinput_pad
+
       - name: DirectInput input (raw payload and low-level hooks)
         run: |
           python3 horizon-wine/tests/check_raw_mouse.py
