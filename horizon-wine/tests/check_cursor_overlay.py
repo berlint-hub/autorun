@@ -88,9 +88,10 @@ struct opengl_funcs
     void (*p_glDisable)(GLenum);
 };
 static struct opengl_funcs *funcs;
-/* Weak in winnx_opengl.c: a runtime without the arrow must leave the overlay
- * doing nothing rather than not link. */
+/* Weak in winnx_opengl.c: a runtime that has no arrow, or no log to write to,
+ * must leave the overlay doing nothing rather than not link. */
 extern int wine_nx_cursor_panel( int *x, int *y ) __attribute__((weak));
+extern void wine_nx_runtime_trace( const char *msg ) __attribute__((weak));
 
 typedef void (*PFN_glGenFramebuffers)(GLint, GLuint *);
 typedef void (*PFN_glBindFramebuffer)(GLenum, GLuint);
@@ -260,6 +261,15 @@ static void *mock_get_proc_address( const char *name )
     if (!strcmp( name, "glBindBuffer" )) return mock_bind_buffer;
     return NULL;
 }
+static char trace_line[256];
+static unsigned int traced;
+
+void wine_nx_runtime_trace( const char *message )
+{
+    traced++;
+    snprintf( trace_line, sizeof(trace_line), "%s", message );
+}
+
 int wine_nx_cursor_panel( int *x, int *y )
 {
     if (!cursor_visible) return 0;
@@ -329,6 +339,12 @@ int main(void)
     program.framebuffer_binds = program.attaches = 0;
     nx_cursor_draw( &drawable );
     assert(program.uploads == 1 && program.attaches == 0);
+    /* Said once, the first frame it drew: the log can then tell a swap that
+     * never got here from one that did. */
+    assert(traced == 1 && strstr( trace_line, "mouse arrow" ));
+    /* The arrow's 22 opaque pieces at the panel's own size, on the surface the
+     * picture is drawn into. */
+    assert(strstr( trace_line, "22 pieces" ) && strstr( trace_line, "1280x720" ));
     check_runs( cursor_panel_x, cursor_panel_y, surface_width, surface_height );
 
     /* A surface that is the panel's picture at another size -- a 1080p window

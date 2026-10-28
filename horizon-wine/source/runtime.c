@@ -961,6 +961,7 @@ static void wine_nx_desktop_init( void )
  * the desktop changes size the arrow has to be able to reach the new edges. */
 static void wine_nx_pointer_rebound( int width, int height );
 static void wine_nx_cursor_move( int x, int y );
+static void wine_nx_cursor_place_locked( void );
 
 /* A program setting a display mode (ddraw/Direct3D SetDisplayMode) switches
  * the screen to its resolution: win32u re-registers the display devices right
@@ -1753,6 +1754,10 @@ void wine_nx_fb_present(void)
         }
         if (wine_nx_fb_pending_bits)
         {
+            /* The fit can have changed under a still cursor (a display mode, a
+             * surface that took the screen): the frame shows it where the
+             * picture puts it now, not where the last poll left it. */
+            wine_nx_cursor_place_locked();
             if (wine_nx_cursor_visible)
                 pointer_cursor_paint( &wine_nx_cursor, wine_nx_fb_pending_bits, wine_nx_fb_pending_stride, 1 );
             if (wine_nx_screenshot_requested())
@@ -1809,6 +1814,18 @@ static void wine_nx_cursor_move( int x, int y )
  * (dlls/win32u/winnx_opengl.c and vulkan.c).  Worked out from the desktop
  * point and the fit in force now, so the arrow is where the compositor would
  * have drawn it; 0 when the program hid it. */
+/* The arrow's panel pixel, from the desktop point and the fit in force now.
+ * Called with wine_nx_fb_mutex held, which takes wine_nx_fit_mutex inside it:
+ * nothing takes them the other way round (wine_nx_cursor_move maps first and
+ * locks the arrow after), so the two cannot deadlock. */
+static void wine_nx_cursor_place_locked( void )
+{
+    int px, py;
+
+    wine_nx_screen_to_panel( wine_nx_cursor_screen_x, wine_nx_cursor_screen_y, &px, &py );
+    pointer_cursor_place( &wine_nx_cursor, px, py );
+}
+
 int wine_nx_cursor_panel( int *x, int *y )
 {
     double screen_x, screen_y;

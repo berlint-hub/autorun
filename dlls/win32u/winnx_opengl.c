@@ -733,6 +733,7 @@ struct nx_cursor_gl
 };
 static struct nx_cursor_gl nx_cursor_gl[8];
 static unsigned int nx_cursor_gl_next;
+static int nx_cursor_traced;   /* said once, in the runtime's log */
 
 static struct nx_cursor_gl *nx_cursor_slot( EGLContext context )
 {
@@ -842,6 +843,18 @@ static void nx_cursor_draw( struct opengl_drawable *base )
     }
     if (scissor) funcs->p_glEnable( GL_SCISSOR_TEST );
     if (srgb) funcs->p_glEnable( GL_FRAMEBUFFER_SRGB );
+    /* The first frame says the arrow is being drawn at all: a log where the
+     * mouse does not show can then tell a swap that never got here from one
+     * that did. */
+    if (!nx_cursor_traced)
+    {
+        char line[160];
+
+        nx_cursor_traced = 1;
+        snprintf( line, sizeof(line), "[NXGL] the mouse arrow: %d pieces into the %dx%d picture at %d,%d",
+                  count, (int)width, (int)height, px, py );
+        if (&wine_nx_runtime_trace) wine_nx_runtime_trace( line );
+    }
 
     p_glBindFramebuffer( GL_READ_FRAMEBUFFER, read_fb );
     p_glBindFramebuffer( GL_DRAW_FRAMEBUFFER, draw_fb );
