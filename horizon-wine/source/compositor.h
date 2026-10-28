@@ -65,8 +65,9 @@ void wine_nx_compositor_redraw( void );
 /* The frames drawn, read without the presenter's lock: for a watch that cannot
  * afford to wait on it. */
 unsigned int wine_nx_compositor_frames_fast( void );
-/* Ends the presenter thread and waits for it, before the program closes. */
-/* FALSE if the presenter did not end within its bound: its stack is still lent. */
+/* Ends the presenter thread and waits for it, before the program closes.
+ * FALSE if it did not end within its bound: its stack is still lent, and the
+ * process must not be handed back to the loader. */
 int wine_nx_compositor_stop( void );
 void wine_nx_compositor_suspend( void );
 void wine_nx_compositor_resume( void );
