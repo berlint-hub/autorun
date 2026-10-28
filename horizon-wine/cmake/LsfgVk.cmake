@@ -9,7 +9,9 @@ endif()
 configure_file("${LSFG_LICENSE}" "${CMAKE_CURRENT_BINARY_DIR}/licenses/LSFG-VK-GPL-3.0.txt" COPYONLY)
 add_library(wine-nx-lsfg STATIC source/lsfg.cpp)
 set_target_properties(wine-nx-lsfg PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON)
-target_include_directories(wine-nx-lsfg PRIVATE "${WINE_NX_MESA_SWITCH_DIR}/../include")
+# LSFG-VK's own headers only include Vulkan's, which come with whichever Mesa
+# the runtime was configured against.
+target_include_directories(wine-nx-lsfg PRIVATE ${WINE_NX_MESA_INCLUDE_DIRS})
 target_compile_options(wine-nx-lsfg PRIVATE -Wall -Wextra -Wno-missing-field-initializers)
 target_link_libraries(wine-nx-lsfg PRIVATE ${SWITCH_LSFG_VK})
 target_compile_definitions(wine-nx-runtime PRIVATE WINE_NX_LSFG)

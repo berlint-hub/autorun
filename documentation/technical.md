@@ -79,7 +79,17 @@ runtime; the full package now ships the Mesa 26 one.
   winevulkan on top. The per-game **OpenGL renderer** setting selects between
   those two paths before EGL starts. Direct3D runs through wined3d on OpenGL,
   or through architecture-specific DXVK payloads on
-  Vulkan for programs set to use it. Frames of another size than the screen's
+  Vulkan for programs set to use it. DXVK translates Direct3D and nothing else:
+  a DXVK payload has no OpenGL in it, so a program set to `d3d=dxvk` that asks
+  for a GL context -- its own window, a dgVoodoo or a wined3d path -- is served
+  by the Mesa below, on whichever of the two renderers the setting names.
+  [nxvk](https://github.com/PalindromicBreadLoaf/nxvk), another port of the
+  same Mesa 26, can be linked instead of mesa-switch with
+  `WINE_NX_NXVK_DIR` (see **Building**); its OpenGL half is Zink over NVK with
+  no NVC0 at all. NVK does not claim Khronos conformance and said so on every
+  run, which reads as a broken driver in a log; the runtime silences that one
+  warning (`MESA_VK_IGNORE_CONFORMANCE_WARNING`) and the probe's own line names
+  the instance and device instead. Frames of another size than the screen's
   (800x600 or 640x480 in full screen) are scaled to it by the runtime's own
   compute blit, and the **Scaling** setting decides where they land: stretched
   over the screen, kept in proportion with bars, by whole pixel steps, or with
@@ -576,8 +586,34 @@ python3 horizon-wine/tools/package-autorun.py    # the card: autorun-NNN.zip, wi
 The runtime links mesa-switch, LSFG-VK and libusbhsfs from the image's portlibs;
 a build records the image's revisions (`switch-dev.json` in the build folder)
 in the package's `build-manifest.json`. `WINE_NX_MESA_SWITCH_DIR` links another
-mesa-switch build instead. A change to Mesa, LSFG-VK's port or libusbhsfs's
-UASP patches is made in switch-dev and comes with a new image.
+mesa-switch build instead, and `WINE_NX_NXVK_DIR`
+[nxvk](https://github.com/PalindromicBreadLoaf/nxvk) in place of mesa-switch.
+A change to Mesa, LSFG-VK's port or libusbhsfs's UASP patches is made in
+switch-dev and comes with a new image.
+
+nxvk is built in its own container, which the switch-dev image does not carry:
+
+```sh
+git clone https://github.com/PalindromicBreadLoaf/nxvk && cd nxvk
+make image && make && make gl      # Vulkan, then the Zink/Gallium/EGL archives
+sudo make install-gl               # libnvk.a, libnvk_support.a, libnvk_gl.a,
+                                   # nxvk.pc, nxvk-gl.pc and include/vulkan
+```
+
+An installed prefix is what `-DWINE_NX_NXVK_DIR=$DEVKITPRO/portlibs/switch`
+takes. A checkout that was built but not installed works too -- the same code
+is then still one archive per directory under `switch/build/cross-zink`, which
+is where `make gl` leaves it -- and `WINE_NX_NXVK_BUILD` names another build
+tree. `cmake/Nxvk.cmake` holds the archive lists, taken from nxvk's own
+`Makefile` (`GL_LIBS`, `SUPPORT_LIBS`) and link order, and
+`tests/nxvk_archives.cmake` checks them against it without a toolchain
+(`cmake -P horizon-wine/tests/nxvk_archives.cmake`).
+
+nxvk's fork-added files (`src/egl/drivers/horizon`, `src/vulkan/wsi/wsi_switch.c`,
+`src/nouveau/vulkan/nvkmd/nvgpu`, `switch/`) are GPL-2.0-or-later, and Mesa's
+own licenses cover the rest. A runtime linked against its static archives is a
+combined GPL work: a package that ships one has to be able to ship its source,
+which is why mesa-switch stays the default.
 
 `package-autorun.py` is what a card wants, with the DLL repository's `switch`
 folder beside it: the runtime, Wine's NLS files and fonts, Autorun's setup
@@ -686,6 +722,7 @@ Autorun is built from these projects; each keeps its own copyright and license.
 | [DXVK](https://github.com/doitsujin/dxvk) | Philip Rebohle, Joshua Ashton, Robin Kertels, Jeffrey Ellison and contributors | zlib/libpng | Direct3D over Vulkan, for programs set to `d3d=dxvk` |
 | [Mesa](https://mesa3d.org) | The Mesa authors | MIT (mostly) | OpenGL through nvc0 and Vulkan through NVK |
 | [mesa-switch](https://github.com/danfromtico/mesa-switch) | danfromtico, NaGaa95 and contributors | Mesa's licenses | The Switch port of Mesa 26 (nvc0 and NVK) that the runtime links |
+| [nxvk](https://github.com/PalindromicBreadLoaf/nxvk) | PalindromicBreadLoaf | GPL-2.0-or-later for its added files, Mesa's licenses for the rest | An alternative Switch port of Mesa 26 (NVK and Zink over it) the runtime can be linked against |
 | Switch ports of Mesa 20.1 and libdrm_nouveau | fincs, Subv, Jules Blok | MIT | The earlier OpenGL path, from devkitPro's packages |
 | [libnx](https://github.com/switchbrew/libnx) | switchbrew, libnx authors | ISC | The Horizon system library the runtime is written against |
 | [devkitPro](https://devkitpro.org) | devkitPro | Per component | devkitA64 and the Switch builds of the libraries in this table |

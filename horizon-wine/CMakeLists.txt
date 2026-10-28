@@ -908,18 +908,36 @@ find_library(SWITCH_MBEDCRYPTO mbedcrypto HINTS "$ENV{DEVKITPRO}/portlibs/switch
 find_library(SWITCH_EGL EGL HINTS "$ENV{DEVKITPRO}/portlibs/switch/lib")
 find_library(SWITCH_GLAPI glapi HINTS "$ENV{DEVKITPRO}/portlibs/switch/lib")
 find_library(SWITCH_DRM_NOUVEAU drm_nouveau HINTS "$ENV{DEVKITPRO}/portlibs/switch/lib")
-# mesa-switch: Mesa 26 with OpenGL through NVC0 or Zink over loaderless NVK,
-# and Vulkan through NVK, all over its own Horizon backend without libdrm_nouveau.
-# The switch-dev image
-# has it in portlibs, where it is used unless this names another build. It is
-# linked in one archive group because EGL, GL, glapi and Vulkan share Mesa's
-# utility libraries.
+# Two Mesas are known here, and either gives the runtime the same three things:
+# EGL on the screen's NWindow with OpenGL through NVC0 or Zink over loaderless
+# NVK, Vulkan through NVK, and the headers they were built with.
+#
+# mesa-switch is the one in the switch-dev image's portlibs, where it is used
+# unless this names another build; it is linked in one archive group because
+# EGL, GL, glapi and Vulkan share Mesa's utility libraries.
 set(WINE_NX_MESA_SWITCH_DEFAULT "")
 if(EXISTS "$ENV{DEVKITPRO}/portlibs/switch/lib/libvulkan.a")
     set(WINE_NX_MESA_SWITCH_DEFAULT "$ENV{DEVKITPRO}/portlibs/switch/lib")
 endif()
 set(WINE_NX_MESA_SWITCH_DIR "${WINE_NX_MESA_SWITCH_DEFAULT}" CACHE PATH "Folder with mesa-switch's libEGL.a, libGL.a, libglapi.a and libvulkan.a")
-if(WINE_NX_MESA_SWITCH_DIR)
+# nxvk is another port of the same Mesa 26 to Horizon, and the newer of the two:
+# naming it links it instead of mesa-switch (cmake/Nxvk.cmake says how).
+set(WINE_NX_NXVK_DIR "" CACHE PATH "Folder with nxvk's libnvk_gl.a: an install prefix, or a checkout built with make and make gl")
+set(WINE_NX_MESA_PROVIDER "")
+if(WINE_NX_NXVK_DIR)
+    include(cmake/Nxvk.cmake)
+    wine_nx_nxvk_detect("${WINE_NX_NXVK_DIR}")
+    set(WINE_NX_MESA_PROVIDER "nxvk")
+    set(WINE_NX_MESA_INCLUDE_DIRS ${NXVK_INCLUDE_DIRS})
+    # WINE_NX_NXVK tells the sources which Mesa this is: nxvk has no NVC0, so
+    # the per-game renderer setting has only one answer there.
+    set(WINE_NX_MESA_DEFINITIONS ${NXVK_DEFINITIONS} WINE_NX_NXVK)
+    set(SWITCH_EGL ${NXVK_ARCHIVES})
+    set(SWITCH_GLAPI "")
+    set(SWITCH_DRM_NOUVEAU "")
+    message(STATUS "Mesa: ${NXVK_DESCRIPTION}")
+elseif(WINE_NX_MESA_SWITCH_DIR)
+    set(WINE_NX_MESA_PROVIDER "mesa-switch")
     message(STATUS "Mesa: mesa-switch, ${WINE_NX_MESA_SWITCH_DIR}")
     foreach(lib EGL GL glapi vulkan mesa_util_c11 blake3 mesa_util mesa_util_simd xmlconfig)
         if(NOT EXISTS "${WINE_NX_MESA_SWITCH_DIR}/lib${lib}.a")
@@ -940,18 +958,25 @@ if(WINE_NX_MESA_SWITCH_DIR)
     list(APPEND SWITCH_EGL ${SWITCH_ELF} ${SWITCH_EXPAT} ${SWITCH_ZSTD} ${SWITCH_Z} -Wl,--end-group)
     set(SWITCH_GLAPI "")
     set(SWITCH_DRM_NOUVEAU "")
-    target_include_directories(wine-nx-runtime BEFORE PRIVATE "${WINE_NX_MESA_SWITCH_DIR}/../include")
+    set(WINE_NX_MESA_INCLUDE_DIRS "${WINE_NX_MESA_SWITCH_DIR}/../include")
+    set(WINE_NX_MESA_DEFINITIONS "")
+endif()
+
+if(WINE_NX_MESA_PROVIDER)
+    target_include_directories(wine-nx-runtime BEFORE PRIVATE ${WINE_NX_MESA_INCLUDE_DIRS})
     target_link_options(wine-nx-runtime PRIVATE
         -Wl,-u,vk_icdGetInstanceProcAddr -Wl,-u,vk_icdNegotiateLoaderICDInterfaceVersion -pthread)
-    target_compile_definitions(wine-nx-runtime PRIVATE WINE_NX_MESA_SWITCH)
+    target_compile_definitions(wine-nx-runtime PRIVATE WINE_NX_MESA_SWITCH ${WINE_NX_MESA_DEFINITIONS})
     target_sources(wine-nx-runtime PRIVATE source/vulkan_probe.c)
     set_source_files_properties(source/vulkan_probe.c PROPERTIES
-        INCLUDE_DIRECTORIES "${WINE_NX_MESA_SWITCH_DIR}/../include")
+        INCLUDE_DIRECTORIES "${WINE_NX_MESA_INCLUDE_DIRS}")
 
     # Vulkan for Windows programs: win32u's Vulkan over NVK, the display driver's
     # VK_NN_vi_surface (dlls/win32u/winnx_vulkan.c), and winevulkan's unix side
     # with its tables renamed like opengl32's (source/winevulkan_unix.c).
     target_sources(wine-win32u-real PRIVATE ../dlls/win32u/winnx_vulkan.c)
+    # VK_NN_vi_surface is described by the headers of whichever Mesa this is.
+    target_include_directories(wine-win32u-real BEFORE PRIVATE ${WINE_NX_MESA_INCLUDE_DIRS})
     target_compile_definitions(wine-win32u-real PRIVATE WINE_NX_MESA_SWITCH)
     target_compile_definitions(wine-virtual-real PRIVATE WINE_NX_MESA_SWITCH)
     add_library(wine-winevulkan-unix-real OBJECT

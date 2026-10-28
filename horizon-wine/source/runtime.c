@@ -129,6 +129,13 @@ u32 __nx_exception_ignoredebug = 1;
  * under the cache directory, a directory per driver version): that one grows
  * as long as the driver meets pipelines it has not stored, and on a card the
  * card is what runs out. The numbers are the ones the driver is told above. */
+/* Which port of Mesa this build links: mesa-switch unless the build named
+ * nxvk (cmake/Nxvk.cmake), which builds Zink and no NVC0 at all. */
+#ifdef WINE_NX_NXVK
+#define WINE_NX_MESA_NAME "nxvk"
+#else
+#define WINE_NX_MESA_NAME "mesa-switch"
+#endif
 #define MESA_SHADER_CACHE_LIMIT (512ull * 1024 * 1024)
 #define MESA_SHADER_CACHE_KEEP  (384ull * 1024 * 1024)
 #define MESA_SHADER_CACHE_TREE  RUNTIME_DIR "/cache/mesa_shader_cache_sf"
@@ -5293,12 +5300,14 @@ int main( int argc, char **argv )
     if (runtime_config_moved && wine_nx_config_save( &runtime_config, CONFIG_FILE ))
         log_line( "[CONFIG] settings written to %s", CONFIG_FILE );
 #ifdef WINE_NX_MESA_SWITCH
-    /* This runtime links mesa-switch (switch-dev image); vulkan-probe.txt
-     * reports what its NVK offers, for Vulkan and DXVK (vulkan_probe.c). */
+    /* This runtime links the Switch's Mesa (WINE_NX_MESA_NAME, the build says
+     * which); vulkan-probe.txt reports what its NVK offers, for Vulkan and
+     * DXVK (vulkan_probe.c). */
     {
         int vulkan_probe = config_bool( "vulkan-probe", 0, "vulkan-probe.txt", 0 );
 
-        log_line( "[INIT] Mesa from mesa-switch: OpenGL available, Vulkan through NVK; Vulkan probe %s",
+        log_line( "[INIT] Mesa from " WINE_NX_MESA_NAME
+                  ": OpenGL available, Vulkan through NVK; Vulkan probe %s",
                   vulkan_probe ? "on" : "off" );
         if (vulkan_probe)
         {
@@ -5905,6 +5914,13 @@ int main( int argc, char **argv )
     setenv( "MESA_GLSL_CACHE_MAX_SIZE", "512M", 1 );
     setenv( "MESA_GLSL_CACHE_DISABLE", "0", 1 );
     log_line( "[MESA] shaders are cached in " RUNTIME_DIR "/cache, up to 512 MB" );
+    /* NVK is not a Khronos conformant implementation and says so the first
+     * time a Vulkan device is created: on every run, for every program,
+     * because a console port has nothing to submit. In a log it reads as a
+     * broken driver -- and it was read as one -- so it is turned off here.
+     * What it carries, the driver's own name, is in the line below and in the
+     * Vulkan probe's account of the device. */
+    setenv( "MESA_VK_IGNORE_CONFORMANCE_WARNING", "1", 1 );
     /* The single-file half of that cache is given its size here, because Mesa
      * only keeps the limit for the multi-file one. Whole driver versions are
      * given back oldest first, the same way the translator's cache is. */
@@ -5927,11 +5943,22 @@ int main( int argc, char **argv )
         setenv( "MESA_SWITCH_GL_DRIVER", "zink", 1 );
         log_line( "[MESA] OpenGL renderer: Zink over NVK/Vulkan" );
     }
+#ifdef WINE_NX_NXVK
+    else
+    {
+        /* nxvk builds Zink and no NVC0, so the other half of the per-game
+         * setting has nothing to select. Saying which renderer the program got
+         * is worth more than repeating the one it asked for. */
+        setenv( "MESA_SWITCH_GL_DRIVER", "zink", 1 );
+        log_line( "[MESA] OpenGL renderer: Zink over NVK/Vulkan (nxvk has no NVC0)" );
+    }
+#else
     else
     {
         setenv( "MESA_SWITCH_GL_DRIVER", "nvc0", 1 );
         log_line( "[MESA] OpenGL renderer: native NVC0" );
     }
+#endif
     /* The program's own two OpenGL switches. glthread is a DRI option, so its
      * name is the lower case one Mesa's driver reads, not the MESA_* form,
      * and it has to be here rather than in the program's environment: the

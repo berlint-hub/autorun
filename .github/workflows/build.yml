@@ -109,6 +109,13 @@ jobs:
             horizon-wine/tests/shared_data_place.c -o shared_data_place
           ./shared_data_place
 
+      # What the linker is asked for when nxvk is the Mesa: its OpenGL set and
+      # its Vulkan driver whole-archived, its support archives after them in a
+      # group, and a configure that stops with the nxvk target to run when one
+      # of them is missing. No toolchain is involved, the trees are made up.
+      - name: nxvk archives
+        run: cmake -P horizon-wine/tests/nxvk_archives.cmake
+
       # The profiler's sample handling, and the i386 CONTEXT offsets the stall
       # report reads a program's own registers through.
       - name: Thread profiler

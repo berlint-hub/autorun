@@ -49,8 +49,10 @@ if not enabled('WINE_NX_AMD64'):
     parser.error('The NRO must be built with WINE_NX_AMD64=ON')
 if args.fex != enabled('WINE_NX_FEX'):
     parser.error('--fex must match the NRO FEX build configuration')
-if args.vulkan != bool(cache.get('WINE_NX_MESA_SWITCH_DIR')):
-    parser.error('--vulkan must match the NRO mesa-switch build configuration')
+# Either Mesa the runtime can be linked against means it has Vulkan: mesa-switch
+# names itself in the cache, nxvk in its own variable.
+if args.vulkan != bool(cache.get('WINE_NX_MESA_SWITCH_DIR') or cache.get('WINE_NX_NXVK_DIR')):
+    parser.error('--vulkan must match the NRO Mesa build configuration')
 nro = build / 'wine-nx-runtime.nro'
 if not nro.is_file() or nro.read_bytes()[16:20] != b'NRO0':
     parser.error('Missing or invalid wine-nx-runtime.nro')

@@ -398,7 +398,7 @@ static struct opengl_context *internal_context_create(void)
     static const int attribs[] = { WGL_CONTEXT_PROFILE_MASK_ARB, WGL_CONTEXT_CORE_PROFILE_BIT_ARB, 0 };
     BOOL shared = TRUE, doublebuffer;
     struct opengl_context *context;
-    int format;
+    int format, usable = 0;
 
     for (format = 1; format <= formats_count; format++)
     {
@@ -406,6 +406,7 @@ static struct opengl_context *internal_context_create(void)
         if (!(desc->pfd.dwFlags & PFD_SUPPORT_OPENGL)) continue;
         if (desc->pfd.iPixelType != PFD_TYPE_RGBA) continue;
         if (desc->pfd.cColorBits < 24) continue;
+        usable++;
 
         doublebuffer = !!(pixel_formats[format - 1].pfd.dwFlags & PFD_DOUBLEBUFFER);
         if (!(context = driver_funcs->p_context_create( format, global_context, attribs, &shared ))) continue;
@@ -417,7 +418,14 @@ static struct opengl_context *internal_context_create(void)
         return context;
     }
 
-    ERR( "Failed to create internal %s context\n", global_context ? "thread" : "global" );
+    /* A program that ends up with no OpenGL at all is diagnosed by these two
+     * numbers: formats_count is what the EGL display described, and usable how
+     * many of those could carry a context. Zero formats is a driver with no
+     * desktop GL to give (a GLES-only build, or a display that bound no
+     * OpenGL API); a count that is not zero means the driver refused every
+     * format, and its own error is the line above this one. */
+    ERR( "Failed to create internal %s context: %d of %u format(s) could carry one\n",
+         global_context ? "thread" : "global", usable, formats_count );
     return calloc( 1, sizeof(*context) ); /* return a valid pointer nonetheless */
 }
 
@@ -3425,6 +3433,8 @@ static void display_funcs_init(void)
     init_egl_platforms( &display_funcs, driver_funcs );
 
     formats_count = driver_funcs->p_init_pixel_formats( &onscreen_count );
+    if (!formats_count)
+        ERR( "the EGL display describes no pixel format for OpenGL, so no context can be made current\n" );
     if (!(pixel_formats = malloc( formats_count * sizeof(*pixel_formats) ))) ERR( "Failed to allocate memory for pixel formats\n" );
     else for (int i = 0; i < formats_count; i++) driver_funcs->p_describe_pixel_format( i + 1, pixel_formats + i );
 

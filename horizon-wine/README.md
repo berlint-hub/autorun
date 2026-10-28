@@ -39,7 +39,7 @@ One source tree builds each runtime. The CMake options pick which:
 
 | Runtime | Runs | Options |
 |---|---|---|
-| x86 (`nx-wow64-dynarec-*`) | 32-bit games through WoW64 and Box64, with OpenGL and Vulkan from mesa-switch | `WINE_NX_BOX64_DYNAREC`, `WINE_NX_MESA_SWITCH_DIR` |
+| x86 (`nx-wow64-dynarec-*`) | 32-bit games through WoW64 and Box64, with OpenGL and Vulkan from mesa-switch | `WINE_NX_BOX64_DYNAREC`, `WINE_NX_MESA_SWITCH_DIR`, `WINE_NX_NXVK_DIR` |
 | AMD64 (`nx-amd64-fex-*`) | 32- and 64-bit games through FEX (WoW64 and ARM64EC) | `WINE_NX_AMD64`, `WINE_NX_FEX` |
 
 The AMD64 runtime runs 32-bit programs too, so a card needs only it; the x86

@@ -246,6 +246,29 @@ static void nx_note_context_request( int format, const EGLint *attribs, const EG
     else nx_log( "[NXGL] the program asks for %s (format %d)", profile, format );
 }
 
+/* What the EGL this driver is talking to can do, said once, the first time a
+ * context cannot be made. A display with no config for OpenGL is the whole
+ * diagnosis of a program that ends up without one -- a driver built for GLES
+ * only, or a display whose client API was bound to ES before win32u asked --
+ * and a display that has them moves the question to the driver's own error,
+ * which the caller logs next. */
+static void nx_note_egl_state( const char *why )
+{
+    const char *vendor, *version;
+    static int noted;
+
+    if (InterlockedExchange( &noted, 1 )) return;
+    vendor = funcs->p_eglQueryString( egl->display, EGL_VENDOR );
+    version = funcs->p_eglQueryString( egl->display, EGL_VERSION );
+    if (!egl->config_count)
+        nx_log( "[NXGL] %s: EGL %s %s describes no config for OpenGL, so no pixel format can carry "
+                "a context (a driver without desktop GL, or one whose client API is ES only)",
+                why, vendor ? vendor : "?", version ? version : "?" );
+    else
+        nx_log( "[NXGL] %s: EGL %s %s, %u config(s) for OpenGL", why, vendor ? vendor : "?",
+                version ? version : "?", egl->config_count );
+}
+
 /* Drops one attribute from a context attribute list, the terminator included.
  * FALSE if the list does not have it. */
 static BOOL nx_drop_context_attribute( EGLint *attribs, EGLint **end, EGLint name )
@@ -956,6 +979,7 @@ static struct opengl_context *nx_context_create( int format, struct opengl_conte
     }
     if (error != EGL_SUCCESS || !context->host_context)
     {
+        nx_note_egl_state( "a context could not be made" );
         ERR( "context creation failed for format %d, share %p, error %#x\n", format, share, error );
         free( context );
         return NULL;

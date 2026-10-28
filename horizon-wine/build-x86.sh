@@ -30,6 +30,7 @@ sh "$root/horizon-wine/tools/bootstrap-wma.sh"
 # git in the image must trust the mounted tree: bind mounts keep the host's
 # UIDs, and the container runs as root.
 docker run --rm -v "$root:/work" -w /work -e NX_MESA="${WINE_NX_MESA_SWITCH_DIR:-}" \
+    -e NX_NXVK="${WINE_NX_NXVK_DIR:-}" \
     -e GIT_CONFIG_COUNT=2 -e GIT_CONFIG_KEY_0=safe.directory -e GIT_CONFIG_VALUE_0='*' \
     -e GIT_CONFIG_KEY_1=safe.directory -e GIT_CONFIG_VALUE_1='/work/horizon-wine/vendor/box64' \
     "${WINE_NX_DEVKIT_IMAGE:-$(cat "$root/horizon-wine/switch-dev.txt")}" sh -ec '
@@ -37,6 +38,7 @@ docker run --rm -v "$root:/work" -w /work -e NX_MESA="${WINE_NX_MESA_SWITCH_DIR:
         -DCMAKE_TOOLCHAIN_FILE=/work/horizon-wine/cmake/switch-devkitA64.cmake \
         -DWINE_NX_PE_BUILD_DIR=/work/horizon-wine/build-wine-amd64-pe \
         -DWINE_NX_BOX64_DYNAREC=ON -DWINE_NX_USB_STORAGE=ON -DCMAKE_BUILD_TYPE=Release \
-        ${NX_MESA:+-DWINE_NX_MESA_SWITCH_DIR="$NX_MESA"}
+        ${NX_MESA:+-DWINE_NX_MESA_SWITCH_DIR="$NX_MESA"} \
+        ${NX_NXVK:+-DWINE_NX_NXVK_DIR="$NX_NXVK"}
     cmake --build horizon-wine/build-switch-wow64-mesa-switch --target wine-nx-runtime-nro -j 8
     '

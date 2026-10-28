@@ -50,7 +50,8 @@ i686-w64-mingw32-clang -Os -Wall -Wextra -Werror -fno-builtin -nostdlib \
 sh "$root/horizon-wine/tools/bootstrap-box64-core.sh"
 sh "$root/horizon-wine/tools/bootstrap-wma.sh"
 # The switch-dev image (switch-dev.txt) has libnx, mesa-switch, LSFG-VK and
-# libusbhsfs in portlibs. WINE_NX_MESA_SWITCH_DIR links another mesa-switch.
+# libusbhsfs in portlibs. WINE_NX_MESA_SWITCH_DIR links another mesa-switch,
+# WINE_NX_NXVK_DIR links nxvk in place of it.
 # git in the image must trust the mounted tree: bind mounts keep the host's
 # UIDs, and the container runs as root.
 docker run --rm --network none -v "$root:/work" -w /work \
@@ -59,13 +60,15 @@ docker run --rm --network none -v "$root:/work" -w /work \
     -e NX_PE="/work/${pe#"$root/"}" -e NX_BUILD="/work/${build#"$root/"}" \
     -e NX_JOBS="$jobs" -e NX_DYNAREC="${WINE_NX_BOX64_DYNAREC:-ON}" \
     -e WINE_NX_JOBS="$jobs" \
-    -e NX_MESA="${WINE_NX_MESA_SWITCH_DIR:-}" -e NX_FEX="$fex" -e NX_BOOT_BUNDLE="$boot_bundle" \
+    -e NX_MESA="${WINE_NX_MESA_SWITCH_DIR:-}" -e NX_NXVK="${WINE_NX_NXVK_DIR:-}" \
+    -e NX_FEX="$fex" -e NX_BOOT_BUNDLE="$boot_bundle" \
     "${WINE_NX_DEVKIT_IMAGE:-$(cat "$root/horizon-wine/switch-dev.txt")}" sh -ec '
     cmake -S horizon-wine -B "$NX_BUILD" -G Ninja \
         -DCMAKE_TOOLCHAIN_FILE=/work/horizon-wine/cmake/switch-devkitA64.cmake \
         -DWINE_NX_PE_BUILD_DIR="$NX_PE" -DWINE_NX_AMD64=ON -DWINE_NX_FEX="$NX_FEX" \
         -DWINE_NX_BOX64_INTERPRETER=ON -DWINE_NX_BOX64_DYNAREC="$NX_DYNAREC" \
-        ${NX_MESA:+-DWINE_NX_MESA_SWITCH_DIR="$NX_MESA"} -DWINE_NX_USB_STORAGE=ON \
+        ${NX_MESA:+-DWINE_NX_MESA_SWITCH_DIR="$NX_MESA"} \
+        ${NX_NXVK:+-DWINE_NX_NXVK_DIR="$NX_NXVK"} -DWINE_NX_USB_STORAGE=ON \
         -DWINE_NX_BOOT_BUNDLE="$NX_BOOT_BUNDLE" -DCMAKE_BUILD_TYPE=Release
     cmake --build "$NX_BUILD" --target wine-nx-runtime-nro -j "$NX_JOBS"
     '
