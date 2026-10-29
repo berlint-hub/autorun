@@ -552,3 +552,32 @@ Tests: `tests/sd_read_cache.c` gained `test_pool_sized_by_heap` (the policy at
 nothing free, 1 GB, 1.7 GB, and with its own chunks counted) and `test_deep_file`
 (a file read through more than eight chunks stays cached), and
 `test_least_recently_used` was made independent of `SD_CACHE_LINES`.
+
+## What memory a run can have, and where the ceiling comes from (2026-10-29)
+
+Asked "can Autorun just allocate 3 GB of RAM?". It cannot, and the log says why:
+a Switch reserves 0.8 GB of its 4 GB, so an application may hold 3.2 GB -- but
+only a process created with the 39-bit address space can be given it. The 32-bit
+forwarder (the one fixed-address Win32 games need) has 4 GB of addresses for its
+code, heap and every mapping together, and Horizon reports `memory=2048 MB` to
+it; `svcSetHeapSize` can never be given more than that. The ceiling is decided by
+the forwarder the console started, not by anything the runtime does.
+
+So this turn:
+
+- `[INIT] processors=… memory=… MB used=… MB` now ends with
+  `(N-bit address space: the most this run can hold)` -- the one line that says
+  what the whole run has to work with, instead of leaving it to be inferred.
+- `[SDCACHE]` was still printing "8 per file, 32 to 192 MB" after the cache grew:
+  it is now built from the header's own constants by
+  `wine_nx_sd_cache_describe()`, so it cannot drift again.
+- The launcher's two forwarder rows say what each is worth: the 39-bit one is
+  the only process that can be given the console's whole memory for games
+  (about 3.2 GB of 4 GB), the 32-bit one is given 2 GB and never more.
+- `documentation/technical.md`'s Memory bullet carries the same explanation.
+
+What this means for a 32-bit game such as Dark Souls II: its own address space
+stops at 2 GB however much the console has, so free RAM cannot make the game
+hold more. It can only go to what the runtime keeps in it -- which is the card
+cache (`cache_mb=<held>/<may hold>`, now up to 512 MB) and the shader caches on
+the card.

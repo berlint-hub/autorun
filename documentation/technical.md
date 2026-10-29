@@ -498,6 +498,18 @@ runtime; the full package now ships the Mesa 26 one.
   launcher can install itself and which also raises the memory limit to 2 GiB.
   AMD64 programs use the main 39-bit application forwarder. The same NRO
   selects the execution path from the program's PE header.
+  That address space is the ceiling on everything a run does: a Switch keeps
+  0.8 GB of its 4 GB for the system, so an application may hold 3.2 GB -- but
+  only a 39-bit process can be given it, and a 32-bit one has 4 GB of addresses
+  for its code, its heap and every mapping, which is why Horizon reports
+  2 GiB to it and `svcSetHeapSize` cannot be given more. Nothing in the runtime
+  can raise this: it is set when the process is created, by the forwarder the
+  console started. The run says which it is -- `[INIT] processors=3
+  memory=2048 MB used=209 MB (32-bit address space: the most this run can
+  hold)` -- and it is worth reading before blaming a game for using little RAM:
+  a 32-bit program cannot address more than 2 GB of its own, so the memory left
+  over can only go to what the runtime keeps in it (the card cache,
+  `[PROGRESS] cache_mb=…/…`), not to the game.
   Wine reserves the program's low address space early, keeps its allocations
   clear of the memory Horizon hands to libnx, and leaves 32-bit programs'
   Vulkan memory in the driver's own mappings.

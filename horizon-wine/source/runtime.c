@@ -6358,8 +6358,15 @@ int main( int argc, char **argv )
     runtime_boost_thread_limit();
     log_line( "[SYNC] %s", horizon_fast_sync_enabled ? "Horizon queued waits" : "Standard" );
     wine_nx_thread_configure_cores( runtime_four_cores );
-    log_line( "[SDCACHE] %s", sd_cache ? "sdmc reads cached: 128 KB chunks, 8 per file, 32 to 192 MB in all"
-                                      : "no sdmc device; reads are not cached" );
+    if (sd_cache)
+    {
+        extern void wine_nx_sd_cache_describe( char *out, size_t size );
+        char cache_text[128];
+
+        wine_nx_sd_cache_describe( cache_text, sizeof(cache_text) );
+        log_line( "[SDCACHE] %s", cache_text );
+    }
+    else log_line( "[SDCACHE] no sdmc device; reads are not cached" );
     if (wine_nx_lazy_file_views)
         log_line( "[INIT] views of files read on demand (lazy-file-views): only the parts a program touches come from the card" );
     log_line( "[INIT] verbose traces %s (verbose.txt)", wine_nx_runtime_verbose ? "on" : "off" );
@@ -6644,10 +6651,16 @@ int main( int argc, char **argv )
     }
     {
         unsigned long long total, used;
+        int bits = runtime_address_space_bits();
 
         horizon_get_memory_info( &total, &used );
-        log_line( "[INIT] processors=%u memory=%llu MB used=%llu MB", (unsigned int)teb->Peb->NumberOfProcessors,
-                  total >> 20, used >> 20 );
+        /* The first number is the ceiling for everything this run does: the
+         * game, Wine, the graphics driver, the caches. Horizon gives a process
+         * what its forwarder's address space allows, and nothing here can ask
+         * for more -- so it is said plainly, with the address space that set
+         * it, instead of being read out of "memory=" by whoever knows. */
+        log_line( "[INIT] processors=%u memory=%llu MB used=%llu MB (%d-bit address space: the most this run "
+                  "can hold)", (unsigned int)teb->Peb->NumberOfProcessors, total >> 20, used >> 20, bits );
     }
     wine_nx_start_user_shared_data_clock();
     log_line( "[INIT] shared data clock initialized" );

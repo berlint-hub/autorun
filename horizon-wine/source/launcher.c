@@ -4518,9 +4518,10 @@ static void settings_menu( struct launcher *l )
         snprintf( rows[SET_MAKE_MAIN].label, sizeof(rows[0].label), "Make an Autorun forwarder" );
         snprintf( rows[SET_MAKE_MAIN].value, sizeof(rows[0].value), "%s",
                   l->options->install_forwarder ? "Autorun" : "Unavailable" );
-        rows[SET_MAKE_MAIN].help = "Installs the 39-bit Autorun forwarder. Fixed-address Win32 games also "
-                                   "require the Atmosphere low-address patch, or the 32-bit forwarder below. "
-                                   "Use emuMMC only.";
+        rows[SET_MAKE_MAIN].help = "Installs the 39-bit Autorun forwarder: the only process that can be given "
+                                   "the console's whole memory for games (about 3.2 GB of its 4 GB), and what "
+                                   "64-bit games need. Fixed-address Win32 games also require the Atmosphere "
+                                   "low-address patch, or the 32-bit forwarder below. Use emuMMC only.";
         rows[SET_MAKE_MAIN].adjustable = 0;
         rows[SET_MAKE_MAIN].disabled = !l->options->install_forwarder;
         snprintf( rows[SET_MAKE_32].label, sizeof(rows[0].label), "Make a 32-bit Autorun forwarder" );
@@ -4528,7 +4529,8 @@ static void settings_menu( struct launcher *l )
                   l->options->install_forwarder ? "Autorun (32-bit)" : "Unavailable" );
         rows[SET_MAKE_32].help = "Installs a forwarder whose 32-bit address space has every mapping in the "
                                  "low 4 GB: fixed-address Win32 games run through it without the Atmosphere "
-                                 "low-address patch. 64-bit games need the 39-bit forwarder. Use emuMMC only.";
+                                 "low-address patch. That address space is the whole process's, so a run "
+                                 "through it is given 2 GB and never more. Use emuMMC only.";
         rows[SET_MAKE_32].adjustable = 0;
         rows[SET_MAKE_32].disabled = !l->options->install_forwarder;
 #ifdef WINE_NX_SWAP_POC
