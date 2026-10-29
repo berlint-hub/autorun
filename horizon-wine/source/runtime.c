@@ -1111,6 +1111,26 @@ int wine_nx_input_toggle_mode( void )
               mode == INPUT_KEYBOARD_MOUSE ? "the keyboard and mouse" : "the gamepad" );
     return mode;
 }
+/* The controls menu's own Input section (controls_overlay.c): the player
+ * picked what the controller is from the panel. It is the same swap + and -
+ * make, and it lasts the same way -- the rest of this run -- because the menu
+ * writes the setting to the program's controls beside it for the next one. */
+int wine_nx_input_set_mode( int mode )
+{
+    int previous;
+
+    if (mode != INPUT_KEYBOARD_MOUSE && mode != INPUT_CONTROLLER) return wine_nx_input_toggle_mode();
+    pthread_mutex_lock( &wine_nx_input_profile_mutex );
+    previous = wine_nx_input_profile.mode;
+    wine_nx_input_profile.mode = mode;
+    runtime_input_mode_swapped = 1;
+    pthread_mutex_unlock( &wine_nx_input_profile_mutex );
+    if (previous != mode)
+        log_line( "[INPUT] the controls menu set the controller to %s for the rest of this run",
+                  mode == INPUT_KEYBOARD_MOUSE ? "the keyboard and mouse" : "the gamepad" );
+    return mode;
+}
+
 /* Where the controls overlay (controls_overlay.c) writes what it changes: the
  * runtime directory and the program the runtime started, kept from the load
  * below so remapping while the game runs lands in the same per-game file. */

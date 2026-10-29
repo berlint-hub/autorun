@@ -476,13 +476,23 @@ runtime; the full package now ships the Mesa 26 one.
   the card, so a game whose menus need a mouse is one tap away without changing
   how it starts. An overlay has the controller while it is up, where the two
   buttons are keys, so the chord waits for it to close.
-- **Remapping while a program runs.** Minus and the left stick click open the
-  controls overlay over the game (`source/controls_overlay.c`): the same rows
-  the launcher's controls editor has, each opened into the key or mouse action
-  it should make -- picked from a grid in keyboard/mouse mode, captured from
-  the controller in controller mode. Every change is written to the program's
-  own controls at once, so it can be tried the moment the overlay closes (B).
-  X clears a row, Y puts the game's layout back under it.
+- **The controls menu, over a running program.** Minus and the left stick click
+  open an on-screen display over the game (`source/controls_overlay.c`): a panel
+  down the right side of the screen, a section per thing it edits. **Input** is
+  what the controller is -- the same swap plus and minus make, and it is written
+  to the program's controls as well, so the next run starts that way. **Mapping**
+  is the launcher's control rows, each opened into the key or mouse action it
+  should make: picked from a grid in keyboard/mouse mode, captured from the
+  controller in controller mode. **Mouse** is the stick's cursor speed, by its
+  stops. Every change is written to the program's own controls at once, so it
+  can be tried the moment the menu closes (B); X clears a row and Y puts the
+  game's layout back under it. Left and Right walk the sections, Up and Down the
+  rows, ZL and ZR page them. The panel is placed and scaled from the screen it
+  is drawn on -- one factor of the smaller side gives its margin, width, rows
+  and text sizes, so nothing about it is a fixed number of pixels -- and a tap
+  on the console's 1280x720 touch panel is mapped through that same geometry
+  into whatever screen the presenters draw for, so a finger lands on what it
+  looks like it lands on at every resolution.
 - **Memory.** Fixed-base games such as NFSU2 need a 32-bit address space:
   launch the NRO through a forwarder made with "32-bit, no alias", which the
   launcher can install itself and which also raises the memory limit to 2 GiB.

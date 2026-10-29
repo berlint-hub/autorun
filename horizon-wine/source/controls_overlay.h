@@ -1,16 +1,27 @@
 /* Copyright 2026 Wine-NX contributors. LGPL-2.1-or-later.
  *
- * The controls overlay: the controls editor that opens over a running program
- * (Minus + the right stick), so a mapping can be tried and fixed where the
- * game is, instead of back in the launcher. It works on the same per-game
- * controls the launcher edits -- the program's settings file, over the game's
- * recommended layout and the global controls -- and saves each change as it is
- * made, so closing it is only ever closing it.
+ * The controls overlay: the on-screen display that opens over a running
+ * program (Minus + the left stick click), so the controls can be tried and
+ * fixed where the game is, instead of back in the launcher. It works on the
+ * same per-game controls the launcher edits -- the program's settings file,
+ * over the game's recommended layout and the global controls -- and saves each
+ * change as it is made, so closing it is only ever closing it.
  *
- * One list of the controller's own inputs (what A does, what ZL does), a row
- * opened into what it should do: keys and mouse actions picked from a grid in
- * keyboard/mouse mode, or captured from the controller in controller mode.
- * Rows cleared or reset fall back through the layers below.
+ * It is a panel down the right side of the screen, placed and scaled from the
+ * screen it is drawn on, with a section per thing it edits:
+ *
+ *   Input    what the controller is -- the pad, or the keyboard and mouse the
+ *            pad stands in for -- and it is saved with the rest.
+ *   Mapping  the controller's own inputs (what A does, what ZL does); a row
+ *            opens into what it should do: keys and mouse actions picked from
+ *            a grid in keyboard/mouse mode, or captured from the controller in
+ *            controller mode. Rows cleared or reset fall back through the
+ *            layers below.
+ *   Mouse    the analog stick's cursor speed, by its stops.
+ *
+ * Left and Right walk the sections, Up and Down the rows, A uses one, X clears
+ * it and Y takes it back to what the layers below say. A finger taps the same
+ * things: the tabs, the rows and the grid's cells.
  *
  * Like the floating keyboard (osk.h) it is drawn here in software and copied
  * over each frame by the presenters; osk.c hands its frame and copy calls to
@@ -36,8 +47,10 @@ unsigned int wine_nx_controls_overlay_generation( void );
 
 /* One reading of the controller while it is up: the buttons held as the
  * keyboard reads them (OSK_* in osk.h), both sticks (-32768 to 32767, up and
- * right positive), and a finger on a 1280x720 screen. Returns whether the
- * finger is on the overlay, which is then not the program's. */
+ * right positive), and a finger on the console's 1280x720 touch panel, which
+ * is scaled into whatever screen the presenters last drew the overlay for.
+ * Returns whether the finger is on the overlay, which is then not the
+ * program's. */
 int wine_nx_controls_overlay_input( unsigned int held, int left_x, int left_y, int right_x, int right_y,
                                     int touching, int touch_x, int touch_y, uint64_t now_ns );
 
@@ -50,8 +63,13 @@ int wine_nx_controls_overlay_frame( int screen_width, int screen_height, struct 
 unsigned int wine_nx_controls_overlay_copy( int screen_width, int screen_height, void *pixels,
                                             int stride, int rgba );
 
+/* The menu's sections, in the order the tabs run across the panel. */
+enum { WINE_NX_CONTROLS_TAB_INPUT, WINE_NX_CONTROLS_TAB_MAPPING, WINE_NX_CONTROLS_TAB_MOUSE };
+
 /* The row the selection is on (input_sources' order), for tests. */
 int wine_nx_controls_overlay_selected( void );
+/* The section it is showing (the enum above), for tests. */
+int wine_nx_controls_overlay_tab( void );
 /* Forget everything, for tests. */
 void wine_nx_controls_overlay_reset( void );
 

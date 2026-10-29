@@ -455,3 +455,62 @@ Two details that would otherwise bite:
 Tests: `tests/input_profile.c` grew `runtime_chord()` (tap, hold, repeat,
 release-after-hold, press-again, backwards clock). The Switch build is the only
 place the wiring itself (poll and toggle) is compiled.
+
+## The in-game OSD menu: sections, and a panel that fits the screen (2026-10-29)
+
+The user asked for "a proper game OSD with keyboard/mouse, controller and
+mapping", and said the mapping overlay that `-` + left stick click opened was
+"too big and not aligned with the resolution". Both were true, and both had the
+same root:
+
+- the panel was **centred** and fixed at 800 logical pixels wide with an
+  8-row list, which on 720p covered more than half the screen and hid the game
+  it was being tuned against;
+- `wine_nx_controls_overlay_input()` did every touch hit test against a
+  **hard-coded `layout(1280, 720)`** while `frame()`/`draw()` used the screen
+  the presenter passed, so on any other resolution a finger landed somewhere
+  else than the thing it was on.
+
+What it is now (`source/controls_overlay.c`, `controls_overlay.h`):
+
+- **A panel down the right side**, one margin (2.5% of the smaller side) off
+  every edge, as tall as the screen allows, 560 logical pixels wide. Everything
+  -- margin, width, strips, row height, text sizes -- comes from one factor,
+  `layout_scale()`, of the smaller side against 1280x720; nothing is a fixed
+  number of pixels. On 1280x720 the panel is 560x684 at (702,18); on 1920x1080
+  it is exactly 1.5x that (840x1026 at (1053,27)), which the host test asserts.
+- **Three sections, as tabs across the panel** (the Steam Deck quick-access
+  shape: side-anchored panel, icons/tabs along the top, footer of button
+  hints): **Input** (pad or keyboard+mouse -- the same swap `+`/`-` make, now
+  also written to the program's controls, through the new weak
+  `wine_nx_input_set_mode()` in `runtime.c`), **Mapping** (the old row list,
+  now scrolling to the rows that fit and paged with ZL/ZR), **Mouse** (the
+  speed stops, as rows rather than a grid). It still opens on **Mapping**, the
+  section it was opened for.
+- **One cursor per section** (`input_selected`, `map_selected`/
+  `map_top`, `mouse_selected`/`mouse_top`), so coming back to a section is
+  coming back to where you were. Left/Right change section, Up/Down walk rows,
+  A uses the row, X clears, Y restores, B closes; a row's grid keeps
+  Left/Right for its cells. Entering a section puts its cursor where the thing
+  it edits already is.
+- **Taps go through the same geometry**: the console's touch panel is
+  1280x720, the presenters may draw the overlay for anything (the Vulkan path
+  passes the swapchain extent, the compositor and the OpenGL path pass
+  1280x720), so a finger's pixels are scaled into whatever screen the overlay
+  was last drawn for (`touch_x_on_screen`/`touch_y_on_screen`), and the panel,
+  tabs, rows, grid cells and the footer's Back are all hit-tested against the
+  drawn `layout()`.
+- `wine_nx_controls_overlay_tab()` is new (for tests); the tab enum
+  `WINE_NX_CONTROLS_TAB_*` lives in the header, and the .c maps its own names
+  onto it so the two cannot drift.
+- Labels no longer truncate at 15 characters (`labels[].text` is 80 bytes now)
+  and a name too long for its row is set a size smaller instead of being
+  written over the value beside it.
+
+Tests: `tests/controls_overlay.c` was rewritten for the sections -- tab
+walking both ways, per-section cursors and paging, the Input section writing
+`input-mode`, the Mouse rows setting and resetting `mouse-speed`, the grid and
+the capture as before, taps on a tab / on a row / off the panel / on the
+footer, and one tap at 1920x1080 proving the panel's pixels are scaled (the
+frame geometry at both sizes is asserted). Run it with the host stubs if SDL2
+is not installed: the picture itself only compiles where SDL2_ttf is.
