@@ -329,6 +329,177 @@ static int log_flusher_quit;
 static pthread_t log_flusher_thread;
 static int runtime_profile;
 
+/***********************************************************************
+ * Play time
+ *
+ * The library keeps how long each program has run, and a run is only two
+ * times: when it began and when it ended. The runtime is the one that runs the
+ * program, so it is the one that writes a run down -- play-session.txt says
+ * which program and when -- and credits it as the program closes. A run started
+ * from its forwarder, from run-next.txt or from the command line never meets
+ * the launcher at all, which is why this cannot be the launcher's to keep.
+ *
+ * A run that ends without this runtime closing it -- the console switched off,
+ * the program killed, the runtime in a hang -- is still on the card with the
+ * last time it was seen up, written once a minute from the log flusher's
+ * thread, so the launcher credits that and not the hours the console was off.
+ */
+#define PLAY_SESSION_FILE RUNTIME_DIR "/" LAUNCHER_SESSION_FILE
+
+static pthread_mutex_t play_session_mutex = PTHREAD_MUTEX_INITIALIZER;
+static char play_session_path[512];
+static unsigned int play_session_started;
+static int play_session_open;
+
+/* Seconds from the epoch, or 0 when the clock says nothing worth keeping. */
+static unsigned int runtime_now_seconds(void)
+{
+    time_t now = time( NULL );
+
+    return now > 0 ? (unsigned int)(unsigned long long)now : 0;
+}
+
+static const char *program_name( const char *path )
+{
+    const char *slash = strrchr( path, '/' );
+
+    return slash ? slash + 1 : path;
+}
+
+/* A run's length as the launcher writes it, so the log and the screen say the
+ * same thing about the same run. */
+static void run_time_text( char *out, size_t size, unsigned int seconds )
+{
+    if (!seconds) snprintf( out, size, "under a minute" );
+    else launcher_playtime_text( out, size, seconds );
+}
+
+/* "3h 53m played", or "nothing played" for a game the library has not counted
+ * yet: the two [PLAY] lines say what the card holds before and after a run. */
+static void playtime_text( char *out, size_t size, unsigned int play_seconds )
+{
+    char played[32];
+
+    if (!play_seconds)
+    {
+        snprintf( out, size, "nothing played" );
+        return;
+    }
+    launcher_playtime_text( played, sizeof(played), play_seconds );
+    snprintf( out, size, "%s played", played );
+}
+
+/* The library as the card holds it, or NULL. It is freed by the caller. */
+static struct launcher_catalog *library_open( void )
+{
+    struct launcher_catalog *catalog = malloc( sizeof(*catalog) );
+
+    if (!catalog) return NULL;
+    if (launcher_catalog_load( catalog, RUNTIME_DIR "/" LAUNCHER_CATALOG_FILE ) != LAUNCHER_CATALOG_OK)
+    {
+        free( catalog );
+        return NULL;
+    }
+    return catalog;
+}
+
+/* Writes down the run that is about to begin. 0 when there is nothing to keep:
+ * a program the library does not hold, or a clock that cannot time a run. */
+static int library_run_begin( const char *path )
+{
+    struct launcher_catalog *catalog;
+    char played[32];
+    unsigned int started;
+    int index, saved;
+
+    if (!path[0] || !(catalog = library_open())) return 0;
+    if ((index = launcher_catalog_find( catalog, path )) < 0)
+    {
+        /* A program nobody added to the library has no play time to keep. */
+        free( catalog );
+        return 0;
+    }
+    if (!(started = runtime_now_seconds()))
+    {
+        log_line( "[PLAY] the console's clock says nothing, so this run of %s is not timed",
+                  program_name( path ) );
+        free( catalog );
+        return 0;
+    }
+    /* A run an older launcher left open on the card is closed before this one
+     * begins: it was time played, and it is not this run's. */
+    if (catalog->entries[index].started_at)
+        launcher_catalog_credit_run( catalog, path, catalog->entries[index].started_at, started );
+    catalog->entries[index].last_played = started;
+    saved = launcher_catalog_save( catalog, RUNTIME_DIR "/" LAUNCHER_CATALOG_FILE );
+    playtime_text( played, sizeof(played), catalog->entries[index].play_seconds );
+    free( catalog );
+
+    if (!launcher_session_write( PLAY_SESSION_FILE, path, started, started ))
+        log_line( "[PLAY] %s began; the card would not take the run in progress, so it is only counted "
+                  "if this runtime gets to close it", program_name( path ) );
+    else
+        log_line( "[PLAY] %s began; %s so far", program_name( path ), played );
+    if (!saved)
+        log_line( "[PLAY] the library could not be saved, so when this game was last on is not on the card" );
+
+    pthread_mutex_lock( &play_session_mutex );
+    snprintf( play_session_path, sizeof(play_session_path), "%s", path );
+    play_session_started = started;
+    play_session_open = 1;
+    pthread_mutex_unlock( &play_session_mutex );
+    return 1;
+}
+
+/* Says the run is still up, once a minute, so one that ends badly is credited
+ * up to here and not up to the next time the launcher opens. */
+static void library_run_keep( void )
+{
+    unsigned int now;
+
+    if (!__atomic_load_n( &play_session_open, __ATOMIC_RELAXED )) return;
+    if (!(now = runtime_now_seconds())) return;
+    pthread_mutex_lock( &play_session_mutex );
+    if (play_session_open) launcher_session_write( PLAY_SESSION_FILE, play_session_path, play_session_started, now );
+    pthread_mutex_unlock( &play_session_mutex );
+}
+
+/* Credits the run that has just ended, and says so: the log is where a count
+ * that looks wrong can be read back line by line. */
+static void library_run_end( void )
+{
+    struct launcher_catalog *catalog;
+    char played[32], ran[32];
+    unsigned int now, elapsed;
+
+    if (!__atomic_load_n( &play_session_open, __ATOMIC_RELAXED )) return;
+    pthread_mutex_lock( &play_session_mutex );
+    now = runtime_now_seconds();
+    elapsed = now > play_session_started ? now - play_session_started : 0;
+    if (elapsed > LAUNCHER_SESSION_MAX) elapsed = LAUNCHER_SESSION_MAX;
+    run_time_text( ran, sizeof(ran), elapsed );
+    /* The last sight of the run is now: a launcher that has to credit it later
+     * credits this far and no further. */
+    if (now) launcher_session_write( PLAY_SESSION_FILE, play_session_path, play_session_started, now );
+    if ((catalog = library_open()) &&
+        launcher_catalog_credit_run( catalog, play_session_path, play_session_started, now ))
+    {
+        playtime_text( played, sizeof(played),
+                       catalog->entries[launcher_catalog_find( catalog, play_session_path )].play_seconds );
+        if (launcher_catalog_save( catalog, RUNTIME_DIR "/" LAUNCHER_CATALOG_FILE ))
+        {
+            launcher_session_clear( PLAY_SESSION_FILE );
+            log_line( "[PLAY] %s ran %s; %s so far", program_name( play_session_path ), ran, played );
+        }
+        else
+            log_line( "[PLAY] %s ran %s, but the library could not be saved: the launcher counts the run "
+                      "from what the card holds", program_name( play_session_path ), ran );
+    }
+    free( catalog );
+    play_session_open = 0;
+    pthread_mutex_unlock( &play_session_mutex );
+}
+
 static void *log_flusher( void *arg )
 {
     unsigned int ticks = 0;
@@ -356,6 +527,9 @@ static void *log_flusher( void *arg )
             horizon_registry_flush();
         }
         if (ticks % 10 == 0) wine_nx_thread_balance();
+        /* A minute of the run, on the card: the log flusher's thread is the one
+         * that is still there when nothing else is. */
+        if (ticks % 300 == 0) library_run_keep();
         runtime_alternate_clean();
         pthread_mutex_lock( &log_mutex );
         fflush( log_file );
@@ -641,7 +815,10 @@ static int run_report_log_line( const char *line )
          * with no settings line at all runs on the default. The rest of the
          * [NXGL] lines are too many for a summary -- those are in the log. */
         "[MESA]", "[NXGL] the first context made current", "[NXGL] it is",
-        "[NXGL] it is NOT", "[NXGL] the program's OpenGL", "[NXGL] no context for"
+        "[NXGL] it is NOT", "[NXGL] the program's OpenGL", "[NXGL] no context for",
+        /* What the run added to the game's play time, which the launcher shows:
+         * a count that looks wrong is read back from here. */
+        "[PLAY]"
     };
     unsigned int i;
 
@@ -5251,6 +5428,9 @@ static int return_to_launcher( void )
             game_fixes_finish( RUNTIME_DIR, runtime_program, wine_nx_program_exit_code, line, sizeof(line) ))
             log_line( "%s", line );
     }
+    /* The run is over: what it was worth goes to the game's play time now, so
+     * the launcher that comes next already has it. */
+    library_run_end();
     finish_game_report();
     /* A program waiting in run-next.txt (after the components setup) is started
      * by the runtime started again, whether or not the launcher would be. */
@@ -6430,6 +6610,8 @@ int main( int argc, char **argv )
         runtime_init_peb_process( teb, module, params );
         set_load_order_app_name( params->ImagePathName.Buffer );
         log_line( "[PEB] image=%s nt=\\??\\%s", dos_path, dos_path );
+        /* The program is about to run: the library's play time starts here. */
+        library_run_begin( target );
 
 #ifdef WINE_NX_AMD64
         if (target_machine == IMAGE_FILE_MACHINE_AMD64)

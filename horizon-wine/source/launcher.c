@@ -643,10 +643,19 @@ static void load_library( struct launcher *l )
         ui_message( &l->ui, "Library", "The game library is unreadable. It was preserved and no games were loaded." );
     }
     /* The launcher closes when a game starts, so this is where the run that
-     * just ended is added to its play time. */
-    if (launcher_catalog_settle_sessions( &l->catalog, now_seconds() ) &&
-        !launcher_catalog_save( &l->catalog, path ))
-        launcher_log( "[LAUNCHER] Could not save the play time" );
+     * just ended is added to its play time. The runtime writes down a run as it
+     * begins and credits it as it ends; one it never got to credit is still
+     * here, and is credited up to the last time the runtime said it was up. */
+    {
+        char session[512];
+        int changed;
+
+        runtime_file( l, LAUNCHER_SESSION_FILE, session, sizeof(session) );
+        changed = launcher_catalog_settle_session( &l->catalog, session, now_seconds() );
+        if (launcher_catalog_settle_sessions( &l->catalog, now_seconds() )) changed = 1;
+        if (changed && !launcher_catalog_save( &l->catalog, path ))
+            launcher_log( "[LAUNCHER] Could not save the play time" );
+    }
     for (i = 0; i < l->catalog.count && l->program_count < LAUNCHER_MAX_ENTRIES; i++)
         describe_catalog_program( l, &l->programs[l->program_count++], &l->catalog.entries[i] );
 }
@@ -2397,9 +2406,13 @@ static int start_program( struct launcher *l, struct program *p, char *target, s
     if (!launcher_dependency_preflight( l, p )) return 0;
     p->missing = 0;
     p->launched_order = l->catalog.next_order++;
-    /* The run is timed from here, and counted when the launcher is next up:
-     * save_library() writes it into the catalog the settle reads. */
-    if ((p->last_played = now_seconds())) p->started_at = p->last_played;
+    /* The run itself is timed by the runtime, which is what starts the program
+     * and is still there as it ends: it writes play-session.txt and credits it
+     * when the program closes, so a run started from a forwarder or from
+     * run-next.txt, which never meets this launcher, is counted too. What this
+     * writes is only when the game was last on -- and never over a time already
+     * known, for a console whose clock has not been set yet. */
+    if (now_seconds()) p->last_played = now_seconds();
     /* The game starts either way: the library it could not be written to is
      * saved again when the launcher comes back, and the log says what the toast
      * cannot -- this frame is the last one before the game takes the screen. */

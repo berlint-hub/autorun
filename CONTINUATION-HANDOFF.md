@@ -357,3 +357,54 @@ already has (`(nw->width || nw->height) && nw->slots_configured`) -- and
   disagree);
 - an OpenGL window while a Vulkan surface holds the screen is refused and says
   so, and nothing of the Vulkan surface's is released.
+
+## The played-time counter: who times a run (2026-10-29)
+
+The user said the counter of played time "is somehow confused". Read back from
+the code, it was confused in three ways, and all three are now fixed and host
+tested.
+
+**It was the launcher's, and the launcher is not what runs a game.** The
+launcher wrote `started-at` as it started a program and the next launcher open
+credited `now - started-at`. That covers a game started from the library and
+nothing else: a game started from its **HOME forwarder**, from **run-next.txt**
+behind a fix's setup, or from the **command line** never meets the launcher, so
+its time was never counted at all, and its "last played" stayed at whatever it
+was. The runtime is the one that starts every program and is still there as it
+ends, so the timing moved there (`horizon-wine/source/runtime.c`):
+`library_run_begin()` writes `switch/wine/play-session.txt` (path, start, last
+seen up) and updates the game's `last_played`; `library_run_end()`, next to
+`finish_game_report()`, credits the run through
+`launcher_catalog_credit_run()` and clears the file. The launcher no longer
+writes `started-at` at all; it still settles a card that carries one from an
+older build, and it credits the session file the runtime left behind.
+
+**A run that ended badly was credited up to the next launcher open.** Quit a game
+from the HOME menu, switch the console off in a game, or let the runtime hang,
+and the next launcher open credited everything since the program began -- the
+night included -- capped at a day. The session file now carries the last time
+the runtime said it was up, written once a minute from the log flusher's thread
+(`library_run_keep()`, `ticks % 300`), and both the runtime and the launcher
+credit no further than that.
+
+**An unset clock wiped when a game was last on.** `p->last_played = now_seconds()`
+wrote the 0 an unset clock answers over a known good time. It is only written
+when the clock says something now.
+
+Every run says what it added, so a count that still looks wrong can be read back
+from the log: `[PLAY] doom3.exe began; 3h 12m played so far` and
+`[PLAY] doom3.exe ran 41m; 3h 53m played so far`. `[PLAY]` is in the run
+report's selected lines, and `documentation/technical.md` says the same.
+
+Tests: `horizon-wine/tests/launcher_catalog.c` (`check_run_session`: the session
+file round trip with an escaped path, torn and foreign files rejected, credit
+only to the program named, backwards clock and the one-day cap, `alive` and
+`now` clamps, a file for a game that left the library cleared not credited), and
+the new `horizon-wine/tests/check_play_time.py` (CI "Play time a run adds"),
+which runs the runtime's own block out of `runtime.c` against the real catalog
+code on a temporary card.
+
+What is left: a run that ends within its first minute, before any heartbeat, is
+credited nothing -- it would have shown "<1m" anyway. The counter is wall-clock
+between the program's start and its end, so a clock moved forward during a run
+is still counted at its word, up to the one-day cap.

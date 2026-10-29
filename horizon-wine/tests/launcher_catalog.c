@@ -180,6 +180,120 @@ static void check_play_time(void)
     assert( !strcmp( text, "2 years ago" ) );
 }
 
+/* The run in progress is the runtime's to write and the launcher's to credit:
+ * a game started from its forwarder never meets the launcher, and one whose
+ * console was switched off must not turn the hours it was off into play. */
+static void check_run_session(void)
+{
+    char path[] = "/tmp/wine-nx-catalog-session-XXXXXX";
+    char session[] = "/tmp/wine-nx-play-session-XXXXXX";
+    struct launcher_catalog catalog;
+    struct launcher_session read;
+    struct launcher_catalog_entry *entry;
+    FILE *file;
+    unsigned int play;
+    int fd = mkstemp( path ), sfd = mkstemp( session );
+
+    assert( fd >= 0 && sfd >= 0 );
+    close( fd );
+    close( sfd );
+    unlink( session );
+    launcher_catalog_init( &catalog );
+    assert( launcher_catalog_add( &catalog, "sdmc:/Roms/Windows/doom3.exe", "Doom 3" ) == 0 );
+    assert( launcher_catalog_add( &catalog, "sdmc:/Roms/Windows/riddick.exe", "Riddick" ) == 1 );
+    entry = &catalog.entries[0];
+
+    /* A run the runtime wrote down, read back as it wrote it. */
+    assert( launcher_session_write( session, "sdmc:/Roms/Windows/doom3.exe", 1000, 1200 ) );
+    assert( launcher_session_read( session, &read ) );
+    assert( !strcmp( read.path, "sdmc:/Roms/Windows/doom3.exe" ) );
+    assert( read.started == 1000 && read.alive == 1200 );
+    /* A path the catalog escapes is escaped here as well. */
+    assert( launcher_session_write( session, "sdmc:/Games/a=b/c[d].exe", 10, 20 ) );
+    assert( launcher_session_read( session, &read ) && !strcmp( read.path, "sdmc:/Games/a=b/c[d].exe" ) );
+
+    /* Nothing to read: no file, a torn one, one that is not this file, and one
+     * with no start at all. None of them is a run. */
+    launcher_session_clear( session );
+    assert( !launcher_session_read( session, &read ) );
+    file = fopen( session, "w" );
+    assert( file && fprintf( file, "path=sdmc:/Roms/Windows/doom3.exe\nstarted=1000" ) > 0 );
+    assert( !fclose( file ) );
+    assert( !launcher_session_read( session, &read ) );
+    file = fopen( session, "w" );
+    assert( file && fprintf( file, "path=sdmc:/Roms/Windows/doom3.exe\nstarted=1000\nalive-dead=1\n" ) > 0 );
+    assert( !fclose( file ) );
+    assert( !launcher_session_read( session, &read ) );
+    file = fopen( session, "w" );
+    assert( file && fprintf( file, "path=sdmc:/Roms/Windows/doom3.exe\n" ) > 0 );
+    assert( !fclose( file ) );
+    assert( !launcher_session_read( session, &read ) );
+
+    /* A run is credited to the program it names, and to no other. */
+    assert( launcher_catalog_credit_run( &catalog, "sdmc:/Roms/Windows/doom3.exe", 1000, 1300 ) == 1 );
+    assert( entry->play_seconds == 300 && entry->last_played == 1000 );
+    assert( catalog.entries[1].play_seconds == 0 && catalog.entries[1].last_played == 0 );
+    /* A program the library does not hold has no time to keep. */
+    assert( launcher_catalog_credit_run( &catalog, "sdmc:/somewhere/else.exe", 1000, 1300 ) == 0 );
+    /* A clock that went backwards says nothing about how long it ran. */
+    assert( launcher_catalog_credit_run( &catalog, "sdmc:/Roms/Windows/doom3.exe", 2000, 1900 ) == 1 );
+    assert( entry->play_seconds == 300 );
+    /* A run with no start is not a run. */
+    assert( launcher_catalog_credit_run( &catalog, "sdmc:/Roms/Windows/doom3.exe", 0, 5000 ) == 0 );
+    assert( entry->play_seconds == 300 );
+    /* Never more than a day, and the counter saturates rather than wrapping. */
+    assert( launcher_catalog_credit_run( &catalog, "sdmc:/Roms/Windows/doom3.exe", 10,
+                                         10 + LAUNCHER_SESSION_MAX + 5000 ) == 1 );
+    assert( entry->play_seconds == 300 + LAUNCHER_SESSION_MAX );
+    play = entry->play_seconds;
+    entry->play_seconds = UINT_MAX - 5;
+    assert( launcher_catalog_credit_run( &catalog, "sdmc:/Roms/Windows/doom3.exe", 100, 1000 ) == 1 );
+    assert( entry->play_seconds == UINT_MAX );
+    entry->play_seconds = play;
+
+    /* The session file is what the launcher finds when the runtime never got to
+     * close the run: it is credited up to the last time the runtime said it was
+     * up, not up to now, and the file is gone afterwards. */
+    entry->play_seconds = 0;
+    entry->last_played = 0;
+    assert( launcher_session_write( session, "sdmc:/Roms/Windows/doom3.exe", 1000, 1500 ) );
+    assert( launcher_catalog_settle_session( &catalog, session, 40000 ) == 1 );
+    assert( entry->play_seconds == 500 && entry->last_played == 1000 );
+    assert( !launcher_session_read( session, &read ) );
+    /* Nothing left to credit, and a second settle changes nothing. */
+    assert( launcher_catalog_settle_session( &catalog, session, 50000 ) == 0 );
+    assert( entry->play_seconds == 500 );
+    /* A launcher that ended before the runtime's last sight of the run credits
+     * the shorter of the two. */
+    assert( launcher_session_write( session, "sdmc:/Roms/Windows/doom3.exe", 1000, 9000 ) );
+    assert( launcher_catalog_settle_session( &catalog, session, 1200 ) == 1 );
+    assert( entry->play_seconds == 700 );
+    /* A session file for a game that has left the library is cleared, not
+     * credited to someone else. */
+    assert( launcher_session_write( session, "sdmc:/gone/game.exe", 1000, 9000 ) );
+    assert( launcher_catalog_settle_session( &catalog, session, 9000 ) == 0 );
+    assert( catalog.entries[1].play_seconds == 0 );
+    assert( !launcher_session_read( session, &read ) );
+    /* A torn file is not a run and is not left for the next open either. */
+    file = fopen( session, "w" );
+    assert( file && fprintf( file, "path=sdmc:/Roms/Windows/doom3.exe\nstarted=100" ) > 0 );
+    assert( !fclose( file ) );
+    assert( launcher_catalog_settle_session( &catalog, session, 5000 ) == 0 );
+    assert( entry->play_seconds == 700 );
+
+    /* The whole of it on the card: written by the runtime, read by the
+     * launcher, and the launcher's next open has nothing left to add. */
+    assert( launcher_catalog_save( &catalog, path ) );
+    launcher_catalog_init( &catalog );
+    assert( launcher_catalog_load( &catalog, path ) == LAUNCHER_CATALOG_OK );
+    assert( launcher_catalog_settle_session( &catalog, session, 7000 ) == 0 );
+    assert( launcher_catalog_settle_sessions( &catalog, 7000 ) == 0 );
+    assert( catalog.entries[0].play_seconds == 700 );
+
+    unlink( path );
+    unlink( session );
+}
+
 /* A card written before play time was kept: read as it is, with no time. */
 static void check_older_catalog(void)
 {
@@ -337,9 +451,11 @@ int main(void)
     unlink( legacy );
     check_address_space();
     check_play_time();
+    check_run_session();
     check_older_catalog();
     check_order_beyond_the_counter();
     check_half_an_escape();
-    puts( "launcher catalog: entries, art, ordering, play time, legacy import and address space passed" );
+    puts( "launcher catalog: entries, art, ordering, play time, run sessions, legacy import and "
+          "address space passed" );
     return 0;
 }

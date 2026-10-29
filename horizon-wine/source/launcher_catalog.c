@@ -317,6 +317,34 @@ int launcher_catalog_import_legacy( struct launcher_catalog *catalog, const char
     }
 }
 
+/* How long a run is credited: from the time it began to the time it ended,
+ * never more than a day, and nothing at all for a clock that went backwards or
+ * was never set -- which says nothing about how long anything ran. */
+static unsigned int run_seconds( unsigned int started, unsigned int ended )
+{
+    unsigned int elapsed;
+
+    if (!started || ended <= started) return 0;
+    elapsed = ended - started;
+    return elapsed > LAUNCHER_SESSION_MAX ? LAUNCHER_SESSION_MAX : elapsed;
+}
+
+int launcher_catalog_credit_run( struct launcher_catalog *catalog, const char *path,
+                                 unsigned int started, unsigned int ended )
+{
+    struct launcher_catalog_entry *entry;
+    unsigned int elapsed = run_seconds( started, ended );
+    int index;
+
+    if (!started || (index = launcher_catalog_find( catalog, path )) < 0) return 0;
+    entry = &catalog->entries[index];
+    if (elapsed > UINT_MAX - entry->play_seconds) entry->play_seconds = UINT_MAX;
+    else entry->play_seconds += elapsed;
+    if (!entry->last_played) entry->last_played = started;
+    entry->started_at = 0;
+    return 1;
+}
+
 int launcher_catalog_settle_sessions( struct launcher_catalog *catalog, unsigned int now )
 {
     int i, changed = 0;
@@ -327,16 +355,104 @@ int launcher_catalog_settle_sessions( struct launcher_catalog *catalog, unsigned
         unsigned int elapsed;
 
         if (!entry->started_at) continue;
-        /* A clock that went backwards or was never set says nothing about how
-         * long the game ran: the run is closed without being counted. */
-        elapsed = now > entry->started_at ? now - entry->started_at : 0;
-        if (elapsed > LAUNCHER_SESSION_MAX) elapsed = LAUNCHER_SESSION_MAX;
+        elapsed = run_seconds( entry->started_at, now );
         if (elapsed > UINT_MAX - entry->play_seconds) entry->play_seconds = UINT_MAX;
         else entry->play_seconds += elapsed;
         if (!entry->last_played) entry->last_played = entry->started_at;
         entry->started_at = 0;
         changed++;
     }
+    return changed;
+}
+
+int launcher_session_write( const char *file, const char *path, unsigned int started, unsigned int alive )
+{
+    char temp[600];
+    FILE *out;
+    int ok;
+
+    if (!file[0] || !path[0] || !started) return 0;
+    if ((size_t)snprintf( temp, sizeof(temp), "%s.tmp", file ) >= sizeof(temp)) return 0;
+    if (!(out = fopen( temp, "w" ))) return 0;
+    ok = write_value( out, "path", path );
+    ok &= fprintf( out, "started=%u\nalive=%u\n", started, alive > started ? alive : started ) > 0;
+    if (fflush( out )) ok = 0;
+    if (fclose( out )) ok = 0;
+    if (!ok) { remove( temp ); return 0; }
+    if (rename( temp, file ))
+    {
+        /* A card's rename does not always replace: the file goes first. */
+        remove( file );
+        if (rename( temp, file )) { remove( temp ); return 0; }
+    }
+    return 1;
+}
+
+int launcher_session_read( const char *file, struct launcher_session *session )
+{
+    char text[1600], *line, *next;
+    FILE *in = fopen( file, "r" );
+    size_t got;
+    int have_path = 0, read_error;
+
+    memset( session, 0, sizeof(*session) );
+    if (!in) return 0;
+    got = fread( text, 1, sizeof(text) - 1, in );
+    read_error = ferror( in );
+    fclose( in );
+    text[got] = 0;
+    /* Every line this file writes ends with a newline, and a file that stops
+     * anywhere else was still being written when the card went: the start it
+     * half wrote is a wrong start, which would be credited as a whole day, and
+     * not a short run. */
+    if (read_error || !got || text[got - 1] != '\n' || got == sizeof(text) - 1) return 0;
+    for (line = text; *line; line = next)
+    {
+        char *equals, *key, *value;
+
+        if ((next = strchr( line, '\n' ))) *next++ = 0;
+        trim( line );
+        if (!line[0] || line[0] == '#' || line[0] == ';') continue;
+        if (!(equals = strchr( line, '=' ))) return 0;
+        *equals = 0; key = line; value = equals + 1; trim( key ); trim( value );
+        if (!strcmp( key, "path" ))
+        {
+            if (have_path || !copy_value( session->path, sizeof(session->path), value )) return 0;
+            have_path = 1;
+        }
+        else if (!strcmp( key, "started" )) session->started = parse_seconds( value );
+        else if (!strcmp( key, "alive" )) session->alive = parse_seconds( value );
+        else return 0;   /* not a line this file writes */
+    }
+    if (!have_path || !session->started) return 0;
+    if (!session->alive) session->alive = session->started;
+    return 1;
+}
+
+int launcher_session_clear( const char *file )
+{
+    if (!remove( file ) || errno == ENOENT) return 1;
+    return 0;
+}
+
+int launcher_catalog_settle_session( struct launcher_catalog *catalog, const char *file, unsigned int now )
+{
+    struct launcher_session session;
+    int changed;
+
+    if (!launcher_session_read( file, &session ))
+    {
+        /* Nothing this wrote: a card that lost power mid-write, or a program
+         * that never began. Either way it is not a run, and it is not left to
+         * be read again. */
+        if (file[0]) launcher_session_clear( file );
+        return 0;
+    }
+    /* The last time the runtime said it was up is the end of the run: the
+     * hours a console slept in a game are not hours of play. */
+    if (now && now < session.alive) session.alive = now;
+    changed = launcher_catalog_credit_run( catalog, session.path, session.started, session.alive );
+    launcher_session_clear( file );
     return changed;
 }
 

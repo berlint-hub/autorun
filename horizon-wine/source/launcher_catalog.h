@@ -70,13 +70,47 @@ int launcher_catalog_import_legacy( struct launcher_catalog *catalog, const char
 #define LAUNCHER_SESSION_MAX 86400u
 
 /* The launcher closes when a game starts, so a run is timed by started_at (set
- * by the launcher as it starts one) and credited by settle_sessions() the next
- * time the launcher is opened. A run that is never settled is only time that
- * did not get counted. */
+ * by a launcher that still does: an older card) and credited by
+ * settle_sessions() the next time the launcher is opened. */
 
 /* Adds every run that ended while the launcher was away to its program's play
  * time and closes it. Returns how many entries it changed. */
 int launcher_catalog_settle_sessions( struct launcher_catalog *catalog, unsigned int now );
+
+/* A run is timed by whoever started the program, which is the runtime: it is
+ * the one that knows the program is up and the one still there as it ends.
+ * play-session.txt is what it writes down -- which program, when it began, and
+ * when it was last seen up -- so a run that ends any way at all is counted, and
+ * one that ends with the console asleep in a game is counted only up to the
+ * last time it was seen. A program started from its forwarder, from
+ * run-next.txt or from the command line never meets the launcher at all, which
+ * is why the runtime, and not the launcher, keeps this. */
+#define LAUNCHER_SESSION_FILE "play-session.txt"
+
+struct launcher_session
+{
+    char path[512];
+    unsigned int started;
+    unsigned int alive;
+};
+
+/* Writes the run in progress, replacing the file. 0 when it could not be
+ * written, which only means the run may have to be counted another way. */
+int launcher_session_write( const char *file, const char *path, unsigned int started, unsigned int alive );
+/* 0 for a file that is not there, or not one this wrote: a torn line cannot say
+ * when a run began, and a wrong start is worse than a run not counted. */
+int launcher_session_read( const char *file, struct launcher_session *session );
+int launcher_session_clear( const char *file );
+
+/* Adds one run to the play time of the program the path names: nothing when it
+ * is not in the library, nothing for a clock that went backwards, and never
+ * more than LAUNCHER_SESSION_MAX. Returns 1 when an entry took it. */
+int launcher_catalog_credit_run( struct launcher_catalog *catalog, const char *path,
+                                 unsigned int started, unsigned int ended );
+
+/* Credits the run play-session.txt names, never past the last time the runtime
+ * said it was up, and clears the file. Returns how many entries it changed. */
+int launcher_catalog_settle_session( struct launcher_catalog *catalog, const char *file, unsigned int now );
 
 /* "3h 12m" for the time played, "<1m" under a minute, and "Never" for none. */
 void launcher_playtime_text( char *out, size_t size, unsigned int seconds );

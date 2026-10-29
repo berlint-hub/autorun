@@ -213,6 +213,13 @@ jobs:
             horizon-wine/tests/launcher_settings.c -o launcher_settings
           ./launcher_settings
 
+      # The play time a game keeps, as the runtime keeps it: a run it closes is
+      # credited as it closes, one it never closes is left on the card with the
+      # last time it was seen up, and a program the library does not hold is not
+      # timed at all. The block is run against the real catalog code.
+      - name: Play time a run adds
+        run: python3 horizon-wine/tests/check_play_time.py
+
       # The boot setup: the Hekate entry it writes, the loader it replaces, and
       # what it puts back when a power cut stops it half way.
       - name: Boot setup and recovery

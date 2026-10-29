@@ -590,11 +590,21 @@ which belong to the game itself, and a DXVK or VKD3D-Proton version that is not
 installed for the other game's machine is dropped, so the installed one is used.
 
 The launcher's look is kept in `launcher.txt` and its library in
-`launcher-library-v2.ini`. Each game there carries the time it has been played:
-the launcher writes `started-at` as it starts a game (it is about to be
-replaced by it), then adds the difference to `play-seconds` the next time it
-opens, so a game that is closed any way at all is still counted. A run longer
-than a day is credited one day.
+`launcher-library-v2.ini`. Each game there carries the time it has been played,
+and a run is timed by the runtime, which is what starts the program and is still
+there as it ends: `play-session.txt` says which program is up, when it began and
+the last time the runtime said it was still up (written once a minute from the
+log flusher's thread), and as the program closes the runtime adds the run to its
+game's `play-seconds`. A game started from its forwarder, from `run-next.txt`
+behind a fix's setup, or from the command line never meets the launcher and is
+counted all the same. A run that ends without the runtime closing it -- the
+console switched off, the program killed -- leaves the last sight of it on the
+card, and the launcher credits that and no more, so the hours a console slept in
+a game are not hours of play; a card that still carries a `started-at` from an
+older build is closed by the same settle. A run longer than a day is credited
+one day, and a clock that went backwards credits nothing. Every run says in the
+log what it added: `[PLAY] doom3.exe ran 41m; 3h 53m played so far`, and the line before
+it, `[PLAY] doom3.exe began; … so far`, is what the game carried into the run.
 
 Settings > System > **Back up settings** writes a copy of everything above that
 is a setting and not content (`source/launcher_backup.c`), under
