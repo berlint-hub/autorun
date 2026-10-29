@@ -92,6 +92,14 @@ jobs:
       - name: Hardware cursor over a Vulkan picture
         run: python3 horizon-wine/tests/check_cursor_vulkan.py
 
+      # Who has the screen and in what order the runtime takes it: the real
+      # wine_nx_screen_acquire() against a mock NWindow that refuses a resize
+      # while buffers are registered, as libnx does -- the compositor's stale
+      # slots, a presenter that did not step aside, the framebuffer, and a
+      # Vulkan swapchain reset that must not release the live swapchain.
+      - name: The screen handover
+        run: python3 horizon-wine/tests/check_screen_handover.py
+
       # Where the runtime draws the arrow: the panel pixel, through the fit in
       # force, for a display mode, a surface that took the screen, a picture
       # with bars at the sides; and the pointer following a screen that changed

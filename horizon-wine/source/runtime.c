@@ -1476,6 +1476,10 @@ static void *wine_nx_screen_acquire( int width, int height, int vulkan )
     int compositor = wine_nx_compositor_enabled();
     NWindow *window = NULL;
     int taken_over = 0, took_dimensions = 1, took_from_compositor = 0, stepped_aside = 1;
+    /* A Vulkan surface made for a swapchain the screen already has: the window
+     * is the right size and the buffers registered on it belong to the
+     * swapchain being replaced. Neither may be touched here. */
+    int reused = 0;
 
     /* As in wine_nx_desktop_set: the set-up before the size, or it would land
      * on top of the size the surface is taking the screen with. */
@@ -1514,6 +1518,7 @@ static void *wine_nx_screen_acquire( int width, int height, int vulkan )
     {
         wine_nx_vulkan_window++;       /* a swapchain reset reuses the screen it has */
         window = nwindowGetDefault();
+        reused = 1;
     }
     else if (vulkan && wine_nx_gl_window)
     {
@@ -1565,7 +1570,8 @@ static void *wine_nx_screen_acquire( int width, int height, int vulkan )
      * a presenter that did not step aside is still presenting into those slots,
      * and a Vulkan swapchain reset acquires the screen it already has, whose
      * own buffers must not be released either. */
-    if (window && took_from_compositor && stepped_aside)
+    if (window && took_from_compositor && stepped_aside &&
+        (window->slots_configured || window->cur_slot >= 0))
     {
         unsigned int stale = (unsigned)__builtin_popcountll( (unsigned long long)window->slots_configured );
         Result rc = nwindowReleaseBuffers( window );
@@ -1590,7 +1596,27 @@ static void *wine_nx_screen_acquire( int width, int height, int vulkan )
      * compositor shows only the central 4:3 of the buffer, stretched over the
      * whole panel.  The Vulkan screen buffers are drawn already cropped and
      * stay whole. */
-    if (window && !screen_take_dimensions( width, height ))
+    /* A window that already has its size must not be asked for it again while
+     * the surface drawing into it has buffers registered: libnx refuses
+     * (nwindowSetDimensions: "cannot be called when there are buffers
+     * registered", and it refuses a repeat of the same size as well), and the
+     * release screen_take_dimensions makes on a refusal would then take away
+     * the buffers of a swapchain that is very much alive. A Vulkan surface is
+     * made for the whole screen, so a reused one has nothing to resize. */
+    if (window && reused)
+    {
+        u32 kept_w = 0, kept_h = 0;
+
+        if (R_SUCCEEDED(nwindowGetDimensions( window, &kept_w, &kept_h )) &&
+            (kept_w != (u32)width || kept_h != (u32)height))
+        {
+            static int told;
+
+            if (!told++) log_line( "[NXGL] the screen a Vulkan surface reuses is %ux%u, not %dx%d; its "
+                                   "swapchain is what sizes the picture", kept_w, kept_h, width, height );
+        }
+    }
+    else if (window && !screen_take_dimensions( width, height ))
     {
         u32 kept_w = 0, kept_h = 0;
 

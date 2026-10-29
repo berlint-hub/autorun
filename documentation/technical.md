@@ -315,6 +315,21 @@ runtime; the full package now ships the Mesa 26 one.
   size the surface presents at read from the swap itself
   (`wine_nx_gl_swap_surface`, `dlls/win32u/winnx_opengl.c`). A stuck first swap
   used to leave the numbers and no conclusion, which cost a run to read.
+- **A Vulkan swapchain's buffers are not the runtime's to release.** A Vulkan
+  window surface is made for the whole screen and is made again whenever its
+  swapchain is (a resize, a format change), and each of those goes through the
+  same acquisition. libnx refuses `nwindowSetDimensions` while buffers are
+  registered, even a repeat of the size the window already has, and the release
+  that follows a refusal then takes the buffers away from the swapchain that is
+  about to use them. So an acquisition that reuses the screen a Vulkan surface
+  holds no longer asks the window for its size at all, and says so if the window
+  is not the size the surface expected
+  (`the screen a Vulkan surface reuses is WxH, not WxH`). The order everything
+  else goes in -- ask the presenter to step aside, release what its EGL left
+  registered, give the window the program's size, then make the surface -- is
+  `horizon-wine/tests/check_screen_handover.py`: the real
+  `wine_nx_screen_acquire()` and `screen_take_dimensions()` against a mock
+  NWindow that behaves as libnx's does, run in CI as "The screen handover".
 - **The screen goes back when the last surface does.** A program can hold more
   than one Vulkan surface at a time -- two windows, and the surface of a device
   reset made before the one it replaces is destroyed -- and the runtime kept

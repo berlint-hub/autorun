@@ -324,3 +324,28 @@ after `wine_nx_fb_unlock`.
   `gl-driver` still wins (`launcher_settings_gl_driver()`, covered by
   `tests/launcher_settings.c`). Three Doom 3 runs had no `[SETTINGS]` line at
   all, so their renderer setting had never reached the runtime.
+
+### The handover, checked: who may release what (2026-10-29, later)
+
+`wine_nx_screen_acquire()` now has a host test that runs the real function
+(`horizon-wine/tests/check_screen_handover.py`, CI "The screen handover"),
+against a mock NWindow with libnx's own rule in it: `nwindowSetDimensions`
+refuses while buffers are registered -- even a repeat of the size the window
+already has (`(nw->width || nw->height) && nw->slots_configured`) -- and
+`nwindowReleaseBuffers` is what makes the next call succeed. What it pins:
+
+- the compositor's stale slots (one of them out) are released **before** the
+  window is sized, and the log says how many there were;
+- a presenter that left nothing behind costs no release at all;
+- a presenter that did not step aside in time still loses its slots to
+  `screen_take_dimensions`'s own retry, and the log names the refusal;
+- the framebuffer is closed before the surface takes the screen;
+- **a Vulkan swapchain reset no longer touches the window.** This was a real
+  bug: the reset acquires the screen the surface already holds, with (0,0), so
+  the code asked for the panel's size, libnx refused (the live swapchain's
+  buffers are registered) and the retry released them -- the buffers the
+  swapchain was about to present from. Reused screens are no longer resized
+  (`[NXGL] the screen a Vulkan surface reuses is WuxH, not WxH` when they
+  disagree);
+- an OpenGL window while a Vulkan surface holds the screen is refused and says
+  so, and nothing of the Vulkan surface's is released.
