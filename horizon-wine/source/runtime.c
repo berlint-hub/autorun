@@ -634,7 +634,14 @@ static int run_report_log_line( const char *line )
     static const char *const prefixes[] = {
         "[BUILD]", "[TARGET]", "[SETTINGS]", "[DXVK]", "[VKD3D]", "[FEX]", "[BOX64]",
         "[SYNC]", "[GL]", "[UPSCALE]", "[LSFG]", "[FRAME]", "[CPU]", "[VULKAN]",
-        "[MISS]", "[FAIL]", "[EXCEPTION]"
+        "[MISS]", "[FAIL]", "[EXCEPTION]",
+        /* Which OpenGL renderer was asked for and which one answered: the two
+         * questions "Zink does not work" is made of, and the reason a program
+         * with no settings line at all runs on the default. The rest of the
+         * [NXGL] lines are too many for a summary -- those are in the log. */
+        "[MESA]", "[NXGL] the driver names itself", "[NXGL] Zink was asked for",
+        "[NXGL] native NVC0 was asked for", "[NXGL] the program's OpenGL",
+        "[NXGL] no context for", "[NXGL] the first context made current"
     };
     unsigned int i;
 
