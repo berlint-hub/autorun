@@ -43,6 +43,31 @@ struct input_profile
      * global controls, but not over a speed they chose themselves. */
     int mouse_speed_explicit;
 };
+/* The runtime's own chord: + and - (Start and Select) together. Held for
+ * INPUT_CHORD_HOLD_NS it closes the program, as it always has; tapped, that is
+ * released before that, it swaps what the controller is -- the gamepad a
+ * program reads through XInput and DirectInput, or the keyboard and mouse it
+ * reads when the pad stands in for them -- for the rest of the run. */
+#define INPUT_CHORD_HOLD_NS 1000000000ull
+
+enum input_chord_result
+{
+    INPUT_CHORD_NONE,   /* nothing to do */
+    INPUT_CHORD_SWAP,   /* both were pressed and let go before they were a hold */
+    INPUT_CHORD_QUIT    /* held long enough: the program is to be closed */
+};
+
+struct input_chord
+{
+    uint64_t since;
+    int present, fired;
+};
+
+/* One reading of the two buttons: whether both are down now, the clock in
+ * nanoseconds (any that only goes up), and how long a hold is. */
+enum input_chord_result input_chord_step( struct input_chord *chord, int both_down,
+                                          uint64_t now_ns, uint64_t hold_ns );
+
 struct input_pad { uint64_t buttons; int axis[4]; };
 struct input_output
 {

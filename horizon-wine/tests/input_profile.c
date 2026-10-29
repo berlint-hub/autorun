@@ -286,9 +286,51 @@ static void game_layouts( void )
     assert(!rmdir(root));
 }
 
+/* + and - together: a tap swaps what the controller is, a hold closes the
+ * program, and let go after the hold it is still the hold. */
+static void runtime_chord( void )
+{
+    const uint64_t hold = INPUT_CHORD_HOLD_NS;
+    struct input_chord chord = {0};
+    uint64_t now = 1000000000ull;
+
+    /* Nothing held. */
+    assert( input_chord_step( &chord, 0, now, hold ) == INPUT_CHORD_NONE );
+    assert( !chord.present );
+
+    /* A tap: down, then up 120 ms later. */
+    assert( input_chord_step( &chord, 1, now, hold ) == INPUT_CHORD_NONE );
+    assert( chord.present );
+    assert( input_chord_step( &chord, 1, now + 120000000ull, hold ) == INPUT_CHORD_NONE );
+    assert( input_chord_step( &chord, 0, now + 130000000ull, hold ) == INPUT_CHORD_SWAP );
+    assert( !chord.present && !chord.fired );
+    /* And the release is only a swap once. */
+    assert( input_chord_step( &chord, 0, now + 200000000ull, hold ) == INPUT_CHORD_NONE );
+
+    /* A hold: one quit, however many polls follow, and no swap when let go. */
+    now = 2000000000ull;
+    assert( input_chord_step( &chord, 1, now, hold ) == INPUT_CHORD_NONE );
+    assert( input_chord_step( &chord, 1, now + hold - 1, hold ) == INPUT_CHORD_NONE );
+    assert( input_chord_step( &chord, 1, now + hold, hold ) == INPUT_CHORD_QUIT );
+    assert( input_chord_step( &chord, 1, now + hold + 50000000ull, hold ) == INPUT_CHORD_NONE );
+    assert( input_chord_step( &chord, 0, now + hold + 100000000ull, hold ) == INPUT_CHORD_NONE );
+
+    /* Let go and pressed again: a fresh tap, not the old hold. */
+    assert( input_chord_step( &chord, 1, now + 3000000000ull, hold ) == INPUT_CHORD_NONE );
+    assert( input_chord_step( &chord, 0, now + 3100000000ull, hold ) == INPUT_CHORD_SWAP );
+
+    /* A clock that went backwards cannot have held anything for a second, and
+     * the release that follows is a tap. */
+    now = 5000000000ull;
+    assert( input_chord_step( &chord, 1, now, hold ) == INPUT_CHORD_NONE );
+    assert( input_chord_step( &chord, 1, now - 4000000000ull, hold ) == INPUT_CHORD_NONE );
+    assert( input_chord_step( &chord, 0, now - 3900000000ull, hold ) == INPUT_CHORD_SWAP );
+}
+
 int main(void)
 {
-    mapping(); transitions(); persistence(); game_layouts();
-    puts("Input profiles: mapping, deadzones, chords, transitions, inheritance and game layouts passed");
+    mapping(); transitions(); persistence(); game_layouts(); runtime_chord();
+    puts("Input profiles: mapping, deadzones, chords, transitions, inheritance, game layouts and the "
+         "+/- chord passed");
     return 0;
 }

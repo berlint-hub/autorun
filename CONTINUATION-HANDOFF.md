@@ -408,3 +408,50 @@ What is left: a run that ends within its first minute, before any heartbeat, is
 credited nothing -- it would have shown "<1m" anyway. The counter is wall-clock
 between the program's start and its end, so a clock moved forward during a run
 is still counted at its word, up to the one-day cap.
+
+## Swapping the controller for the keyboard and mouse in game (2026-10-29)
+
+The user asked for an in-game switch between keyboard/mouse and gamepad, with
+`+` and `-` (Start and Select) as the example. That pair was already the quit
+chord (held for a second), so the two are now one state machine
+(`input_chord_step`, `source/input_profile.c`, tested in
+`tests/input_profile.c`):
+
+- **held for a second** -- the program is closed, exactly as before;
+- **tapped** (let go before that) -- the controller swaps between the gamepad
+  and the keyboard and mouse it stands in for, for the rest of the run;
+- let go *after* the hold fired is still the hold, and a clock that went
+  backwards is not a hold -- the release then counts as a tap.
+
+What the swap does: `wine_nx_input_toggle_mode()` (`runtime.c`) flips
+`mode` in the one live `input_profile` the whole runtime reads, so
+
+- the pointer poll stops or starts emulating keys and the mouse
+  (`emulate = profile->mode == INPUT_KEYBOARD_MOUSE`, `wine_nx_pointer_poll`),
+  and the arrow starts moving with the stick (it is visible unless the program
+  hides it);
+- XInput and DirectInput both go through `nx_xinput_get_state_unix`
+  (`source/xinput_unix.c`, `dlls/dinput/joystick_nx.c`), which answers
+  "no pad" in keyboard/mouse mode, so the pad the game sees goes away with the
+  swap and comes back with the next tap.
+
+It is live for the run and writes nothing: the launcher's **Input mode** is what
+a run starts on, and a game whose menus want a mouse is one tap away without
+changing how it starts. The log and the run report say `[INPUT] + and - tapped:
+the controller is now the keyboard and mouse|the gamepad`.
+
+Two details that would otherwise bite:
+
+- An overlay (the floating keyboard, the controls overlay) has the controller
+  while it is up, where `+` and `-` are keys: the chord is not read then. That
+  also fixes the old behaviour of the quit chord firing while the floating
+  keyboard was up.
+- The controls overlay publishes a whole profile after a remap. It now keeps a
+  swapped mode (`runtime_input_mode_swapped`) and takes the live mode into its
+  own copy (`wine_nx_input_profile_copy`, weak for the host test), so its grid
+  remaps the layout the player is actually playing on instead of putting the
+  card's mode back under it.
+
+Tests: `tests/input_profile.c` grew `runtime_chord()` (tap, hold, repeat,
+release-after-hold, press-again, backwards clock). The Switch build is the only
+place the wiring itself (poll and toggle) is compiled.

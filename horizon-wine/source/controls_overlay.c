@@ -34,6 +34,9 @@
  * game the moment it is made, not at the next launch. Weak, so the host tests
  * can link this file without the runtime. */
 extern void wine_nx_input_profile_publish( const struct input_profile *profile ) __attribute__((weak));
+/* And reads it: + and - may have swapped what the controller is since the card
+ * was read, and the grid has to remap what the pad is doing now. */
+extern void wine_nx_input_profile_copy( struct input_profile *profile ) __attribute__((weak));
 
 #define LIST_ROWS 8
 #define PICK_COLS 6
@@ -172,6 +175,16 @@ static int reload( void )
     else if (!input_profile_global( root_dir, profile.keyboard_auto, &loaded, &loaded_kv,
                                     loaded_path, sizeof(loaded_path) )) return 0;
     profile = loaded;
+    /* What the controller is now, not what it was when the game started: a tap
+     * of + and - while playing swaps it for the run (runtime.c), and this grid
+     * edits the layout the player is playing on. */
+    if (wine_nx_input_profile_copy)
+    {
+        struct input_profile live;
+
+        wine_nx_input_profile_copy( &live );
+        profile.mode = live.mode;
+    }
     kv = loaded_kv;
     memcpy( save_path, loaded_path, sizeof(save_path) );
     generation++;

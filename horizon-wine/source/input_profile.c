@@ -72,6 +72,34 @@ void input_profile_defaults( struct input_profile *p, int keyboard_auto )
     }
 }
 
+enum input_chord_result input_chord_step( struct input_chord *chord, int both_down,
+                                          uint64_t now_ns, uint64_t hold_ns )
+{
+    if (both_down)
+    {
+        if (!chord->present)
+        {
+            chord->present = 1;
+            chord->since = now_ns;
+            chord->fired = 0;
+            return INPUT_CHORD_NONE;
+        }
+        /* A clock that went backwards cannot have held anything: it is not a
+         * hold, and the release decides whether it was a tap. */
+        if (!chord->fired && (int64_t)( now_ns - chord->since ) >= (int64_t)hold_ns)
+        {
+            chord->fired = 1;
+            return INPUT_CHORD_QUIT;
+        }
+        return INPUT_CHORD_NONE;
+    }
+    if (!chord->present) return INPUT_CHORD_NONE;
+    chord->present = 0;
+    /* Let go after it had already asked to close the program: that was the
+     * hold, not a tap of the pair. */
+    return chord->fired ? INPUT_CHORD_NONE : INPUT_CHORD_SWAP;
+}
+
 int input_binding_parse( struct input_binding *binding, const char *text, int controller )
 {
     struct input_binding parsed = {0};

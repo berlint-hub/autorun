@@ -498,7 +498,8 @@ static const struct
     const char *key, *label, *help;
 } options[INPUT_ROW_COUNT] =
 {
-    { "input-mode", "Input mode", "Use controller input or keyboard and mouse mappings." },
+    { "input-mode", "Input mode", "Use controller input or keyboard and mouse mappings. A run starts "
+      "on this, and + and - tapped while a game is on swap it until the game closes." },
     { NULL, "Controller remapping", "Change controller buttons and stick directions." },
     { NULL, "Keyboard / mouse mapping", "Assign keys and mouse actions to controller inputs." },
     { "keyboard-auto", "On-screen keyboard", "Automatic: open when a text field gains focus." },

@@ -463,6 +463,19 @@ runtime; the full package now ships the Mesa 26 one.
   the Vulkan swapchain image before present (`dlls/win32u/vulkan.c`), blitted
   into the back buffer before `eglSwapBuffers` (`winnx_opengl.c`), or drawn as
   the compositor's top layer; the controller is its while it is up.
+- **Swapping what the controller is, while a program runs.** Plus and Minus
+  (Start and Select) tapped together swap the run between the gamepad and the
+  keyboard and mouse the pad stands in for, without going back to the launcher:
+  XInput and DirectInput read the same profile, so the pad they offer goes away
+  with the swap, and the stick starts moving the arrow. Held instead of tapped,
+  the pair still closes the program as it always has -- a second of holding is
+  the quit, anything shorter is the tap (`input_chord_step`,
+  `source/input_profile.c`), and the log and the run report say
+  `[INPUT] + and - tapped: the controller is now ...`. The launcher's Input mode
+  is what a run starts on: the swap lasts as long as the run and does not write
+  the card, so a game whose menus need a mouse is one tap away without changing
+  how it starts. An overlay has the controller while it is up, where the two
+  buttons are keys, so the chord waits for it to close.
 - **Remapping while a program runs.** Minus and the left stick click open the
   controls overlay over the game (`source/controls_overlay.c`): the same rows
   the launcher's controls editor has, each opened into the key or mouse action

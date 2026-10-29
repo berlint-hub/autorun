@@ -818,7 +818,10 @@ static int run_report_log_line( const char *line )
         "[NXGL] it is NOT", "[NXGL] the program's OpenGL", "[NXGL] no context for",
         /* What the run added to the game's play time, which the launcher shows:
          * a count that looks wrong is read back from here. */
-        "[PLAY]"
+        "[PLAY]",
+        /* And what the pad was: the gamepad, or the keyboard and mouse + and -
+         * swapped it to while the program ran. */
+        "[INPUT] + and -"
     };
     unsigned int i;
 
@@ -1055,6 +1058,11 @@ struct input_profile wine_nx_input_profile;
 uint64_t wine_nx_input_swallowed;
 static pthread_mutex_t wine_nx_input_profile_mutex = PTHREAD_MUTEX_INITIALIZER;
 
+/* Whether this run's keyboard/mouse setting has been swapped from the card's:
+ * the controls overlay publishes a whole profile after a remap, and that must
+ * not put the setting back under a player who swapped it while playing. */
+static int runtime_input_mode_swapped;
+
 /* The controls overlay writes the profile the game runs on (controls_overlay.c)
  * while the polls read it. Publish hands over a whole profile at a time, and
  * the polls take a copy of it, so a row being remapped mid-frame is never half
@@ -1065,7 +1073,16 @@ void wine_nx_input_profile_publish( const struct input_profile *profile )
 
     pthread_mutex_lock( &wine_nx_input_profile_mutex );
     changed = wine_nx_input_profile.mouse_speed != speed;
-    if (profile != &wine_nx_input_profile) wine_nx_input_profile = *profile;
+    if (profile != &wine_nx_input_profile)
+    {
+        int mode = wine_nx_input_profile.mode;
+
+        wine_nx_input_profile = *profile;
+        /* A mode swapped with + and - while playing stays swapped: a remap
+         * publishes the whole profile, and the card's setting is what the run
+         * started with, not what it is now. */
+        if (runtime_input_mode_swapped) wine_nx_input_profile.mode = mode;
+    }
     pthread_mutex_unlock( &wine_nx_input_profile_mutex );
     if (changed) log_line( "[INPUT] mouse speed %d%% of the built-in", speed );
 }
@@ -1075,6 +1092,24 @@ void wine_nx_input_profile_copy( struct input_profile *profile )
     pthread_mutex_lock( &wine_nx_input_profile_mutex );
     *profile = wine_nx_input_profile;
     pthread_mutex_unlock( &wine_nx_input_profile_mutex );
+}
+
+/* + and - tapped in a program: the controller becomes the keyboard and mouse,
+ * or stops being them, for the rest of the run. XInput and DirectInput read
+ * the same profile, so the pad they offer goes away with it. */
+int wine_nx_input_toggle_mode( void )
+{
+    int mode;
+
+    pthread_mutex_lock( &wine_nx_input_profile_mutex );
+    wine_nx_input_profile.mode = wine_nx_input_profile.mode == INPUT_KEYBOARD_MOUSE ?
+                                 INPUT_CONTROLLER : INPUT_KEYBOARD_MOUSE;
+    mode = wine_nx_input_profile.mode;
+    runtime_input_mode_swapped = 1;
+    pthread_mutex_unlock( &wine_nx_input_profile_mutex );
+    log_line( "[INPUT] + and - tapped: the controller is now %s for the rest of this run",
+              mode == INPUT_KEYBOARD_MOUSE ? "the keyboard and mouse" : "the gamepad" );
+    return mode;
 }
 /* Where the controls overlay (controls_overlay.c) writes what it changes: the
  * runtime directory and the program the runtime started, kept from the load
@@ -2278,9 +2313,10 @@ int wine_nx_pointer_poll( int *x, int *y, unsigned int *buttons )
     struct input_profile profile_store;
     const struct input_profile *profile = &profile_store;
     u64 now, held, all_held, elapsed;
-    int moved = 0, keyboard = 0, on_keyboard = 0, leave = 0, emulate;
+    int moved = 0, keyboard = 0, on_keyboard = 0, leave = 0, swap = 0, emulate;
     static int osk_combo, remap_combo, shot_combo;
-    static u64 swallowed, quit_since, wheel_next;
+    static u64 swallowed, wheel_next;
+    static struct input_chord chord;
     static unsigned int last_wheels;
 
     wine_nx_input_profile_copy( &profile_store );
@@ -2401,13 +2437,21 @@ int wine_nx_pointer_poll( int *x, int *y, unsigned int *buttons )
     pointer_buttons_update( &wine_nx_pointer_buttons, output.buttons );
     wine_nx_pointer_moved |= moved;
     {
-        const u64 chord = HidNpadButton_Plus | HidNpadButton_Minus;
-        if ((all_held & chord) != chord) quit_since = 0;
-        else if (!quit_since) quit_since = now;
-        else if (armTicksToNs( now - quit_since ) >= 1000000000ull) leave = 1;
+        /* + and - together are the runtime's, not the program's: held for a
+         * second they close it, as they always have, and a tap of the two
+         * swaps what the controller is (input_chord_step). An overlay has the
+         * controller while it is up, where + and - are keys. */
+        const u64 pair = HidNpadButton_Plus | HidNpadButton_Minus;
+        enum input_chord_result result = input_chord_step( &chord, !keyboard && (all_held & pair) == pair,
+                                                           armTicksToNs( now ), INPUT_CHORD_HOLD_NS );
+
+        if (result == INPUT_CHORD_QUIT) leave = 1;
+        else if (result == INPUT_CHORD_SWAP) swap = 1;
     }
     pthread_mutex_unlock( &wine_nx_pointer_mutex );
     if (leave) wine_nx_ask_program_quit( "+ and - held" );
+    /* After the poll, so this frame is drawn the way it was played. */
+    if (swap) wine_nx_input_toggle_mode();
     wine_nx_cursor_move( *x, *y );
     return moved;
 }
