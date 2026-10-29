@@ -138,11 +138,29 @@ runtime; the full package now ships the Mesa 26 one.
   NOT the renderer this program asked for (Zink): the EGL display was made with
   another backend before the program's first context …`. The comparison is
   `source/nxgl_renderer.h`, tested by `tests/nxgl_renderer.c`: Zink names
-  itself first in `GL_RENDERER`, NVC0 names the card.
+  itself first in `GL_RENDERER`, NVC0 names the card. The program's own context
+  also carries the driver's name and vendor (`[NXGL] the driver names itself
+  "…" of "…"`), and a renderer that is not the one asked for says so
+  (`Zink was asked for and "NV132" answered … takes effect in a fresh start of
+  the runtime`). A display that is still up when the program's renderer is set
+  is let go there and then, so the next `eglInitialize` picks the renderer up
+  (`[MESA] an EGL display was still up (…) and was let go`); a display made
+  after that point is what locks the choice for the rest of the run.
+  `gl-debug.txt` (or `gl-debug` in `config/settings.json`) makes every context
+  carry `GL_KHR_debug`: the driver's own account of a shader it refused, an enum
+  it does not know or a context it lost is written into the run log
+  (`[NXGL] the driver (high error): …`, the first 64 messages, then the rest
+  counted), synchronously from the thread that caused them. The debug bit is the
+  first thing dropped if the driver will not make such a context, so the switch
+  that explains a broken picture can never be the reason there is none.
   A program whose per-game settings file is not there now says so — `[SETTINGS]
   … is not there: this program runs on the runtime's defaults` — because a
   setting the launcher shows but never saved is otherwise indistinguishable
-  from one it applied. The swap interval is capped at what the config offers (0
+  from one it applied; that is what three Doom 3 runs of 2026-10-29 showed, all
+  of them on NVC0 with no settings line at all. For a program with no renderer
+  of its own, `gl-driver` in `config/settings.json` chooses one for every
+  program (`[INIT] the OpenGL renderer for a program without settings of its
+  own: …`), and a program's own file still wins. The swap interval is capped at what the config offers (0
   and 1 here) rather than passed on to be refused: the frame limit is what caps
   frames, and `eglSwapInterval` has no return value anyone would read. Frames of another size than the screen's
   (800x600 or 640x480 in full screen) are scaled to it by the runtime's own
@@ -496,11 +514,13 @@ the first time a newer build starts.
 | `reopen-the-launcher-on-exit` | false | Start the launcher again when a program ends (`reload-launcher.txt`) |
 | `core-balancing` | true | Move busy threads between cores (`no-balance.txt`, inverted) |
 | `display-devices` | true | Report display devices (`no-display-devices.txt`, inverted) |
+| `gl-debug` | false | The driver's own debug messages in the log, through `GL_KHR_debug` (`gl-debug.txt`) |
 | `gl-pinned-buffers-cached` | true | Mesa 20.1 runtime: cached pinned buffers (`gl-uncached.txt`, inverted) |
 | `gl-clean-before-submit` | true | Mesa 20.1 runtime (`gl-noclean.txt`, inverted) |
 | `run-the-chosen-program` | false | Start `target.txt` directly, without the launcher (`run-entry.txt`) |
 | `hand-the-process-back-anyway` | false | Return through the Homebrew loader on exit (`loader-anyway.txt`) |
 | `vulkan-probe` | false | Vulkan self-test at startup (`vulkan-probe.txt`) |
+| `gl-driver` | `nvc0` | The OpenGL renderer for a program that does not name one: `zink` (Zink over NVK/Vulkan) or `nvc0` (native). A program's own `gl-driver` in its `NAME.wine-nx.txt` overrides it |
 
 The controls every program uses are in `config/keys.txt`. A game Autorun
 recognises gets its recommended layout over them (`source/games/controls.h`),

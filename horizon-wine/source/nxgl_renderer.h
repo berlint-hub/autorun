@@ -1,41 +1,61 @@
 /* Copyright 2026 Wine-NX contributors. LGPL-2.1-or-later.
  *
- * Which OpenGL renderer a driver answered with, read from the string it gives
- * for GL_RENDERER, against the one the runtime asked for.
+ * Which OpenGL renderer a driver answered with (GL_RENDERER), against the one
+ * the per-game setting asked mesa-switch for.
  *
- * The runtime asks mesa-switch for a renderer per program (MESA_SWITCH_GL_DRIVER
- * in horizon-wine/source/runtime.c: "zink" or "nvc0"), but asking is not getting:
- * mesa-switch reads that variable in switch_initialize(), when an EGL display is
- * initialized, and a display picks one backend for its lifetime. A process can
- * therefore ask for Zink and be answered by NVC0 -- the compositor's display was
- * already up when the program's first context was made, or the setting reached
- * the runtime after something else had made one -- and nothing in the runtime's
- * log said so, because it only knew what it had asked for. (A display that is
- * terminated and made again does read the variable afresh: switch_terminate()
- * frees the backend state, so the launcher's own SDL display does not stand in
- * a program's way.)
+ * The asking and the answering are different things: mesa-switch reads
+ * MESA_SWITCH_GL_DRIVER when an EGL display is initialized, and a display keeps
+ * the backend it was made with -- a display that is terminated and made again
+ * reads the variable afresh (switch_terminate frees the backend state), one that
+ * is still up does not. A program whose setting says Zink can therefore run on
+ * NVC0 with every other line of the log looking right, which is what "Zink never
+ * turns on" looked like from outside: the runtime's line named what it asked
+ * for, and nothing named what answered.
  *
- * The program's own GL_RENDERER is the one place that answers the question:
- * Zink names itself first ("zink (Mesa)", "zink Vulkan 1.4 (NVIDIA Tegra X1
- * (NVK ...))"), and nvc0 names the card ("NV132", "NVIDIA Tegra X1"). Used by
- * dlls/win32u/winnx_opengl.c where the first context is made current, and by
- * tests/nxgl_renderer.c without a console.
+ * Zink names itself first in GL_RENDERER ("zink", "zink (Mesa)", "zink Vulkan
+ * 1.4 (NVIDIA Tegra X1 (NVK ...))"); native NVC0 names the card ("NV132",
+ * "NVIDIA Tegra X1"). Used by dlls/win32u/winnx_opengl.c where the program's own
+ * context is first made current, and by tests/nxgl_renderer.c without a console.
  */
 #ifndef WINE_NXGL_RENDERER_H
 #define WINE_NXGL_RENDERER_H
 
 #include <ctype.h>
 
-/* What the runtime asked for. */
+/* What the runtime asked mesa-switch for. */
 enum nxgl_renderer
 {
     NXGL_RENDERER_NVC0 = 0,   /* Mesa's native nouveau driver */
     NXGL_RENDERER_ZINK = 1,   /* Zink over NVK/Vulkan */
 };
 
-/* The renderer "MESA_SWITCH_GL_DRIVER" names, as mesa-switch reads it: "zink"
- * is Zink, and "nvc0", "nouveau", nothing at all and anything unrecognised are
- * all the display's own default. */
+/* Whether a GL_RENDERER string is Zink's: the name, then the end, a space or a
+ * parenthesis -- so "zinking" and "azink" are not Zink, and the drivers' own
+ * decorations ("(Mesa)", "Vulkan 1.4 (...)") do not matter. */
+static inline int nxgl_renderer_is_zink( const char *renderer )
+{
+    static const char name[] = "zink";
+    unsigned int i;
+
+    if (!renderer) return 0;
+    for (i = 0; i < sizeof(name) - 1; i++)
+    {
+        if (!renderer[i] || tolower( (unsigned char)renderer[i] ) != name[i]) return 0;
+    }
+    return renderer[i] == 0 || renderer[i] == ' ' || renderer[i] == '(';
+}
+
+/* Whether the answer is the one that was asked for. A driver that gives no
+ * renderer string at all contradicts nothing and is not called a mismatch. */
+static inline int nxgl_renderer_matches( int asked_zink, const char *renderer )
+{
+    if (!renderer || !renderer[0]) return 1;
+    return nxgl_renderer_is_zink( renderer ) == !!asked_zink;
+}
+
+/* The renderer "MESA_SWITCH_GL_DRIVER" names, as mesa-switch reads it: "zink" is
+ * Zink; "nvc0", "nouveau", nothing at all and anything unrecognised are the
+ * display's own default. */
 static inline enum nxgl_renderer nxgl_renderer_requested( const char *env )
 {
     static const char zink[] = "zink";
@@ -44,24 +64,11 @@ static inline enum nxgl_renderer nxgl_renderer_requested( const char *env )
     if (!env) return NXGL_RENDERER_NVC0;
     for (i = 0; i < sizeof(zink) - 1; i++)
         if (tolower( (unsigned char)env[i] ) != zink[i]) return NXGL_RENDERER_NVC0;
-    return env[i] == '\0' ? NXGL_RENDERER_ZINK : NXGL_RENDERER_NVC0;
+    return env[i] == 0 ? NXGL_RENDERER_ZINK : NXGL_RENDERER_NVC0;
 }
 
-/* A renderer string that is Zink's, whatever follows the name. */
-static inline int nxgl_renderer_is_zink( const char *renderer )
-{
-    static const char zink[] = "zink";
-    unsigned int i;
-
-    if (!renderer) return 0;
-    for (i = 0; i < sizeof(zink) - 1; i++)
-        if (tolower( (unsigned char)renderer[i] ) != zink[i]) return 0;
-    /* "zink", "zink (Mesa)", "zink Vulkan 1.4 (..." -- but not a longer word
-     * that merely starts the same way. */
-    return renderer[i] == '\0' || renderer[i] == ' ' || renderer[i] == '(';
-}
-
-/* How the answer stands against the request. */
+/* How the answer stands against the request, for the log line under the first
+ * context made current. */
 enum nxgl_renderer_state
 {
     NXGL_RENDERER_AS_ASKED = 0,   /* the renderer that answered is the one asked for */
@@ -73,8 +80,7 @@ static inline enum nxgl_renderer_state nxgl_renderer_state_of( enum nxgl_rendere
                                                               const char *renderer )
 {
     if (!renderer || !renderer[0]) return NXGL_RENDERER_NO_ANSWER;
-    if (nxgl_renderer_is_zink( renderer ) == (requested == NXGL_RENDERER_ZINK))
-        return NXGL_RENDERER_AS_ASKED;
+    if (nxgl_renderer_matches( requested == NXGL_RENDERER_ZINK, renderer )) return NXGL_RENDERER_AS_ASKED;
     return NXGL_RENDERER_OTHER;
 }
 

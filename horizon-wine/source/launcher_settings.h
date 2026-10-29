@@ -491,6 +491,20 @@ static inline int launcher_setting_state( const struct launcher_kv *kv, const ch
     return -1;
 }
 
+/* The OpenGL renderer a program's settings file names, or fallback when it names
+ * none. launcher_settings_read() answers 0 for a file without the key, and 0 is
+ * also "native NVC0": the runtime's global choice for programs without settings
+ * of their own needs the two told apart, so the key is asked for directly. */
+static inline int launcher_settings_gl_driver( const struct launcher_kv *kv, int fallback )
+{
+    char value[16];
+
+    if (!launcher_kv_get( kv, "gl-driver", value, sizeof(value) )) return fallback;
+    for (int i = 0; i < LAUNCHER_GL_DRIVER_COUNT; i++)
+        if (!strcasecmp( value, launcher_gl_driver_values[i] )) return i;
+    return fallback;
+}
+
 static inline void launcher_settings_read( const struct launcher_kv *kv, struct launcher_settings *settings )
 {
     char value[64];

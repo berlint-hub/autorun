@@ -38,6 +38,12 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(wgl);
 
+/* In eglext.h of the headers this is built with; a driver built from an older
+ * EGL set may not have the name, and the bit is fixed by the extension. */
+#ifndef EGL_CONTEXT_OPENGL_DEBUG_BIT_KHR
+#define EGL_CONTEXT_OPENGL_DEBUG_BIT_KHR 0x0001
+#endif
+
 /* The runtime hands the screen's NWindow to one OpenGL surface at a time
  * (horizon-wine/source/runtime.c). */
 extern void *wine_nx_gl_acquire_window( int width, int height );
@@ -49,6 +55,10 @@ extern void wine_nx_present_fit_stretched( int src_w, int src_h, int src_x, int 
 extern void wine_nx_desktop_size( int *width, int *height ) __attribute__((weak));
 extern void wine_nx_runtime_trace( const char *msg ) __attribute__((weak));
 extern int wine_nx_screenshot_requested( void ) __attribute__((weak));
+/* runtime.c: what the per-game renderer setting asked for (1 is Zink), and
+ * whether gl-debug.txt wants the driver's own messages in the run log. */
+extern int wine_nx_gl_renderer_requested( void ) __attribute__((weak));
+extern int wine_nx_gl_debug( void ) __attribute__((weak));
 extern int wine_nx_screenshot_take( const void *pixels, int width, int height, int stride_px, int format ) __attribute__((weak));
 /* The arrow whose tip is at this panel pixel (pointer_cursor.h), for a picture
  * the compositor does not draw, and which part of the surface the panel shows
@@ -191,6 +201,88 @@ const char *wine_nx_gl_program_version( void )
     return nx_program_gl;
 }
 
+/* GL_KHR_debug, on request (gl-debug.txt): the driver's own account of a shader
+ * it refused, an enum it does not know or a context it lost, in the run log
+ * instead of a separate file nobody reads. Messages are delivered
+ * synchronously, so the line is written by the thread that caused it and keeps
+ * the log's order; the count is bounded, because a driver in a message loop
+ * would otherwise fill the card. A switch meant to explain a broken picture
+ * must never be the reason there is none, so the context is made with the debug
+ * bit only when asked, and the bit is the first thing dropped if it is
+ * refused. */
+#define NX_GL_DEBUG_OUTPUT                0x92E0
+#define NX_GL_DEBUG_OUTPUT_SYNCHRONOUS    0x8242
+#define NX_GL_DEBUG_SEVERITY_NOTIFICATION 0x826B
+#define NX_GL_DEBUG_MESSAGES              64
+
+typedef void (*nx_gl_debug_proc)( unsigned int, unsigned int, unsigned int, unsigned int,
+                                  int, const char *, const void * );
+typedef void (*nx_pfn_debug_callback)( nx_gl_debug_proc, const void * );
+
+static void nx_debug_message( unsigned int source, unsigned int type, unsigned int id,
+                              unsigned int severity, int length, const char *message, const void *user )
+{
+    static unsigned int logged, dropped;
+    char text[200];
+    int i, n;
+
+    (void)source; (void)type; (void)id; (void)user;
+    /* The driver narrating its own bookkeeping is not a symptom of anything. */
+    if (severity == NX_GL_DEBUG_SEVERITY_NOTIFICATION || !message) return;
+    if (__atomic_add_fetch( &logged, 1, __ATOMIC_RELAXED ) > NX_GL_DEBUG_MESSAGES)
+    {
+        if (!__atomic_fetch_add( &dropped, 1, __ATOMIC_RELAXED ))
+            nx_log( "[NXGL] the driver has more to say; only the first %d messages are kept",
+                    NX_GL_DEBUG_MESSAGES );
+        return;
+    }
+    if (length < 0) length = (int)strlen( message );
+    for (i = 0, n = 0; i < length && n < (int)sizeof(text) - 1; i++)
+    {
+        char c = message[i];
+
+        if (c == '\n' || c == '\r' || c == '\t') c = ' ';
+        text[n++] = c;
+    }
+    while (n > 0 && text[n - 1] == ' ') n--;
+    text[n] = 0;
+    nx_log( "[NXGL] the driver (%s %s): %s",
+            severity == 0x9146 ? "high" : severity == 0x9147 ? "medium" : "low",
+            type == 0x824C ? "error" : type == 0x824D ? "deprecated" : type == 0x824E ? "undefined" :
+            type == 0x824F ? "portability" : type == 0x8250 ? "performance" : "message", text );
+}
+
+/* Installed once per context, the first time it is made current with the
+ * screen: the functions are EGL's to give, and a driver without them leaves the
+ * flag alone. */
+static void nx_install_debug( struct opengl_context *context )
+{
+    static EGLContext installed[8];
+    unsigned int i;
+    nx_pfn_debug_callback callback;
+
+    for (i = 0; i < ARRAY_SIZE(installed); i++)
+        if (installed[i] == context->host_context) return;
+    callback = (void *)funcs->p_eglGetProcAddress( "glDebugMessageCallback" );
+    if (!callback) callback = (void *)funcs->p_eglGetProcAddress( "glDebugMessageCallbackKHR" );
+    if (!callback)
+    {
+        static int told;
+
+        if (!told++) nx_log( "[NXGL] this driver has no glDebugMessageCallback; the debug switch does nothing" );
+        return;
+    }
+    callback( nx_debug_message, NULL );
+    if (funcs->p_glEnable)
+    {
+        funcs->p_glEnable( NX_GL_DEBUG_OUTPUT );
+        funcs->p_glEnable( NX_GL_DEBUG_OUTPUT_SYNCHRONOUS );
+    }
+    for (i = 0; i < ARRAY_SIZE(installed); i++)
+        if (!installed[i]) { installed[i] = context->host_context; break; }
+    nx_log( "[NXGL] the driver's debug messages are being collected for this context" );
+}
+
 /* What the program's own context turned out to be, said once, the first time it
  * draws or the first time it is made current: the GL and GLSL versions it was
  * given, whether that is a core or a compatibility profile, and how long the
@@ -201,7 +293,7 @@ const char *wine_nx_gl_program_version( void )
  * is how a change to it is seen. */
 static void nx_note_program_gl( void )
 {
-    const char *version, *shading, *extensions;
+    const char *version, *shading, *extensions, *renderer, *vendor;
     GLint profile = -1, count = 0;
     static int noted;
 
@@ -210,6 +302,22 @@ static void nx_note_program_gl( void )
     if (version) snprintf( nx_program_gl, sizeof(nx_program_gl), "%s", version );
     shading = (const char *)funcs->p_glGetString( GL_SHADING_LANGUAGE_VERSION );
     extensions = (const char *)funcs->p_glGetString( GL_EXTENSIONS );
+    renderer = (const char *)funcs->p_glGetString( GL_RENDERER );
+    vendor = (const char *)funcs->p_glGetString( GL_VENDOR );
+    /* Which renderer answered, next to which one was asked for. The setting is
+     * the asking: mesa-switch reads MESA_SWITCH_GL_DRIVER when an EGL display
+     * is initialized, and a display keeps the backend it was made with, so a
+     * program whose setting says Zink can be running on NVC0 with every other
+     * line of the log looking right. Written separately so the line above stays
+     * the version line it has always been. */
+    nx_log( "[NXGL] the driver names itself \"%s\" of \"%s\"", renderer ? renderer : "?",
+            vendor ? vendor : "?" );
+    if (&wine_nx_gl_renderer_requested &&
+        !nxgl_renderer_matches( wine_nx_gl_renderer_requested(), renderer ))
+        nx_log( "[NXGL] %s was asked for and \"%s\" answered: this process's EGL display was made with "
+                "another backend before this context, and a display keeps the one it was made with -- "
+                "the renderer takes effect in a fresh start of the runtime",
+                wine_nx_gl_renderer_requested() ? "Zink" : "native NVC0", renderer );
     if (funcs->p_glGetIntegerv) funcs->p_glGetIntegerv( GL_CONTEXT_PROFILE_MASK, &profile );
     if (!extensions)
     {
@@ -1181,11 +1289,34 @@ err:
  * EGL_BAD_CONFIG) and EGL_KHR_create_context_no_error. A context gets the config
  * of its pixel format, the one this format's window surfaces and pbuffers use,
  * so EGL lets them be made current together. */
+#define NX_CONTEXT_ATTRIBS 20
+
+/* A flag of the context's own (EGL_CONTEXT_FLAGS_KHR), added or taken away:
+ * gl-debug.txt asks for the debug bit, and the same switch takes it away again
+ * when the driver refuses the context it makes. */
+static void nx_set_context_flag( EGLint *attribs, EGLint **end, EGLint bit, int on )
+{
+    EGLint *at;
+
+    for (at = attribs; at != *end; at += 2)
+        if (at[0] == EGL_CONTEXT_FLAGS_KHR)
+        {
+            if (on) at[1] |= bit;
+            else at[1] &= ~bit;
+            return;
+        }
+    if (!on || *end - attribs > NX_CONTEXT_ATTRIBS - 3) return;
+    (*end)[0] = EGL_CONTEXT_FLAGS_KHR;
+    (*end)[1] = bit;
+    *end += 2;
+}
+
 static struct opengl_context *nx_context_create( int format, struct opengl_context *share,
                                                   const int *attribs, BOOL *shared )
 {
-    EGLint egl_attribs[16], *end = egl_attribs, error;
+    EGLint egl_attribs[NX_CONTEXT_ATTRIBS], *end = egl_attribs, error;
     struct opengl_context *context;
+    int debug = &wine_nx_gl_debug && wine_nx_gl_debug();
 
     TRACE( "format %d, share %p, attribs %p\n", format, share, attribs );
 
@@ -1230,6 +1361,7 @@ static struct opengl_context *nx_context_create( int format, struct opengl_conte
         dst[0] = name;
         dst[1] = attribs[1];
     }
+    if (debug) nx_set_context_flag( egl_attribs, &end, EGL_CONTEXT_OPENGL_DEBUG_BIT_KHR, 1 );
     *end = EGL_NONE;
     nx_note_egl_display();
     nx_note_context_request( format, egl_attribs, end );
@@ -1241,6 +1373,19 @@ static struct opengl_context *nx_context_create( int format, struct opengl_conte
                                                         end != egl_attribs ? egl_attribs : NULL );
     error = funcs->p_eglGetError();
 
+    /* The debug flag is the first thing to go: a switch that was turned on to
+     * explain a broken picture must never be the reason the program has no
+     * context at all. */
+    if (debug && (error != EGL_SUCCESS || !context->host_context))
+    {
+        nx_set_context_flag( egl_attribs, &end, EGL_CONTEXT_OPENGL_DEBUG_BIT_KHR, 0 );
+        nx_log( "[NXGL] the driver refused a debug context for format %d (%#x); retrying without it",
+                format, error );
+        context->host_context = funcs->p_eglCreateContext( egl->display, nx_config_for_format( format ),
+                                                            share ? share->host_context : NULL,
+                                                            end != egl_attribs ? egl_attribs : NULL );
+        error = funcs->p_eglGetError();
+    }
     /* A driver built around the core profile can refuse the compatibility one
      * that wglCreateContext asks for, and then a game of the 2000s has no
      * context at all and paints nothing. Letting the profile go -- and, if the
@@ -1309,6 +1454,7 @@ static BOOL nx_context_activate( struct opengl_context *context, struct opengl_d
             nx_log( "[NXGL] the program's OpenGL context could not be made current, error %#x", error );
         return FALSE;
     }
+    if (&wine_nx_gl_debug && wine_nx_gl_debug()) nx_install_debug( context );
     nx_note_first_context();
     /* Only the program's own window tells us what it got; a context that draws
      * into a pbuffer or the compositor's own is none of our business. */

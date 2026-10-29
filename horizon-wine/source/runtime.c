@@ -14,6 +14,9 @@
 #include <unistd.h>
 #include <time.h>
 #include <png.h>
+#ifdef WINE_NX_MESA_SWITCH
+#include <EGL/egl.h>
+#endif
 
 #include "ntstatus.h"
 #define WIN32_NO_STATUS
@@ -816,6 +819,13 @@ static int runtime_xinput_ps4;
 static int runtime_gl_thread;
 static int runtime_gl_year;
 static int runtime_gl_driver;
+/* gl-debug.txt: the driver's own account of what it refused, in the run log. */
+static int runtime_gl_debug;
+/* What config.json's "gl-driver" asks for, for every program: 1 is Zink. A
+ * program's own settings still win; this is what a program without one runs on,
+ * so that "Zink everywhere" is a thing the runtime can be set to and the log can
+ * prove, instead of a per-game toggle that may never have been written. */
+static int runtime_gl_driver_default;
 /* The program's CPU translator choice: "opt", "" for the stock modules, or
  * NULL when it has none and fex-variant.txt decides. */
 static const char *runtime_fex_variant;
@@ -1633,6 +1643,25 @@ void *wine_nx_gl_acquire_window_vulkan( int width, int height )
 int wine_nx_vulkan_owns_screen( void )
 {
     return wine_nx_vulkan_window;
+}
+
+/* What the per-game OpenGL renderer setting asked for, 1 being Zink over
+ * NVK/Vulkan, for the display driver: the log names the renderer the driver
+ * really answered with next to the one that was asked for, which is the only
+ * way "Zink never turns on" can be told from "Zink is on and slow". */
+int wine_nx_gl_renderer_requested( void )
+{
+#ifdef WINE_NX_NXVK
+    return 1;  /* nxvk's OpenGL is Zink and nothing else */
+#else
+    return runtime_gl_driver == 1;
+#endif
+}
+
+/* gl-debug.txt: whether the driver's debug messages are wanted in the log. */
+int wine_nx_gl_debug( void )
+{
+    return runtime_gl_debug;
 }
 
 /* Who holds the screen, for the stall report's verdict on a swap that has not
@@ -5473,6 +5502,20 @@ int main( int argc, char **argv )
               "the OpenGL compositor" :
               "the framebuffer (window pixels only: a program that draws with OpenGL or Vulkan puts its "
               "own surface on the screen either way, and nothing else can be drawn over it)" );
+    {
+        char value[16];
+
+        if (wine_nx_config_string_value( &runtime_config, "gl-driver", value, sizeof(value) ))
+        {
+            runtime_gl_driver_default = !strcasecmp( value, "zink" ) ? 1 : 0;
+            log_line( "[INIT] the OpenGL renderer for a program without settings of its own: %s "
+                      "(config.json gl-driver=%s)", runtime_gl_driver_default ? "Zink over NVK/Vulkan"
+                      : "native NVC0", value );
+        }
+    }
+    runtime_gl_debug = config_bool( "gl-debug", 0, "gl-debug.txt", 0 );
+    if (runtime_gl_debug)
+        log_line( "[MESA] the driver's own debug messages go into this log (GL_KHR_debug)" );
     /* Both are wanted on the way out, when the card is a poor thing to ask. */
     runtime_loader_anyway = config_bool( "hand-the-process-back-anyway", 0, "loader-anyway.txt", 0 );
     runtime_reopen_launcher = config_bool( "reopen-the-launcher-on-exit", 1, "reload-launcher.txt", 0 );
@@ -5697,6 +5740,7 @@ int main( int argc, char **argv )
         runtime_windows_xp = 0;
         runtime_windows_czech = 0;
         runtime_xinput_ps4 = 0;
+        runtime_gl_driver = runtime_gl_driver_default;
         horizon_fast_sync_enabled = 0;
         wine_nx_scaling_mode = SCREEN_SCALING_ASPECT;
 #ifdef WINE_NX_MESA_SWITCH
@@ -5736,7 +5780,10 @@ int main( int argc, char **argv )
             runtime_fex_disk_cache = settings.fex_disk_cache;
             runtime_gl_thread = settings.gl_thread;
             runtime_gl_year = settings.gl_year ? launcher_gl_years[settings.gl_year] : 0;
-            runtime_gl_driver = settings.gl_driver;
+            /* The program's own file only overrides the global choice when it
+             * names a renderer: launcher_settings_read() answers 0 for a file
+             * without the key, which is not the same as "native NVC0". */
+            runtime_gl_driver = launcher_settings_gl_driver( &kv, runtime_gl_driver_default );
             if (settings.verbose >= 0) wine_nx_runtime_verbose = settings.verbose;
             if (settings.profile >= 0) runtime_profile = settings.profile;
             if (settings.framebuffer >= 0) wine_nx_compositor_mode = !settings.framebuffer;
@@ -6175,6 +6222,24 @@ int main( int argc, char **argv )
                   "",
 #endif
                   zink ? "zink" : "nvc0" );
+#ifdef WINE_NX_MESA_SWITCH
+        {
+            /* A display that is still up keeps the renderer it was made with,
+             * whatever this process asks for now, and the only way to another
+             * one is to let it go: mesa-switch's switch_terminate() frees the
+             * backend state, and the next eglInitialize() -- the program's or
+             * the compositor's -- reads the variable set above. The launcher's
+             * SDL display is normally terminated by SDL_Quit before this point
+             * and nothing here happens; one that is still up would otherwise
+             * keep NVC0 under a program whose setting says Zink, silently. */
+            EGLDisplay display = eglGetDisplay( EGL_DEFAULT_DISPLAY );
+            const char *version = display ? eglQueryString( display, EGL_VERSION ) : NULL;
+
+            if (version && eglTerminate( display ))
+                log_line( "[MESA] an EGL display was still up (%s) and was let go, so the program's is made with %s",
+                          version, zink ? "Zink over NVK/Vulkan" : "native NVC0" );
+        }
+#endif
     }
     /* The program's own two OpenGL switches. glthread is a DRI option, so its
      * name is the lower case one Mesa's driver reads, not the MESA_* form,

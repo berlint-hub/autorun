@@ -295,3 +295,32 @@ Still open, unchanged by this: Doom 3's visual glitches (no log line describes t
 the rendering path looks healthy and no frame was lost), the 1 ms granularity of
 `GetTickCount` in `KUSER_SHARED_DATA`, the alpha of the OSK overlay, and the repaint
 after `wine_nx_fb_unlock`.
+
+### What was added on top (same day): the renderer that answered, and the driver's own words
+
+- `[NXGL] the driver names itself "…" of "…"` — the program's own `GL_RENDERER`
+  and `GL_VENDOR`, next to the version line. And when that is not the renderer
+  the setting asked for: `Zink was asked for and "NV132" answered … takes effect
+  in a fresh start of the runtime`. `source/nxgl_renderer.h` decides it (Zink
+  names itself first in `GL_RENDERER`; NVC0 names the card), and
+  `tests/nxgl_renderer.c` covers the strings both drivers really give — wired
+  into CI as "Which OpenGL renderer answered".
+- The runtime asks `wine_nx_compositor_suspend()` whether the presenter really
+  stepped aside, and only then releases what is left on the window (the earlier
+  note in this file said "both ways"; it was one way, and the way in — the
+  compositor's leftovers — was missing).
+- An EGL display that is somehow still up when the program's renderer is chosen
+  is terminated there and then, so the program's own display is made with the
+  requested backend (`[MESA] an EGL display was still up (…) and was let go`).
+  Normally SDL has terminated the launcher's display and nothing happens.
+- `gl-debug.txt` / `gl-debug` in `config/settings.json` turns on `GL_KHR_debug`
+  for every context: the driver's account of a refused shader, an unknown enum
+  or a lost context lands in the run log (`[NXGL] the driver (high error): …`),
+  synchronously, first 64 messages, then counted. The debug bit is dropped first
+  if the driver refuses such a context, so the switch can never cost a program
+  its OpenGL.
+- `gl-driver` in `config/settings.json` (`"zink"` or `"nvc0"`) chooses the
+  renderer for programs whose own settings file names none; a program's own
+  `gl-driver` still wins (`launcher_settings_gl_driver()`, covered by
+  `tests/launcher_settings.c`). Three Doom 3 runs had no `[SETTINGS]` line at
+  all, so their renderer setting had never reached the runtime.

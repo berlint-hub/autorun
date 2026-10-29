@@ -177,6 +177,21 @@ static void test_settings( const char *dir )
     load_text( &kv, "gl-driver=unknown\n" );
     launcher_settings_read( &kv, &settings );
     assert( settings.gl_driver == 0 );
+    /* The global choice (config/settings.json's gl-driver) applies to a program
+     * that names no renderer, and a file that names one overrides it. A file
+     * whose line is present but unreadable must not silently undo the global
+     * choice by looking like the default. */
+    load_text( &kv, "" );
+    assert( launcher_settings_gl_driver( &kv, 1 ) == 1 );
+    assert( launcher_settings_gl_driver( &kv, 0 ) == 0 );
+    load_text( &kv, "gl-driver=nvc0\n" );
+    assert( launcher_settings_gl_driver( &kv, 1 ) == 0 );
+    load_text( &kv, "gl-driver=zink\n" );
+    assert( launcher_settings_gl_driver( &kv, 0 ) == 1 );
+    load_text( &kv, "gl-driver=ZINK\n" );
+    assert( launcher_settings_gl_driver( &kv, 0 ) == 1 );
+    load_text( &kv, "gl-driver=unknown\n" );
+    assert( launcher_settings_gl_driver( &kv, 1 ) == 1 );
     /* The switch of the build before this one, which knew one year. */
     load_text( &kv, "gl-2003=on\n" );
     launcher_settings_read( &kv, &settings );
