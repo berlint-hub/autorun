@@ -174,6 +174,12 @@ static void wine_nx_present_fit_stretched(int src_w, int src_h, int src_x, int s
     stretched_fits++;
 }
 static void wine_nx_desktop_size(int *width, int *height) { *width = desktop_w; *height = desktop_h; }
+/* The screen's window as libnx keeps it: a fresh surface on a window that has
+ * nothing registered and nothing out, which is what a healthy one looks like. */
+static int wine_nx_gl_window_state(char *buffer, size_t size) {
+    snprintf(buffer, size, "0 slots, 800x600 format 0, connected, no buffer is out");
+    return 1;
+}
 /* Called by the swap, and only logged by the real ones. */
 static void nx_note_program_gl(void) { }
 static void nx_drawable_screenshot(struct opengl_drawable *base) { }
@@ -190,8 +196,13 @@ static int nx_swap_surface_w, nx_swap_surface_h, nx_swap_surface_screen;
  * vendor too, and is not that report. */
 static unsigned int egl_reports;
 static char last_egl_report[256];
+/* The window's line: said once, when the program's surface is first made on the
+ * screen, and again for the first swap that follows. */
+static unsigned int window_state_lines;
 static void nx_log(const char *format, ...) {
     va_list args;
+    if (strstr(format, "the window the program's surface was made on") ||
+        strstr(format, "the window at the first swap")) window_state_lines++;
     if (!strstr(format, "config(s) for OpenGL")) return;
     egl_reports++;
     va_start(args, format);
@@ -449,6 +460,9 @@ int main(void) {
     assert(!live_drawables && !live_surfaces && !screen_busy && !nx_screen_refs);
     for (unsigned int i = 0; i < 64; i++) assert(!clients[i]);
     assert(egl_reports == 1);   /* never repeated, however many surfaces were made */
+    /* The window's books, read while the program ran: once when the first
+     * surface took the window, once as the first swap began. */
+    assert(window_state_lines == 2);
     puts("OpenGL surfaces: offscreen probes, sharing, visibility, resizing, cached references, failures, screen sizing, "
          "swap intervals and the EGL report passed");
 }
