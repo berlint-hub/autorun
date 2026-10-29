@@ -8,6 +8,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <malloc.h>
+#include <ctype.h>
 #include <string.h>
 #include <strings.h>
 #include <sys/stat.h>
@@ -639,9 +640,8 @@ static int run_report_log_line( const char *line )
          * questions "Zink does not work" is made of, and the reason a program
          * with no settings line at all runs on the default. The rest of the
          * [NXGL] lines are too many for a summary -- those are in the log. */
-        "[MESA]", "[NXGL] the driver names itself", "[NXGL] Zink was asked for",
-        "[NXGL] native NVC0 was asked for", "[NXGL] the program's OpenGL",
-        "[NXGL] no context for", "[NXGL] the first context made current"
+        "[MESA]", "[NXGL] the first context made current", "[NXGL] it is",
+        "[NXGL] it is NOT", "[NXGL] the program's OpenGL", "[NXGL] no context for"
     };
     unsigned int i;
 
@@ -5556,14 +5556,34 @@ int main( int argc, char **argv )
               "the framebuffer (window pixels only: a program that draws with OpenGL or Vulkan puts its "
               "own surface on the screen either way, and nothing else can be drawn over it)" );
     {
-        char value[16];
+        char value[16] = "";
+        int found = wine_nx_config_string_value( &runtime_config, "gl-driver", value, sizeof(value) );
 
-        if (wine_nx_config_string_value( &runtime_config, "gl-driver", value, sizeof(value) ))
+        if (!found)
+        {
+            /* Written by hand without quotes, which this file's reader accepts
+             * for its numbers: the value is taken as it stands. Anything else
+             * -- a number, null -- is not a renderer name and leaves the
+             * build's own default alone. */
+            int at = wine_nx_config_find( &runtime_config, "gl-driver" );
+
+            if (at >= 0 && isalpha( (unsigned char)runtime_config.entries[at].value[0] ))
+            {
+                snprintf( value, sizeof(value), "%s", runtime_config.entries[at].value );
+                found = 1;
+            }
+        }
+        if (found)
         {
             runtime_gl_driver_default = !strcasecmp( value, "zink" ) ? 1 : 0;
-            log_line( "[INIT] the OpenGL renderer for a program without settings of its own: %s "
-                      "(config.json gl-driver=%s)", runtime_gl_driver_default ? "Zink over NVK/Vulkan"
-                      : "native NVC0", value );
+            if (strcasecmp( value, "zink" ) && strcasecmp( value, "nvc0" ))
+                log_line( "[INIT] config.json gl-driver=%s is not a renderer this build knows; a program "
+                          "without settings of its own runs on %s", value,
+                          runtime_gl_driver_default ? "Zink over NVK/Vulkan" : "native NVC0" );
+            else
+                log_line( "[INIT] the OpenGL renderer for a program without settings of its own: %s "
+                          "(settings.json gl-driver=%s)", runtime_gl_driver_default ? "Zink over NVK/Vulkan"
+                          : "native NVC0", value );
         }
     }
     runtime_gl_debug = config_bool( "gl-debug", 0, "gl-debug.txt", 0 );
@@ -5980,6 +6000,17 @@ int main( int argc, char **argv )
             }
             else
                 voodoo_system_ddraw( 0 );
+            /* The launcher writes a program's settings the first time one is
+             * opened for it, and a program started without that file runs on
+             * the runtime's defaults: what a setting the user changed but never
+             * had saved looks like. launcher_kv_load() answers 1 for a file
+             * that is not there -- an empty settings set is a valid answer --
+             * so the file itself has to be asked. The line is here, with the
+             * summary below, so "my setting did nothing" has something to point
+             * at. */
+            if (access( settings_path, F_OK ))
+                log_line( "[SETTINGS] %s is not there: this program runs on the runtime's defaults, "
+                          "and a setting the launcher shows for it has not been saved", settings_path );
             log_line( "[SETTINGS] %s: verbose %s, profiler %s, windows %s, Direct3D %s", settings_path,
                       settings.verbose < 0 ? "global" : settings.verbose ? "on" : "off",
                       settings.profile < 0 ? "global" : settings.profile ? "on" : "off",
@@ -5990,20 +6021,6 @@ int main( int argc, char **argv )
 #else
                       settings.d3d != LAUNCHER_D3D_WINE ? "Wine (DXVK needs the Vulkan runtime)" : "Wine" );
 #endif
-        }
-        else if (target[1] != ':')
-        {
-            /* The launcher writes a program's settings the first time one is
-             * opened for it; a program started without that file runs on the
-             * runtime's defaults, which is also what a setting the user changed
-             * but never had saved looks like. The line is here so that "my
-             * setting did nothing" has something to point at: no line, no
-             * settings, and the renderer it asked for is the default's. */
-            char expected[520];
-
-            if (launcher_program_settings_path( RUNTIME_DIR, target, expected, sizeof(expected) ))
-                log_line( "[SETTINGS] %s is not there: this program runs on the runtime's defaults, "
-                          "and a setting the launcher shows for it has not been saved", expected );
         }
     }
 
@@ -6240,15 +6257,19 @@ int main( int argc, char **argv )
      * made again is a new one: switch_terminate() frees the backend state and
      * the next eglInitialize() reads this variable afresh, so the launcher's
      * own SDL display (made and terminated before a program is chosen) does
-     * not stand in a program's way. What does stand in its way is a display
-     * that is still alive when the program makes its first one -- the runtime
-     * compositor's, which lives as long as the program does. */
+     * not stand in a program's way.
+     *
+     * The compositor's display is the one that cannot be let go: its presenter
+     * is drawing through it, and terminating it under the presenter would take
+     * its context and surface with it. While it runs, the program keeps the
+     * renderer the compositor was made with, and the log says so. */
     {
         static int applied = -1;
 
-        if (applied >= 0 && applied != runtime_gl_driver && wine_nx_compositor_running())
-            log_line( "[MESA] this process's EGL display was made with the first program's renderer, "
-                      "so this one cannot change it; it takes effect when the runtime restarts" );
+        if (wine_nx_compositor_running() && applied >= 0 && applied != runtime_gl_driver)
+            log_line( "[MESA] this process's EGL display is the compositor's, made with the first "
+                      "program's renderer, so this one cannot change it; it takes effect when the "
+                      "runtime restarts" );
         applied = runtime_gl_driver;
     }
     {
@@ -6276,15 +6297,21 @@ int main( int argc, char **argv )
 #endif
                   zink ? "zink" : "nvc0" );
 #ifdef WINE_NX_MESA_SWITCH
+        if (!wine_nx_compositor_running())
         {
             /* A display that is still up keeps the renderer it was made with,
              * whatever this process asks for now, and the only way to another
              * one is to let it go: mesa-switch's switch_terminate() frees the
-             * backend state, and the next eglInitialize() -- the program's or
-             * the compositor's -- reads the variable set above. The launcher's
-             * SDL display is normally terminated by SDL_Quit before this point
-             * and nothing here happens; one that is still up would otherwise
-             * keep NVC0 under a program whose setting says Zink, silently. */
+             * backend state, and the next eglInitialize() reads the variable
+             * set above. The launcher's SDL display is normally terminated by
+             * SDL_Quit before this point and nothing here happens; one that is
+             * still up would otherwise keep NVC0 under a program whose setting
+             * says Zink, silently.
+             *
+             * The compositor's display is never touched here: its presenter is
+             * presenting through it, and the renderer it was made with is then
+             * the process's for as long as it runs -- which the block above has
+             * already said. */
             EGLDisplay display = eglGetDisplay( EGL_DEFAULT_DISPLAY );
             const char *version = display ? eglQueryString( display, EGL_VERSION ) : NULL;
 

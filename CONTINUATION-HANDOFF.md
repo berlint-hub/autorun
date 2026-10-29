@@ -270,7 +270,14 @@ Read from the run logs the user attached (`doom3_*.log` ×3, `DarkAthena_*.log` 
   the clocks keep moving -- it is a wait for a buffer nobody returns, not a stall in
   time. The compositor had just started (`[NXCOMP] presenting the screen through OpenGL
   on NV12B`) and handed the window over right before it.
-- **So the tree now releases what the suspended presenter left on the window.**
+- **The `[SETTINGS] … is not there` line was wrong in its first version.** It hung
+  off `launcher_kv_load()`'s answer, and that answers 1 for a file that is not
+  there -- an empty settings set is a valid answer -- so it never fired for the
+  case it named. It now asks `access()` inside the block that reads the file, and
+  `tests/launcher_settings.c` pins the loader's behaviour so the mistake is not
+  made again. The three Doom 3 runs have no `[SETTINGS]` line at all, which a
+  current build always writes; those runs predate the summary.
+- So the tree now releases what the suspended presenter left on the window.
   `wine_nx_compositor_suspend()` returns whether the presenter really stepped aside
   (its surface destroyed), and `wine_nx_screen_acquire()` releases the window's buffers
   before taking it, only in that case and only when this call is the one taking the
@@ -298,13 +305,14 @@ after `wine_nx_fb_unlock`.
 
 ### What was added on top (same day): the renderer that answered, and the driver's own words
 
-- `[NXGL] the driver names itself "…" of "…"` — the program's own `GL_RENDERER`
-  and `GL_VENDOR`, next to the version line. And when that is not the renderer
-  the setting asked for: `Zink was asked for and "NV132" answered … takes effect
-  in a fresh start of the runtime`. `source/nxgl_renderer.h` decides it (Zink
-  names itself first in `GL_RENDERER`; NVC0 names the card), and
-  `tests/nxgl_renderer.c` covers the strings both drivers really give — wired
-  into CI as "Which OpenGL renderer answered".
+- `[NXGL] the first context made current is …` followed by `it is the renderer
+  this program asked for (Zink)` or `it is NOT … the EGL display was made with
+  another backend before …` — one place, once, asked of the runtime
+  (`wine_nx_gl_renderer_requested()`, with the environment as the fallback).
+  `source/nxgl_renderer.h` decides it (Zink names itself first in
+  `GL_RENDERER`; NVC0 names the card), and `tests/nxgl_renderer.c` covers the
+  strings both drivers really give — wired into CI as "Which OpenGL renderer
+  answered".
 - The runtime asks `wine_nx_compositor_suspend()` whether the presenter really
   stepped aside, and only then releases what is left on the window (the earlier
   note in this file said "both ways"; it was one way, and the way in — the

@@ -132,20 +132,21 @@ runtime; the full package now ships the Mesa 26 one.
   own SDL display, made and terminated before a program is chosen, does not
   stand in the way; the compositor's display, which lives as long as the
   program, does). A second program started in the same run keeps the renderer
-  the first one asked for, and the log says so when it happens. Which of the
-  two a program really ran on is answered once, right after the program's first
-  context: `[NXGL] it is the renderer this program asked for (Zink)` or `it is
-  NOT the renderer this program asked for (Zink): the EGL display was made with
-  another backend before the program's first context …`. The comparison is
-  `source/nxgl_renderer.h`, tested by `tests/nxgl_renderer.c`: Zink names
-  itself first in `GL_RENDERER`, NVC0 names the card. The program's own context
-  also carries the driver's name and vendor (`[NXGL] the driver names itself
-  "…" of "…"`), and a renderer that is not the one asked for says so
-  (`Zink was asked for and "NV132" answered … takes effect in a fresh start of
-  the runtime`). A display that is still up when the program's renderer is set
-  is let go there and then, so the next `eglInitialize` picks the renderer up
-  (`[MESA] an EGL display was still up (…) and was let go`); a display made
-  after that point is what locks the choice for the rest of the run.
+  the first one asked for, and the log says so when it happens (`[MESA] this
+  process's EGL display is the compositor's, made with the first program's
+  renderer …`). Which of the two a program really ran on is answered
+  once, by the first context that is made current: `[NXGL] the first context
+  made current is …` names the renderer, and `it is the renderer this program
+  asked for (Zink)` or `it is NOT the renderer this program asked for (Zink):
+  the EGL display was made with another backend before …` follows it. The
+  comparison is `source/nxgl_renderer.h`, tested by `tests/nxgl_renderer.c`:
+  Zink names itself first in `GL_RENDERER`, NVC0 names the card. A display that
+  is still up (the launcher's, if SDL left it) is let go there and then, so the
+  next `eglInitialize` picks the renderer up (`[MESA] an EGL display was still
+  up (…) and was let go`); the compositor's is never touched — its presenter is
+  presenting through it — so with the compositor running, the renderer it was
+  made with is the process's. A display made after that point is what locks the
+  choice for the rest of the run.
   `gl-debug.txt` (or `gl-debug` in `config/settings.json`) makes every context
   carry `GL_KHR_debug`: the driver's own account of a shader it refused, an enum
   it does not know or a context it lost is written into the run log
@@ -153,14 +154,20 @@ runtime; the full package now ships the Mesa 26 one.
   counted), synchronously from the thread that caused them. The debug bit is the
   first thing dropped if the driver will not make such a context, so the switch
   that explains a broken picture can never be the reason there is none.
-  A program whose per-game settings file is not there now says so — `[SETTINGS]
-  … is not there: this program runs on the runtime's defaults` — because a
-  setting the launcher shows but never saved is otherwise indistinguishable
-  from one it applied; that is what three Doom 3 runs of 2026-10-29 showed, all
-  of them on NVC0 with no settings line at all. For a program with no renderer
+  A program whose per-game settings file is not there says so — `[SETTINGS]
+  … is not there: this program runs on the runtime's defaults, and a setting the
+  launcher shows for it has not been saved` — next to the summary line every run
+  writes, because a setting the launcher shows but never saved is otherwise
+  indistinguishable from one it applied. The line is decided by `access()` and
+  not by `launcher_kv_load()`, which answers 1 for a file that is not there:
+  an empty settings set is a valid answer, and `tests/launcher_settings.c` pins
+  that. (The three Doom 3 runs of 2026-10-29 have neither line, so the build
+  they came from does not write the summary at all.)
+  For a program with no renderer
   of its own, `gl-driver` in `config/settings.json` chooses one for every
   program (`[INIT] the OpenGL renderer for a program without settings of its
-  own: …`), and a program's own file still wins. The swap interval is capped at what the config offers (0
+  own: …`; an unknown name is named and leaves the build's default), and a
+  program's own file still wins. The swap interval is capped at what the config offers (0
   and 1 here) rather than passed on to be refused: the frame limit is what caps
   frames, and `eglSwapInterval` has no return value anyone would read. Frames of another size than the screen's
   (800x600 or 640x480 in full screen) are scaled to it by the runtime's own

@@ -177,6 +177,11 @@ static void test_settings( const char *dir )
     load_text( &kv, "gl-driver=unknown\n" );
     launcher_settings_read( &kv, &settings );
     assert( settings.gl_driver == 0 );
+    /* A settings file that is not there loads as an empty set and answers 1,
+     * not 0: "no settings" is a valid answer, so the runtime asks access()
+     * before telling a program its settings file is missing. */
+    assert( launcher_kv_load( &kv, "/nonexistent/autorun/none.wine-nx.txt" ) );
+    assert( !kv.size && !kv.text[0] );
     /* The global choice (config/settings.json's gl-driver) applies to a program
      * that names no renderer, and a file that names one overrides it. A file
      * whose line is present but unreadable must not silently undo the global

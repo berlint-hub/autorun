@@ -295,7 +295,7 @@ static void nx_install_debug( struct opengl_context *context )
  * is how a change to it is seen. */
 static void nx_note_program_gl( void )
 {
-    const char *version, *shading, *extensions, *renderer, *vendor;
+    const char *version, *shading, *extensions;
     GLint profile = -1, count = 0;
     static int noted;
 
@@ -304,22 +304,6 @@ static void nx_note_program_gl( void )
     if (version) snprintf( nx_program_gl, sizeof(nx_program_gl), "%s", version );
     shading = (const char *)funcs->p_glGetString( GL_SHADING_LANGUAGE_VERSION );
     extensions = (const char *)funcs->p_glGetString( GL_EXTENSIONS );
-    renderer = (const char *)funcs->p_glGetString( GL_RENDERER );
-    vendor = (const char *)funcs->p_glGetString( GL_VENDOR );
-    /* Which renderer answered, next to which one was asked for. The setting is
-     * the asking: mesa-switch reads MESA_SWITCH_GL_DRIVER when an EGL display
-     * is initialized, and a display keeps the backend it was made with, so a
-     * program whose setting says Zink can be running on NVC0 with every other
-     * line of the log looking right. Written separately so the line above stays
-     * the version line it has always been. */
-    nx_log( "[NXGL] the driver names itself \"%s\" of \"%s\"", renderer ? renderer : "?",
-            vendor ? vendor : "?" );
-    if (&wine_nx_gl_renderer_requested &&
-        !nxgl_renderer_matches( wine_nx_gl_renderer_requested(), renderer ))
-        nx_log( "[NXGL] %s was asked for and \"%s\" answered: this process's EGL display was made with "
-                "another backend before this context, and a display keeps the one it was made with -- "
-                "the renderer takes effect in a fresh start of the runtime",
-                wine_nx_gl_renderer_requested() ? "Zink" : "native NVC0", renderer );
     if (funcs->p_glGetIntegerv) funcs->p_glGetIntegerv( GL_CONTEXT_PROFILE_MASK, &profile );
     if (!extensions)
     {
@@ -551,14 +535,18 @@ static void nx_note_first_context( void )
     version = (const char *)funcs->p_glGetString( GL_VERSION );
     nx_log( "[NXGL] the first context made current is %s, OpenGL %s",
             renderer ? renderer : "?", version ? version : "?" );
-    /* Whether that is the renderer the runtime asked mesa-switch for. The
-     * asking happens in the runtime, but the answering happens when an EGL
-     * display is initialized, and a display keeps one backend: a program whose
-     * setting says Zink can be answered by NVC0 because something else in the
-     * process made the display first. That difference is invisible in every
-     * other line of the log, and a setting that looks applied but is not is
-     * exactly what "Zink never turns on" looks like from the outside. */
-    asked = nxgl_renderer_requested( getenv( "MESA_SWITCH_GL_DRIVER" ) );
+    /* Whether that is the renderer the runtime asked mesa-switch for -- the one
+     * place in the log that says it, so nothing else repeats the comparison.
+     * The asking happens in the runtime (per program, and nxvk asks for Zink
+     * whatever a program says); the answering happens when an EGL display is
+     * initialized, and a display keeps one backend. A program whose setting
+     * says Zink can therefore be answered by NVC0 with every other line of the
+     * log looking right, which is what "Zink never turns on" looked like from
+     * the outside. The environment is the fallback for a runtime that does not
+     * answer: the driver reads the same variable mesa-switch reads. */
+    asked = &wine_nx_gl_renderer_requested ? (wine_nx_gl_renderer_requested() ? NXGL_RENDERER_ZINK
+                                                                             : NXGL_RENDERER_NVC0)
+                                           : nxgl_renderer_requested( getenv( "MESA_SWITCH_GL_DRIVER" ) );
     state = nxgl_renderer_state_of( asked, renderer );
     if (state == NXGL_RENDERER_AS_ASKED)
         nx_log( "[NXGL] it is the renderer this program asked for (%s)",
