@@ -285,6 +285,12 @@ Read from the run logs the user attached (`doom3_*.log` ×3, `DarkAthena_*.log` 
   and `tests/thread_profile.c` covers a PE32+ image, a PE32+ magic over the 32-bit
   layout, and an unknown magic.
 
+- **A spinning thread's callers are now read from its stack.** The stall report's
+  `| x86 at …` had no callers for Dark Athena's main thread
+  (`< 0 < 0`): the chain came from `ebp` and the game is built without frame
+  pointers. `nx_prof_x86_scan()` scans the stack's own words for return addresses
+  into a module when the frame chain is empty (marked `(scanned)`), host-tested.
+
 Still open, unchanged by this: Doom 3's visual glitches (no log line describes them --
 the rendering path looks healthy and no frame was lost), the 1 ms granularity of
 `GetTickCount` in `KUSER_SHARED_DATA`, the alpha of the OSK overlay, and the repaint
