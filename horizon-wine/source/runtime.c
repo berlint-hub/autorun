@@ -1458,7 +1458,7 @@ static void *wine_nx_screen_acquire( int width, int height, int vulkan )
 {
     int compositor = wine_nx_compositor_enabled();
     NWindow *window = NULL;
-    int taken_over = 0, took_dimensions = 1;
+    int taken_over = 0, took_dimensions = 1, took_from_compositor = 0, stepped_aside = 1;
 
     /* As in wine_nx_desktop_set: the set-up before the size, or it would land
      * on top of the size the surface is taking the screen with. */
@@ -1510,7 +1510,7 @@ static void *wine_nx_screen_acquire( int width, int height, int vulkan )
     else if (!wine_nx_gl_window && !wine_nx_vulkan_window && !wine_nx_fb_lock_depth)
     {
         if (compositor)
-            ;  /* suspended below, without this lock, as it waits for the presenter */
+            took_from_compositor = 1;  /* suspended below, without this lock, as it waits */
         else if (wine_nx_fb_ready)
         {
             framebufferClose( &wine_nx_fb );
@@ -1533,7 +1533,33 @@ static void *wine_nx_screen_acquire( int width, int height, int vulkan )
     /* After the suspend: the presenter has destroyed its surface by now, and
      * what its EGL left registered is what the window has to be rid of before
      * it can take the program's size. */
-    if (window && compositor) wine_nx_compositor_suspend();
+    if (window && compositor) stepped_aside = wine_nx_compositor_suspend();
+    /* A presenter that has stepped aside still leaves the slots it registered
+     * on the window behind, and one of them can be out: the frame it had just
+     * dequeued when it was asked to stop. libnx then hands the window to the
+     * program with that buffer still out, its own buffers cannot all be
+     * registered, and the surface's creation waits for a buffer that no one
+     * will give back -- which is a program stuck in SetPixelFormat with the
+     * screen showing the compositor's last frame and no log line to say why.
+     * The slots go back here, before the size and the surface, the same way
+     * wine_nx_screen_return lets them go on the way out. Only when this call
+     * takes the screen from the compositor and the presenter has really given
+     * it up (its surface is destroyed, so what is left on the window is stale):
+     * a presenter that did not step aside is still presenting into those slots,
+     * and a Vulkan swapchain reset acquires the screen it already has, whose
+     * own buffers must not be released either. */
+    if (window && took_from_compositor && stepped_aside)
+    {
+        unsigned int stale = (unsigned)__builtin_popcountll( (unsigned long long)window->slots_configured );
+        Result rc = nwindowReleaseBuffers( window );
+
+        if (R_FAILED(rc))
+            log_line( "[NXGL] the screen still had %u buffers registered for the compositor, "
+                      "and they would not go back: error 0x%x", stale, rc );
+        else if (stale)
+            log_line( "[NXGL] the screen still had %u buffers registered for the compositor: released",
+                      stale );
+    }
     /* The surface is the window's own size: the program draws 1:1 and the
      * display compositor scales the buffer onto the panel, like it does for
      * every other layer.  The panel's own size kept the program's viewport
@@ -5865,6 +5891,20 @@ int main( int argc, char **argv )
                       settings.d3d != LAUNCHER_D3D_WINE ? "Wine (DXVK needs the Vulkan runtime)" : "Wine" );
 #endif
         }
+        else if (target[1] != ':')
+        {
+            /* The launcher writes a program's settings the first time one is
+             * opened for it; a program started without that file runs on the
+             * runtime's defaults, which is also what a setting the user changed
+             * but never had saved looks like. The line is here so that "my
+             * setting did nothing" has something to point at: no line, no
+             * settings, and the renderer it asked for is the default's. */
+            char expected[520];
+
+            if (launcher_program_settings_path( RUNTIME_DIR, target, expected, sizeof(expected) ))
+                log_line( "[SETTINGS] %s is not there: this program runs on the runtime's defaults, "
+                          "and a setting the launcher shows for it has not been saved", expected );
+        }
     }
 
     /* The translator's code, kept on the card (fex-cache=1). FEX writes each
@@ -6096,10 +6136,13 @@ int main( int argc, char **argv )
      * compositor; Vulkan applications continue to use NVK.
      *
      * One EGL display has one backend for its lifetime
-     * (mesa-switch, docs/switch-opengl.rst), and the display outlives the
-     * program that first asked for it -- the compositor's is made in the same
-     * process. A second program that asks for the other renderer cannot change
-     * it, and saying so is better than a setting that looks applied. */
+     * (mesa-switch, docs/switch-opengl.rst). A display that is terminated and
+     * made again is a new one: switch_terminate() frees the backend state and
+     * the next eglInitialize() reads this variable afresh, so the launcher's
+     * own SDL display (made and terminated before a program is chosen) does
+     * not stand in a program's way. What does stand in its way is a display
+     * that is still alive when the program makes its first one -- the runtime
+     * compositor's, which lives as long as the program does. */
     {
         static int applied = -1;
 
@@ -6108,27 +6151,31 @@ int main( int argc, char **argv )
                       "so this one cannot change it; it takes effect when the runtime restarts" );
         applied = runtime_gl_driver;
     }
-    if (runtime_gl_driver == 1)
     {
-        setenv( "MESA_SWITCH_GL_DRIVER", "zink", 1 );
-        log_line( "[MESA] OpenGL renderer: Zink over NVK/Vulkan" );
-    }
 #ifdef WINE_NX_NXVK
-    else
-    {
         /* nxvk builds Zink and no NVC0, so the other half of the per-game
-         * setting has nothing to select. Saying which renderer the program got
-         * is worth more than repeating the one it asked for. */
-        setenv( "MESA_SWITCH_GL_DRIVER", "zink", 1 );
-        log_line( "[MESA] OpenGL renderer: Zink over NVK/Vulkan (nxvk has no NVC0)" );
-    }
+         * setting has nothing to select. */
+        const int zink = 1;
 #else
-    else
-    {
-        setenv( "MESA_SWITCH_GL_DRIVER", "nvc0", 1 );
-        log_line( "[MESA] OpenGL renderer: native NVC0" );
-    }
+        const int zink = runtime_gl_driver == 1;
 #endif
+
+        setenv( "MESA_SWITCH_GL_DRIVER", zink ? "zink" : "nvc0", 1 );
+        /* Said as the asking, not as the answer: mesa-switch reads this when an
+         * EGL display is initialized, and the display that answers may be one
+         * made earlier in this process (the launcher's SDL, a compositor's).
+         * What actually answers is said once, by the program's own first
+         * context, in [NXGL] "the first context made current" -- which names
+         * Zink or the card and says whether it is what was asked for. */
+        log_line( "[MESA] OpenGL renderer asked for: %s%s (MESA_SWITCH_GL_DRIVER=%s)",
+                  zink ? "Zink over NVK/Vulkan" : "native NVC0",
+#ifdef WINE_NX_NXVK
+                  " (nxvk has no NVC0)",
+#else
+                  "",
+#endif
+                  zink ? "zink" : "nvc0" );
+    }
     /* The program's own two OpenGL switches. glthread is a DRI option, so its
      * name is the lower case one Mesa's driver reads, not the MESA_* form,
      * and it has to be here rather than in the program's environment: the

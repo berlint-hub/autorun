@@ -126,10 +126,23 @@ runtime; the full package now ships the Mesa 26 one.
   so before any of that: it is a driver built for GLES only.
 
   One EGL display has one backend for its lifetime, so the **OpenGL renderer**
-  setting is the process's, not only the program's: the launcher, the
-  compositor and the program share one display, and a second program started
-  in the same run keeps the renderer the first one asked for. The log says so
-  when it happens. The swap interval is capped at what the config offers (0
+  setting is the display's, not only the program's: whatever made a display
+  first in the process fixed its backend until that display is terminated
+  (mesa-switch's `switch_terminate` frees the backend state, so the launcher's
+  own SDL display, made and terminated before a program is chosen, does not
+  stand in the way; the compositor's display, which lives as long as the
+  program, does). A second program started in the same run keeps the renderer
+  the first one asked for, and the log says so when it happens. Which of the
+  two a program really ran on is answered once, right after the program's first
+  context: `[NXGL] it is the renderer this program asked for (Zink)` or `it is
+  NOT the renderer this program asked for (Zink): the EGL display was made with
+  another backend before the program's first context …`. The comparison is
+  `source/nxgl_renderer.h`, tested by `tests/nxgl_renderer.c`: Zink names
+  itself first in `GL_RENDERER`, NVC0 names the card.
+  A program whose per-game settings file is not there now says so — `[SETTINGS]
+  … is not there: this program runs on the runtime's defaults` — because a
+  setting the launcher shows but never saved is otherwise indistinguishable
+  from one it applied. The swap interval is capped at what the config offers (0
   and 1 here) rather than passed on to be refused: the frame limit is what caps
   frames, and `eglSwapInterval` has no return value anyone would read. Frames of another size than the screen's
   (800x600 or 640x480 in full screen) are scaled to it by the runtime's own
@@ -264,9 +277,11 @@ runtime; the full package now ships the Mesa 26 one.
   `eglSwapBuffers` never came back: one core, every other thread parked, six
   compositor frames on the screen and no line in the log between the context
   and the stall report. The runtime now releases the window's buffers both
-  ways -- after the presenter has detached, and before it takes the screen
-  back -- and says how many it found (`[NXGL] the screen still had 3 buffers
-  registered for the program: released`), a refused resize is named
+  ways -- what the suspended presenter left on it before the program's surface
+  takes it, and the program's own when the screen goes back -- and says how
+  many the presenter's were (`[NXGL] the screen still had 3 buffers registered
+  for the compositor: released`, which a run only prints when there were any),
+  a refused resize is named
   (`[NXGL] the screen would not take the program's 800x600`), the first three
   swaps are logged with their surface size and how long they took, and a swap
   still inside the driver two seconds later is named in the stall report,
@@ -587,7 +602,12 @@ translations give their room back, at a small cost on every block entry;
 `purged=` counts the passes, blocks, megabytes and milliseconds. Freed code
 waits two seconds before it is reused.
 With the profiler on, `[THREADS]`, `[SERVER]` and `[PROF]` show where each busy
-thread spends its time. DLLs that fail to load are logged (`[NXLDR]`, and
+thread spends its time. A frame is named through the module's export table when
+it has one (`wow64.dll!…` instead of `wow64.dll+0x…`), and both PE layouts are
+read: the ARM64 modules -- Wine's 64-bit half, and ntdll's PE side -- are PE32+,
+whose directories sit sixteen bytes further into the optional header than a
+32-bit image's, so reading them as PE32 named nothing and every ARM64 frame came
+out as `module+0x…` (`source/thread_profile.h`, `tests/thread_profile.c`). DLLs that fail to load are logged (`[NXLDR]`, and
 Wine's `err:` lines) even without verbose traces, and so are files a program
 could not open (`[FS]`, with how it asked), the first overlapped socket
 operations (`[ASYNC]`), user APCs (`[APC]`) and x86 faults (`[BOX64]`).

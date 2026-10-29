@@ -283,7 +283,7 @@ static inline int nx_prof_window_cover( struct nx_prof_window *win, uint64_t add
 static inline int nx_prof_pe_export( uint64_t base, uint32_t rva, uint32_t (*read32)( uint64_t, void * ),
                                      void *ctx, uint32_t *name_rva, uint32_t *delta )
 {
-    uint32_t lfanew, opt, dir_rva, dir_size, nfuncs, nnames, funcs, names, ordinals;
+    uint32_t lfanew, opt, magic, dirs, dir_rva, dir_size, nfuncs, nnames, funcs, names, ordinals;
     uint32_t best = 0, best_name = 0, i, count;
     uint64_t exp;  /* the module's base need not fit in 32 bits */
 
@@ -291,10 +291,20 @@ static inline int nx_prof_pe_export( uint64_t base, uint32_t rva, uint32_t (*rea
     if (!(lfanew = read32( base + 0x3c, ctx )) || lfanew > 0x10000000) return 0;
     if (read32( base + lfanew, ctx ) != 0x00004550) return 0;                   /* PE\0\0 */
     opt = lfanew + 24;
-    if ((read32( base + opt, ctx ) & 0xffff) != 0x10b) return 0;                /* PE32 */
-    if (!read32( base + opt + 92, ctx )) return 0;                             /* rva count */
-    dir_rva = read32( base + opt + 96, ctx );
-    dir_size = read32( base + opt + 100, ctx );
+    /* Both layouts are read: the ARM64 modules this profiles -- wow64.dll and
+     * its thunks, ntdll.dll -- are PE32+, and a table read at the PE32 offsets
+     * out of one of those names the wrong function or none, which is why every
+     * ARM64 module used to be reported as module+offset. The 64-bit optional
+     * header has sixteen more bytes of fields before the directories, so the
+     * whole difference is where NumberOfRvaAndSizes and the first directory
+     * start: that is 4 bytes after dirs in both. */
+    magic = read32( base + opt, ctx ) & 0xffff;
+    if (magic == 0x10b) dirs = 96;         /* PE32,  0x20b is PE32+ */
+    else if (magic == 0x20b) dirs = 112;
+    else return 0;
+    if (!read32( base + opt + dirs - 4, ctx )) return 0;                       /* rva count */
+    dir_rva = read32( base + opt + dirs, ctx );
+    dir_size = read32( base + opt + dirs + 4, ctx );
     if (!dir_rva || dir_size < 40) return 0;
     exp = base + dir_rva;
     nfuncs = read32( exp + 0x14, ctx );

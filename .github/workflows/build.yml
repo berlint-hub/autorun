@@ -110,6 +110,17 @@ jobs:
             horizon-wine/tests/nxgl_verdict.c -o nxgl_verdict
           ./nxgl_verdict
 
+      # Which OpenGL renderer answered: the runtime asks mesa-switch for one per
+      # program, but the answer comes from the display that was made first, so
+      # the strings the two drivers give for GL_RENDERER are compared with the
+      # request and the log says which of the two a program really ran on.
+      - name: Which OpenGL renderer answered
+        run: |
+          cc -std=gnu11 -Wall -Wextra -Werror -O1 -g \
+            -I horizon-wine/source \
+            horizon-wine/tests/nxgl_renderer.c -o nxgl_renderer
+          ./nxgl_renderer
+
       # Which panel rate a measured frame rate asks for: the policy behind
       # SaltyNX's handheld 45-60 Hz display sync, which needs no console to test.
       - name: Display sync rate policy

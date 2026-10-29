@@ -235,3 +235,57 @@ Watch on device, because these now actually happen: `d3d11.disableMsaa = True`
 5. The user still needs to test this build on a handheld Switch, especially
    repeated start/normal exit/forced quit, two Vulkan surfaces alive at once,
    and memory reuse; do not claim hardware safety without that test.
+
+## The 2026-10-29 logs: Riddick never swaps, Doom 3 stays on NVC0, Zink never appears (2026-10-29)
+
+Read from the run logs the user attached (`doom3_*.log` ×3, `DarkAthena_*.log` ×2,
+`autorun_runtime.log`, `driver.txt`, `stdout.txt`). What they actually say:
+
+- **Doom 3 runs, on NVC0.** `[MESA] OpenGL renderer: native NVC0` in all three runs,
+  `EGL Mesa Project 1.4` with 21 configs, a 4.3 Compatibility context, an extension
+  list of 7743 bytes, and swaps that come back in 0-7 ms (`swap #1 came back after 7
+  ms`), `gl_frames=479` over ten seconds once the level was up. Nothing in these logs
+  is an error line. "Zink does not run in Doom 3" is not a rendering failure here: the
+  program asked for NVC0 (`runtime_gl_driver == 0`), and no `[SETTINGS]` line exists in
+  any of the three runs, i.e. `sdmc:/Roms/Windows/Doom 3/doom3.wine-nx.txt` was not
+  read at all -- so the per-game setting the launcher shows was never applied. The log
+  could not say that before; now it does (`[SETTINGS] … is not there`).
+- **Which renderer answered is now measured, not assumed.** `[NXGL] the first context
+  made current is …` was already there; the line under it now compares that with
+  `MESA_SWITCH_GL_DRIVER` (`source/nxgl_renderer.h`, `tests/nxgl_renderer.c`, CI "Which
+  OpenGL renderer answered") and says `it is` or `it is NOT the renderer this program
+  asked for`. `[MESA] OpenGL renderer asked for: …` is worded as the asking.
+- **A terminated EGL display does not lock the backend.** mesa-switch's
+  `switch_terminate()` (read at HEAD, `src/egl/drivers/switch/egl_switch.c`, 1506)
+  releases the display data, so the next `eglInitialize()` re-reads
+  `MESA_SWITCH_GL_DRIVER`. The launcher's SDL display therefore does not stand in a
+  program's way; a *live* display does -- the compositor's, which outlives the program.
+  The earlier note in this file that the launcher shares one display with the program
+  was wrong, and the comment in `runtime.c` and `documentation/technical.md` say so now.
+- **Riddick's hang is not a swap.** Dark Athena's run has zero swaps: the last GL line
+  is the context introspection, and the stall report has the main thread (`tid 4w` at
+  99.8 % of a core) inside a GL call while the screen's window reports `3 slots
+  registered, 800x600 format 0, connected, a buffer is out and has not come back`. Five
+  compositor frames are on the glass, the program's own OpenGL has presented none, and
+  the clocks keep moving -- it is a wait for a buffer nobody returns, not a stall in
+  time. The compositor had just started (`[NXCOMP] presenting the screen through OpenGL
+  on NV12B`) and handed the window over right before it.
+- **So the tree now releases what the suspended presenter left on the window.**
+  `wine_nx_compositor_suspend()` returns whether the presenter really stepped aside
+  (its surface destroyed), and `wine_nx_screen_acquire()` releases the window's buffers
+  before taking it, only in that case and only when this call is the one taking the
+  screen from the compositor (a Vulkan swapchain reset acquires the screen it already
+  has). It says how many it found (`[NXGL] the screen still had N buffers registered
+  for the compositor: released`). This is a plausible cause for the buffer-out wait and
+  is **not** proven: no console was available, and the line above is what the next run
+  has to show or not show.
+- **ARM64 frames are named now.** `nx_prof_pe_export()` read only PE32 optional
+  headers, so every ARM64 module -- wow64.dll's thunks, ntdll's PE half -- came out as
+  `module+0x…` in `[STALL]`/`[PROF]`. Both layouts are read (`source/thread_profile.h`),
+  and `tests/thread_profile.c` covers a PE32+ image, a PE32+ magic over the 32-bit
+  layout, and an unknown magic.
+
+Still open, unchanged by this: Doom 3's visual glitches (no log line describes them --
+the rendering path looks healthy and no frame was lost), the 1 ms granularity of
+`GetTickCount` in `KUSER_SHARED_DATA`, the alpha of the OSK overlay, and the repaint
+after `wine_nx_fb_unlock`.

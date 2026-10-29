@@ -33,6 +33,7 @@
 #include "../../horizon-wine/source/graphics_config.h"
 #include "../../horizon-wine/source/thread_profile.h"
 #include "../../horizon-wine/source/gl_entries.h"
+#include "../../horizon-wine/source/nxgl_renderer.h"
 #include "../../horizon-wine/source/pointer_overlay.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(wgl);
@@ -430,6 +431,8 @@ static void nx_note_egl_display( void )
  * shows up. Said once, before anything of the program's own has run. */
 static void nx_note_first_context( void )
 {
+    enum nxgl_renderer asked;
+    enum nxgl_renderer_state state;
     const char *renderer, *version;
     static int noted;
 
@@ -438,6 +441,27 @@ static void nx_note_first_context( void )
     version = (const char *)funcs->p_glGetString( GL_VERSION );
     nx_log( "[NXGL] the first context made current is %s, OpenGL %s",
             renderer ? renderer : "?", version ? version : "?" );
+    /* Whether that is the renderer the runtime asked mesa-switch for. The
+     * asking happens in the runtime, but the answering happens when an EGL
+     * display is initialized, and a display keeps one backend: a program whose
+     * setting says Zink can be answered by NVC0 because something else in the
+     * process made the display first. That difference is invisible in every
+     * other line of the log, and a setting that looks applied but is not is
+     * exactly what "Zink never turns on" looks like from the outside. */
+    asked = nxgl_renderer_requested( getenv( "MESA_SWITCH_GL_DRIVER" ) );
+    state = nxgl_renderer_state_of( asked, renderer );
+    if (state == NXGL_RENDERER_AS_ASKED)
+        nx_log( "[NXGL] it is the renderer this program asked for (%s)",
+                asked == NXGL_RENDERER_ZINK ? "Zink" : "native NVC0" );
+    else if (state == NXGL_RENDERER_OTHER)
+        nx_log( "[NXGL] it is NOT the renderer this program asked for (%s): the EGL display "
+                "was made with another backend before the program's first context, and a "
+                "display keeps the one it was made with -- this program runs on %s",
+                asked == NXGL_RENDERER_ZINK ? "Zink" : "native NVC0",
+                asked == NXGL_RENDERER_ZINK ? "native NVC0" : "Zink" );
+    else
+        nx_log( "[NXGL] the driver gave no renderer string to compare with the one asked for (%s)",
+                asked == NXGL_RENDERER_ZINK ? "Zink" : "native NVC0" );
 }
 
 static void nx_drawable_destroy( struct opengl_drawable *base )

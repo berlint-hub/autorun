@@ -278,9 +278,10 @@ int wine_nx_compositor_stop( void )
  * or in the frame it was presenting -- would otherwise keep the program's own
  * surface off the screen.  The screen is then taken anyway, and the log says
  * whose picture may be left on the glass. */
-void wine_nx_compositor_suspend( void )
+int wine_nx_compositor_suspend( void )
 {
     struct timespec deadline;
+    int aside;
 
     clock_gettime( CLOCK_REALTIME, &deadline );
     deadline.tv_sec += 3;
@@ -297,7 +298,12 @@ void wine_nx_compositor_suspend( void )
                       comp.state == STATE_STARTING ? "still starting" : "still presenting" );
         break;
     }
+    /* Whether the presenter's surface is really gone. A caller that takes the
+     * window next may release what is registered on it only when it is: slots
+     * a presenter is still presenting into are its own. */
+    aside = comp.state != STATE_STARTING && (comp.state != STATE_RUNNING || comp.suspended);
     pthread_mutex_unlock( &comp.lock );
+    return aside;
 }
 
 void wine_nx_compositor_resume( void )

@@ -69,7 +69,9 @@ unsigned int wine_nx_compositor_frames_fast( void );
  * FALSE if it did not end within its bound: its stack is still lent, and the
  * process must not be handed back to the loader. */
 int wine_nx_compositor_stop( void );
-void wine_nx_compositor_suspend( void );
+/* 1 when the presenter stepped aside (its surface is gone), 0 when it did
+ * not come back in time and the screen is taken from it anyway. */
+int wine_nx_compositor_suspend( void );
 void wine_nx_compositor_resume( void );
 
 /* Frames presented so far, for [PROGRESS]. */

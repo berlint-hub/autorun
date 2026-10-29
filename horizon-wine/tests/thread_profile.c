@@ -154,9 +154,28 @@ static void check_pe_exports( void )
     /* An image without a header is not an image. */
     pe_put16( 0x00, 0 );
     assert( !nx_prof_pe_export( (uint64_t)(uintptr_t)pe_image, 0x300, pe_read32, NULL, &name, &delta ) );
-    /* A 64-bit image's export table is not laid out this way. */
+    /* A 64-bit magic over the 32-bit layout names nothing: the directories of
+     * a PE32+ image are sixteen bytes further in, and reading them where PE32
+     * keeps them would land in the middle of another field. */
     build_pe_image();
     pe_put16( 0x98, 0x20b );
+    assert( !nx_prof_pe_export( (uint64_t)(uintptr_t)pe_image, 0x300, pe_read32, NULL, &name, &delta ) );
+    /* The same tables as a PE32+ image lays them out: the ARM64 Wine DLLs this
+     * profiles are all this shape, and naming their functions is the whole
+     * point of reading the table. */
+    build_pe_image();
+    pe_put16( 0x98, 0x20b );
+    pe_put32( 0x98 + 92, 0 );                   /* nothing where PE32 keeps the count */
+    pe_put32( 0x98 + 96, 0 );
+    pe_put32( 0x98 + 112, 0x200 );              /* export directory, PE32+ offset */
+    pe_put32( 0x98 + 116, 40 );
+    pe_put32( 0x98 + 108, 16 );                 /* NumberOfRvaAndSizes */
+    assert( nx_prof_pe_export( (uint64_t)(uintptr_t)pe_image, 0x300, pe_read32, NULL, &name, &delta ) );
+    assert( name == 0x3a0 && delta == 0 );
+    assert( nx_prof_pe_export( (uint64_t)(uintptr_t)pe_image, 0x345, pe_read32, NULL, &name, &delta ) );
+    assert( name == 0x3a6 && delta == 5 );
+    /* An optional header that is neither layout is not an image. */
+    pe_put16( 0x98, 0x107 );
     assert( !nx_prof_pe_export( (uint64_t)(uintptr_t)pe_image, 0x300, pe_read32, NULL, &name, &delta ) );
     check_window();
     check_counted_lines();
