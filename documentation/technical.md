@@ -607,7 +607,13 @@ it has one (`wow64.dll!…` instead of `wow64.dll+0x…`), and both PE layouts a
 read: the ARM64 modules -- Wine's 64-bit half, and ntdll's PE side -- are PE32+,
 whose directories sit sixteen bytes further into the optional header than a
 32-bit image's, so reading them as PE32 named nothing and every ARM64 frame came
-out as `module+0x…` (`source/thread_profile.h`, `tests/thread_profile.c`). DLLs that fail to load are logged (`[NXLDR]`, and
+out as `module+0x…` (`source/thread_profile.h`, `tests/thread_profile.c`).
+The program's own call chain is read from its frame pointers when it has them,
+and otherwise by scanning the words of its stack for return addresses into a
+module (`nx_prof_x86_scan`, marked `(scanned)` in the line): a release build has
+no frame pointers, and `[STALL] thread 4w … | x86 at 0x6e433db4 … < 0 < 0` was a
+spinning thread with its callers left out. In a 32-bit program the scan reads at
+most 2 KB and stops at the end of the piece the stack is in. DLLs that fail to load are logged (`[NXLDR]`, and
 Wine's `err:` lines) even without verbose traces, and so are files a program
 could not open (`[FS]`, with how it asked), the first overlapped socket
 operations (`[ASYNC]`), user APCs (`[APC]`) and x86 faults (`[BOX64]`).

@@ -678,6 +678,18 @@ static int image_at( uint64_t address, void **base, char *name, size_t size )
     return &wine_nx_image_at && wine_nx_image_at( (void *)(uintptr_t)address, base, name, size );
 }
 
+/* For the stack scan: whether an address on a thread's stack is a return address
+ * into a module at all. Everything else on a stack is data, and printing data as
+ * a call chain is worse than printing none. */
+static int guest_in_module( uint32_t address, void *ctx )
+{
+    char name[64];
+    void *base;
+
+    (void)ctx;
+    return address && image_at( address, &base, name, sizeof(name) );
+}
+
 /* The readable range around an address, for the export scan's window. */
 static int readable_range( uint64_t address, uint64_t *lo, uint64_t *hi )
 {
@@ -883,8 +895,23 @@ void wine_nx_threads_report_stalled( void )
                 len = appendf( line, len, " | x86 at %#x %s", eip, where );
                 if (readable( esp, &info ))
                 {
+                    int scanned = 0;
+
                     guest_frames = nx_prof_x86_callers( esp, ebp, info.addr, info.addr + info.size,
                                                         read_word32, guest, 4 );
+                    /* Without frame pointers -- every release build of a game --
+                     * the chain above is one word long and the callers are only
+                     * in the stack's words, so the stack is read for them. A
+                     * thread spinning in a loop is where this pays: the report
+                     * then names the functions of the loop instead of leaving
+                     * one address and "x86 at" around it. */
+                    if (!guest_frames)
+                    {
+                        guest_frames = nx_prof_x86_scan( esp, info.addr, info.addr + info.size,
+                                                         read_word32, guest_in_module, NULL, guest, 4 );
+                        scanned = !!guest_frames;
+                    }
+                    if (scanned) len = appendf( line, len, " (scanned)" );
                     for (f = 0; f < guest_frames; f++)
                     {
                         name_address( guest[f], where, sizeof(where) );

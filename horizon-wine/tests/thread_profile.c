@@ -135,6 +135,48 @@ static void check_window( void )
     assert( !nx_prof_window_cover( &win, 0x19000, 0, model_query ) );  /* nothing asked for */
 }
 
+/* A game's release build has no frame pointers: the stack scan has to find its
+ * callers in the words of the stack, name only what is really code, and stop at
+ * the end of the piece the stack is in. */
+#define SCAN_STACK 0x9000
+static uint32_t scan_stack[64];
+static uint32_t scan_read32( uint64_t address )
+{
+    assert( address >= SCAN_STACK && address + 4 <= SCAN_STACK + sizeof(scan_stack) && !(address & 3) );
+    return scan_stack[(address - SCAN_STACK) / 4];
+}
+
+static int scan_is_code( uint32_t address, void *ctx )
+{
+    (void)ctx;
+    return address >= 0x500000 && address < 0x600000;
+}
+
+static void check_x86_scan( void )
+{
+    uint32_t frames[8];
+
+    memset( scan_stack, 0, sizeof(scan_stack) );
+    scan_stack[0] = 0x7ff00000;              /* data: a local pointer */
+    scan_stack[1] = 0x501234;                /* return address */
+    scan_stack[2] = 0x0;                     /* a hole */
+    scan_stack[3] = 0x501234;                /* the same call twice running */
+    scan_stack[4] = 0x610000;                /* data that looks like an address */
+    scan_stack[5] = 0x502000;                /* another caller */
+    assert( nx_prof_x86_scan( SCAN_STACK, SCAN_STACK, SCAN_STACK + sizeof(scan_stack),
+                              scan_read32, scan_is_code, NULL, frames, 8 ) == 2 );
+    assert( frames[0] == 0x501234 && frames[1] == 0x502000 );
+    /* An odd address is not a return address, and the scan never leaves the
+     * piece the stack is in: the end of the piece is the end of the reads. */
+    scan_stack[0] = 0x501235;
+    assert( nx_prof_x86_scan( SCAN_STACK, SCAN_STACK, SCAN_STACK + 4,
+                              scan_read32, scan_is_code, NULL, frames, 8 ) == 0 );
+    /* Nothing to read, and nowhere readable to start. */
+    assert( nx_prof_x86_scan( 0, 0x1000, 0x2000, scan_read32, scan_is_code, NULL, frames, 8 ) == 0 );
+    assert( nx_prof_x86_scan( 0x1800, 0x1000, 0x2000, scan_read32, scan_is_code, NULL, frames, 0 ) == 0 );
+    assert( nx_prof_x86_scan( 0x2000, 0x1000, 0x2000, scan_read32, scan_is_code, NULL, frames, 8 ) == 0 );
+}
+
 static void check_pe_exports( void )
 {
     uint32_t name = 0, delta = 0;
@@ -192,6 +234,7 @@ int main(void)
     assert( offsetof( struct i386_context_layout, esp ) == NX_PROF_I386_ESP );
 
     check_pe_exports();
+    check_x86_scan();
 
     /* At a gate: esp 0x2000 holds the return into the stub and its caller's return;
      * ebp 0x2010 -> 0x2020, whose saved ebp points down. */

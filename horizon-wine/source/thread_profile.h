@@ -216,6 +216,38 @@ static inline unsigned int nx_prof_x86_callers( uint32_t esp, uint32_t ebp, uint
     return n;
 }
 
+/* The stack itself, for the case the frame chain cannot answer: a game's release
+ * build is compiled without frame pointers, so ebp on the stack is an ordinary
+ * local and the chain above it is one word long -- which is what a stall report
+ * of a spinning thread read as "x86 at 0x6e433db4 opengl32.dll+0x84 < 0 < 0",
+ * the address and no callers. The return addresses are still on the stack in
+ * order, so the words from esp up are scanned and those that land inside a
+ * module's code are kept, newest first, consecutive repeats dropped. code()
+ * answers whether an address is in a module at all; the scan reads 2 KB at most
+ * and stops at the end of the stack's own piece, so a thread that is not
+ * stopped anywhere readable costs nothing. */
+static inline unsigned int nx_prof_x86_scan( uint32_t esp, uint64_t lo, uint64_t hi,
+                                            uint32_t (*read)( uint64_t ),
+                                            int (*code)( uint32_t, void * ), void *ctx,
+                                            uint32_t *out, unsigned int max )
+{
+    unsigned int n = 0, i, words;
+
+    if (!read || !code || !max || esp < lo || (uint64_t)esp >= hi) return 0;
+    words = (unsigned int)((hi - esp) / 4);
+    if (words > 512) words = 512;
+    for (i = 0; i < words && n < max; i++)
+    {
+        uint32_t value = read( (uint64_t)esp + 4 * i );
+
+        if (!value || (value & 3)) continue;
+        if (!code( value, ctx )) continue;
+        if (n && out[n - 1] == value) continue;
+        out[n++] = value;
+    }
+    return n;
+}
+
 /* The frame chain alone, for a thread inside translated code, where Box64 keeps
  * the guest's ESP and EBP in x14 and x15 and the words at esp are not return
  * addresses in the middle of a function. */
