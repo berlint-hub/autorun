@@ -668,12 +668,21 @@ checking before reading anything else. `[PROGRESS]` lines report every 10
 seconds: frames, OpenGL and system call rates, memory and translation counters.
 Its reading figures tell a slow load apart from a busy one: `reads`/`read_mb`
 are what the program asked for, `sd_reads`/`sd_mb` what the card was asked for
-after the read cache, and `cache_mb` what that cache holds. The cache
-(`source/sd_read_cache.h`) keeps up to eight pieces of each open file, and takes
-between 32 and 192 MB depending on the heap a game leaves free; a write to a
-file throws away what is held for it. A miss reads a whole 128 KB chunk; the
-cache can also read ahead from 16 KB (`fill_min`), which on The Sims 2 halved
-the bytes from the card but not the time. `code_mb` is the translated code the run
+after the read cache, and `cache_mb` what that cache holds over `cache_max_mb`,
+what it may hold. The cache (`source/sd_read_cache.h`) keeps up to 24 chunks
+(3 MB) of each open file, and takes between 32 and 512 MB -- half of the heap a
+game leaves free above the 512 MB floor kept for the game itself, so a game
+that sits at a sixth of the console's memory hands the card cache hundreds of
+megabytes while one that has taken the heap still gets 32 MB. A write to a file
+throws away what is held for it. A miss reads a whole 128 KB chunk; reads up to
+256 KB go through the cache (a game streaming level data in 128 or 256 KB
+pieces used to send every one of them straight to the card, and read the level
+again in full the next time it was entered); the cache can also read ahead from
+16 KB (`fill_min`), which on The Sims 2 halved the bytes from the card but not
+the time. Each thread keeps its read buffer rather than allocating one per
+read, and every resize of the pool writes `[CACHE] the card cache went from N
+to M MB: … of heap free, … MB held`, so the numbers are in the log without the
+profiler. `code_mb` is the translated code the run
 holds now over the code memory Horizon gave it, and `code_all_mb` every byte
 ever translated: Horizon grants ten code memory objects in all, so translated
 code that is never reused is what ends a long run in the interpreter

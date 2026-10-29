@@ -101,46 +101,54 @@ static ssize_t sd_cache_base_read( struct _reent *r, void *fd, char *ptr, size_t
 }
 
 /* The game's own memory comes first: the cache grows into the heap left free
- * above this floor, and only into part of it, so that a game whose appetite
- * grows later still finds room. mallinfo walks the heap, so the size is
+ * above the floor the game keeps, and only into part of it, so that a game
+ * whose appetite grows later still finds room (sd_cache_target_chunks, in the
+ * header, is the whole policy). mallinfo walks the heap, so the size is
  * settled a few times a minute and outside the lock. */
-#define SD_CACHE_FREE_FLOOR_MB 512
-#define SD_CACHE_FREE_SHARE    3     /* of what is free above the floor */
-#define SD_CACHE_STEP          128   /* chunks, 16 MB: what makes a move worth it */
+#define SD_CACHE_STEP 128   /* chunks, 16 MB: what makes a move worth it */
 
-static unsigned int sd_cache_room(void)
+static unsigned long long sd_cache_free_mb(void)
 {
     extern char *fake_heap_start, *fake_heap_end;
     struct mallinfo heap = mallinfo();
     unsigned long long heap_size = (unsigned long long)(fake_heap_end - fake_heap_start);
-    /* What malloc holds unused plus what it has not taken from the heap yet,
-     * and the chunks the cache is already holding, which it can keep. */
-    unsigned long long free_mb = (heap.fordblks + (heap_size > heap.arena ? heap_size - heap.arena : 0)) >> 20;
-    unsigned long long room;
-    unsigned long long chunks;
-    unsigned int used;
 
-    pthread_mutex_lock( &sd_cache_mutex );
-    used = sd_cache_pool.used;
-    pthread_mutex_unlock( &sd_cache_mutex );
-    room = free_mb + (((unsigned long long)used * SD_CACHE_CHUNK) >> 20);
-
-    if (room <= SD_CACHE_FREE_FLOOR_MB) return SD_CACHE_POOL_MIN;
-    chunks = (room - SD_CACHE_FREE_FLOOR_MB) / SD_CACHE_FREE_SHARE * (1024 * 1024 / SD_CACHE_CHUNK);
-    if (chunks < SD_CACHE_POOL_MIN) return SD_CACHE_POOL_MIN;
-    if (chunks > SD_CACHE_POOL_MAX) return SD_CACHE_POOL_MAX;
-    return (unsigned int)chunks;
+    /* What malloc holds unused plus what it has not taken from the heap yet;
+     * the chunks the cache holds count as used and are added back by the
+     * policy, which is why it is told them. */
+    return (heap.fordblks + (heap_size > heap.arena ? heap_size - heap.arena : 0)) >> 20;
 }
 
-/* Called before the lock is taken, from the read path. */
+/* A move large enough to be worth saying: what the cache is now, and the heap
+ * it is sized by. A player reporting a slow load has the numbers in the log
+ * without a profiler. */
+static void sd_cache_report( unsigned int before, unsigned int after, unsigned long long free_mb,
+                             unsigned int used )
+{
+    char message[256];
+
+    snprintf( message, sizeof(message), "[CACHE] the card cache went from %u to %u MB: %llu MB of heap free, "
+              "%u MB held", (unsigned int)(((unsigned long long)before * SD_CACHE_CHUNK) >> 20),
+              (unsigned int)(((unsigned long long)after * SD_CACHE_CHUNK) >> 20), free_mb,
+              (unsigned int)(((unsigned long long)used * SD_CACHE_CHUNK) >> 20) );
+    wine_nx_runtime_trace( message );
+}
+
+/* Called before the lock is taken, from the read path, because mallinfo walks
+ * the heap. */
 static void sd_cache_resize(void)
 {
     u64 now = armGetSystemTick();
     u64 settled_at = __atomic_load_n( &sd_cache_settled_at, __ATOMIC_RELAXED );
-    unsigned int target;
+    unsigned long long free_mb;
+    unsigned int target, used, before, after;
 
     if (settled_at && armTicksToNs( now - settled_at ) < 5000000000ull) return;
-    target = sd_cache_room();
+    free_mb = sd_cache_free_mb();
+    pthread_mutex_lock( &sd_cache_mutex );
+    used = sd_cache_pool.used;
+    pthread_mutex_unlock( &sd_cache_mutex );
+    target = sd_cache_target_chunks( free_mb, used );
     pthread_mutex_lock( &sd_cache_mutex );
     if (__atomic_load_n( &sd_cache_settled_at, __ATOMIC_RELAXED ) != settled_at)
     {
@@ -148,12 +156,15 @@ static void sd_cache_resize(void)
         return;
     }
     __atomic_store_n( &sd_cache_settled_at, now, __ATOMIC_RELAXED );
-    if ((target > sd_cache_pool.max ? target - sd_cache_pool.max : sd_cache_pool.max - target) >= SD_CACHE_STEP)
+    before = sd_cache_pool.max;
+    if ((target > before ? target - before : before - target) >= SD_CACHE_STEP)
     {
         sd_cache_pool.max = target;
         sd_cache_trim( &sd_cache_pool );
     }
+    after = sd_cache_pool.max;
     pthread_mutex_unlock( &sd_cache_mutex );
+    if (before != after) sd_cache_report( before, after, free_mb, used );
 }
 
 size_t wine_nx_sd_cache_reclaim( size_t bytes )
@@ -176,6 +187,76 @@ unsigned int wine_nx_sd_cache_mb(void)
     used = sd_cache_pool.used;
     pthread_mutex_unlock( &sd_cache_mutex );
     return (unsigned int)(((unsigned long long)used * SD_CACHE_CHUNK) >> 20);
+}
+
+/* What it may hold, which is what the free heap it was sized from allows: a
+ * run that reads the card all the time while the cache sits near this ceiling
+ * has outgrown it, and a bigger ceiling would not help a run that never gets
+ * near it. */
+unsigned int wine_nx_sd_cache_max_mb(void)
+{
+    unsigned int max;
+
+    pthread_mutex_lock( &sd_cache_mutex );
+    max = sd_cache_pool.max;
+    pthread_mutex_unlock( &sd_cache_mutex );
+    return (unsigned int)(((unsigned long long)max * SD_CACHE_CHUNK) >> 20);
+}
+
+/* The buffer a read is copied into under the lock and out of it after: one
+ * per thread, instead of a malloc and a free for every read. A game loading a
+ * level makes tens of thousands of reads, and the copy has to be outside the
+ * lock (a fault on the caller's pages must not happen with it held) but the
+ * allocation does not have to be anywhere in particular. */
+struct sd_cache_scratch
+{
+    char *data;
+    size_t size;
+};
+
+static pthread_key_t sd_cache_scratch_key;
+static pthread_once_t sd_cache_scratch_once = PTHREAD_ONCE_INIT;
+static int sd_cache_scratch_key_ok;
+
+static void sd_cache_scratch_destroy( void *value )
+{
+    struct sd_cache_scratch *scratch = value;
+
+    if (!scratch) return;
+    free( scratch->data );
+    free( scratch );
+}
+
+static void sd_cache_scratch_make_key(void)
+{
+    sd_cache_scratch_key_ok = !pthread_key_create( &sd_cache_scratch_key, sd_cache_scratch_destroy );
+}
+
+/* This thread's scratch of at least size bytes, or NULL when there is none:
+ * the caller then reads straight from the card, as it did before. */
+static char *sd_cache_scratch_get( size_t size )
+{
+    struct sd_cache_scratch *scratch;
+    char *grown;
+
+    pthread_once( &sd_cache_scratch_once, sd_cache_scratch_make_key );
+    if (!sd_cache_scratch_key_ok) return NULL;
+    if (!(scratch = pthread_getspecific( sd_cache_scratch_key )))
+    {
+        if (!(scratch = calloc( 1, sizeof(*scratch) ))) return NULL;
+        if (pthread_setspecific( sd_cache_scratch_key, scratch ))
+        {
+            free( scratch );
+            return NULL;
+        }
+    }
+    if (scratch->size < size)
+    {
+        if (!(grown = realloc( scratch->data, size ))) return NULL;
+        scratch->data = grown;
+        scratch->size = size;
+    }
+    return scratch->data;
 }
 
 static long long sd_cache_fill( void *ctx, long long offset, char *buf, size_t size )
@@ -410,7 +491,7 @@ static ssize_t sd_cache_read_file( struct _reent *r, void *fd, char *ptr, size_t
         else sd_cache_flush_locked( r, sd_write_find( sd_write_buffers, fd ) );
         pthread_mutex_unlock( &sd_cache_mutex );
     }
-    if (!len || len >= SD_CACHE_DIRECT || !(copy = malloc( len )))
+    if (!len || len >= SD_CACHE_DIRECT || !(copy = sd_cache_scratch_get( len )))
     {
         ssize_t direct = sd_cache_base_read( r, fd, ptr, len );
 
@@ -434,7 +515,7 @@ static ssize_t sd_cache_read_file( struct _reent *r, void *fd, char *ptr, size_t
         memcpy( ptr, copy, (size_t)got );
         if (!fills) __atomic_add_fetch( &wine_nx_sd_hits, 1, __ATOMIC_RELAXED );
     }
-    free( copy );
+    /* copy is this thread's scratch, kept for the next read. */
     if (got == SD_CACHE_BYPASS)
     {
         ssize_t direct = sd_cache_base_read( r, fd, ptr, len );

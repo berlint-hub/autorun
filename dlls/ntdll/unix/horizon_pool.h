@@ -128,10 +128,21 @@ static inline void *horizon_pages_alloc_dedicated( struct horizon_page_pool *poo
     return ptr;
 }
 
+/* The card's read cache holds what the game leaves free -- hundreds of
+ * megabytes on a game that sits at a sixth of the console's memory -- and it
+ * is the first thing to give memory back when the program asks for more than
+ * there is: a failed allocation is retried once after the cache has released
+ * what this request needs. Weak, so a build or a test without the cache links
+ * as it did. */
+extern size_t wine_nx_sd_cache_reclaim( size_t size ) __attribute__((weak));
+
 /* The legacy fallback may share a kernel block with unrelated heap allocations. */
 static inline void *horizon_pages_alloc_any( struct horizon_page_pool *pool, size_t size )
 {
     void *ptr = horizon_pages_alloc_dedicated( pool, size );
+
+    if (!ptr && &wine_nx_sd_cache_reclaim && wine_nx_sd_cache_reclaim( size ))
+        ptr = horizon_pages_alloc_dedicated( pool, size );
     if (!ptr && size && !(size % HORIZON_POOL_PAGE) && (ptr = aligned_alloc( HORIZON_POOL_PAGE, size )))
         pool->shared++;
     return ptr;

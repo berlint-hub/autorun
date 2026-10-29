@@ -37,11 +37,26 @@
 
 #define SD_CACHE_CHUNK  (128 * 1024)  /* the most a miss reads, and a line's buffer */
 #define SD_CACHE_FILL_MIN (16 * 1024) /* what a miss reads until a file is read in order */
-#define SD_CACHE_LINES  8             /* chunks kept per file */
-#define SD_CACHE_DIRECT (64 * 1024)   /* reads this large go straight to the file */
+/* Chunks one open file may keep. A game that streams from a few big packages
+ * rereads far more of one file than of the whole card, and eight chunks (1 MB)
+ * held a few seconds of its streaming; twenty-four is 3 MB a file, and the pool
+ * is still what bounds the total. */
+#define SD_CACHE_LINES  24            /* chunks kept per file */
+/* Reads up to this go through the cache: a game reading level data in 128 KB
+ * or 256 KB pieces had every one of them go straight to the card and never
+ * stay, so a level re-entered a minute later was read again in full. What is
+ * larger than this is usually read once, and one request for it is cheaper
+ * than the chunks it would fill. */
+#define SD_CACHE_DIRECT (256 * 1024)  /* reads this large go straight to the file */
 #define SD_CACHE_BYPASS (-2)          /* sd_cache_read found no memory: read directly */
 #define SD_CACHE_POOL_MIN 256         /* 32 MB, the chunks every game gets */
-#define SD_CACHE_POOL_MAX 1536        /* 192 MB, when a game leaves that much heap free */
+/* A console playing a game of the 2010s leaves most of its memory untouched
+ * (Dark Souls II sits at a sixth of it), and the card is the slowest thing in
+ * the run: the cache is worth far more than the idle megabytes are. Half of
+ * what is free above the game's floor, up to this. */
+#define SD_CACHE_POOL_MAX 4096        /* 512 MB, when a game leaves that much heap free */
+#define SD_CACHE_FREE_FLOOR_MB 512    /* the game's own memory, never taken */
+#define SD_CACHE_FREE_SHARE 2         /* of what is free above the floor */
 
 struct sd_cache_line
 {
@@ -151,6 +166,23 @@ static inline size_t sd_cache_reclaim( struct sd_cache_pool *pool, size_t bytes 
     pool->max = before - (unsigned int)count;
     sd_cache_trim( pool );
     return (size_t)(before - pool->used) * SD_CACHE_CHUNK;
+}
+
+/* How many chunks the pool may hold, given the megabytes of heap a game leaves
+ * free and the chunks already held (which count as used heap, and are the
+ * cache's own). The game's floor comes off the top, half of what is left is
+ * the cache's, and the answer stays between the floor every game gets and the
+ * ceiling. */
+static inline unsigned int sd_cache_target_chunks( unsigned long long free_mb, unsigned int used_chunks )
+{
+    unsigned long long room = free_mb + (((unsigned long long)used_chunks * SD_CACHE_CHUNK) >> 20);
+    unsigned long long chunks;
+
+    if (room <= SD_CACHE_FREE_FLOOR_MB) return SD_CACHE_POOL_MIN;
+    chunks = (room - SD_CACHE_FREE_FLOOR_MB) / SD_CACHE_FREE_SHARE * (1024 * 1024 / SD_CACHE_CHUNK);
+    if (chunks < SD_CACHE_POOL_MIN) return SD_CACHE_POOL_MIN;
+    if (chunks > SD_CACHE_POOL_MAX) return SD_CACHE_POOL_MAX;
+    return (unsigned int)chunks;
 }
 
 struct sd_cache_file

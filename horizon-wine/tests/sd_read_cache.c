@@ -108,7 +108,9 @@ static void test_end_of_file(void)
 static void test_least_recently_used(void)
 {
     struct sd_cache_pool pool = { .max = 64 };
-    struct fake_file f = make_file( 20LL * SD_CACHE_CHUNK );
+    /* One chunk more than a file may hold, so the last of them has to take
+     * one away. */
+    struct fake_file f = make_file( (SD_CACHE_LINES + 4) * (long long)SD_CACHE_CHUNK );
     struct sd_cache_file file = { .cacheable = 1 };
     char buf[100];
     unsigned int i, seed = 1;
@@ -117,8 +119,9 @@ static void test_least_recently_used(void)
         assert( cached_read( &file, &pool, &f, (long long)i * SD_CACHE_CHUNK + 7, buf, 10 ) == 10 );
     assert( f.requests == SD_CACHE_LINES );
     assert( cached_read( &file, &pool, &f, 3, buf, 10 ) == 10 && f.requests == SD_CACHE_LINES );
-    /* A ninth chunk replaces chunk 1, the least recently used, not chunk 0. */
-    assert( cached_read( &file, &pool, &f, 8LL * SD_CACHE_CHUNK, buf, 10 ) == 10 );
+    /* The chunk after the last one takes chunk 1's place, chunk 1 being the
+     * least recently used, and not chunk 0, which was touched after it. */
+    assert( cached_read( &file, &pool, &f, (long long)SD_CACHE_LINES * SD_CACHE_CHUNK, buf, 10 ) == 10 );
     assert( f.requests == SD_CACHE_LINES + 1 && pool.used == SD_CACHE_LINES );
     assert( cached_read( &file, &pool, &f, 11, buf, 10 ) == 10 && f.requests == SD_CACHE_LINES + 1 );
     assert( cached_read( &file, &pool, &f, SD_CACHE_CHUNK, buf, 10 ) == 10 && f.requests == SD_CACHE_LINES + 2 );
@@ -339,6 +342,64 @@ static void test_pool_resized(void)
     free( f.data );
 }
 
+/* The pool is the heap's, not a number somebody guessed: a game leaving a
+ * couple of gigabytes free (Dark Souls II sits at a sixth of the console's
+ * memory) hands the card cache hundreds of megabytes, and one that has taken
+ * the heap still keeps the floor every game gets. The floor never grows the
+ * cache past the game's own memory. */
+static void test_pool_sized_by_heap(void)
+{
+    /* Nothing free: the floor, which is the 32 MB every game gets. */
+    assert( sd_cache_target_chunks( 0, 0 ) == SD_CACHE_POOL_MIN );
+    assert( sd_cache_target_chunks( SD_CACHE_FREE_FLOOR_MB, 0 ) == SD_CACHE_POOL_MIN );
+    /* 1.7 GB free, as a log's heap_free_mb reads in a game that barely uses
+     * the console's memory: half of what is above the 512 MB floor, capped at
+     * the ceiling rather than growing without end. */
+    assert( sd_cache_target_chunks( 1750, 0 ) == SD_CACHE_POOL_MAX );
+    assert( sd_cache_target_chunks( 1024, 0 ) ==
+            (1024 - SD_CACHE_FREE_FLOOR_MB) / SD_CACHE_FREE_SHARE * (1024 * 1024 / SD_CACHE_CHUNK) );
+    /* The chunks already held count as this cache's, not the game's: asking
+     * again with them in hand does not shrink it. */
+    {
+        unsigned int chunks = sd_cache_target_chunks( 700, 0 );
+
+        assert( chunks == sd_cache_target_chunks( 700 - (chunks * SD_CACHE_CHUNK >> 20), chunks ) );
+    }
+    /* A game that has taken the heap back leaves the floor, never less. */
+    assert( sd_cache_target_chunks( 40, SD_CACHE_POOL_MAX ) >= SD_CACHE_POOL_MIN );
+    assert( SD_CACHE_POOL_MAX * SD_CACHE_CHUNK / (1024 * 1024) == 512 );
+    assert( SD_CACHE_DIRECT >= 256 * 1024 && SD_CACHE_DIRECT <= SD_CACHE_CHUNK * 4 );
+    assert( SD_CACHE_LINES >= 16 );
+}
+
+/* A file read through more of itself than eight chunks: a game streaming its
+ * level out of one package keeps three megabytes of it now, and the ninth
+ * chunk does not push the first out from under a read that comes back to it. */
+static void test_deep_file(void)
+{
+    struct sd_cache_pool pool = { .max = 4096 };
+    struct fake_file f = make_file( 40LL * SD_CACHE_CHUNK );
+    struct sd_cache_file file = { .cacheable = 1 };
+    char buf[256];
+    unsigned int i, before;
+
+    for (i = 0; i < SD_CACHE_LINES; i++)
+        assert( cached_read( &file, &pool, &f, i * SD_CACHE_CHUNK, buf, sizeof(buf) ) == (long long)sizeof(buf) );
+    assert( holding( &file ) == SD_CACHE_LINES && f.requests == SD_CACHE_LINES );
+    /* Everything it read is still there, a file's own chunks being the whole
+     * of what it may hold. */
+    before = f.requests;
+    for (i = 0; i < SD_CACHE_LINES; i++)
+    {
+        assert( cached_read( &file, &pool, &f, i * SD_CACHE_CHUNK, buf, sizeof(buf) ) == (long long)sizeof(buf) );
+        assert( !memcmp( buf, f.data + i * SD_CACHE_CHUNK, sizeof(buf) ) );
+    }
+    assert( f.requests == before );
+    sd_cache_drop( &file, &pool );
+    assert( !pool.used && !pool.held );
+    free( f.data );
+}
+
 /* Where the last read of the random mix in test_readahead ended. */
 static long long file_next;
 static long long at_next( const struct sd_cache_file *file )
@@ -548,11 +609,14 @@ int main(void)
     test_oldest_across_files();
     test_many_open_files();
     test_pool_resized();
+    test_pool_sized_by_heap();
+    test_deep_file();
     test_readahead();
     test_replay();
     test_open_files();
     puts( "SD read cache: sprite reads, end of file, least recently used, failures, a full pool taking the "
-          "oldest chunk of any file, 300 open files, a pool that grows and shrinks with the free heap, "
-          "readahead, and open files a program writes to passed" );
+          "oldest chunk of any file, 300 open files, a pool that grows and shrinks with the free heap and is "
+          "sized by it, a file read deeper than eight chunks, readahead, and open files a program writes to "
+          "passed" );
     return 0;
 }

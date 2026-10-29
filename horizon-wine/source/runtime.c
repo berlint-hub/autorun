@@ -2677,6 +2677,7 @@ static void runtime_report_interpreter(void)
                             wine_nx_sd_flush_end, wine_nx_sd_flush_close, wine_nx_sd_flush_timer;
         extern unsigned long long wine_nx_file_read_bytes __attribute__((weak));
         extern unsigned int wine_nx_sd_cache_mb( void );
+        extern unsigned int wine_nx_sd_cache_max_mb( void );
         extern unsigned int wine_nx_usb_reads __attribute__((weak));
         extern unsigned int wine_nx_usb_sectors __attribute__((weak));
         extern unsigned int wine_nx_usb_cache_hits __attribute__((weak));
@@ -2861,10 +2862,12 @@ static void runtime_report_interpreter(void)
         /* read_mb is what the program asked for and sd_mb what the card gave:
          * apart they say whether a run is reading a lot or reading the same
          * bytes again, which the request counts alone cannot. cache_mb is what
-         * the cache holds, which follows the heap the game leaves free. */
+         * the cache holds and cache_max_mb what it may, both following the
+         * heap the game leaves free: a run whose cache sits at its ceiling
+         * while it reads the card is one the ceiling is holding back. */
         log_line( "[PROGRESS] %llus reads=%u read_ms=%llu read_mb=%llu sd_reads=%u sd_ms=%llu sd_mb=%llu "
                   "sd_writes=%u sd_write_ms=%llu writes_held=%u sd_stats=%u stat_hits=%u flushes=%u/%u/%u/%u/%u "
-                  "cache_hits=%u cache_mb=%u syscalls=%u "
+                  "cache_hits=%u cache_mb=%u/%u syscalls=%u "
                   "frames=%u heap_used_mb=%llu heap_free_mb=%llu%s%s%s%s%s",
                   (unsigned long long)(armTicksToNs( now - start ) / 1000000000ull), reads, read_ms,
                   &wine_nx_file_read_bytes
@@ -2879,7 +2882,8 @@ static void runtime_report_interpreter(void)
                   __atomic_load_n( &wine_nx_sd_stat_hits, __ATOMIC_RELAXED ),
                   wine_nx_sd_flush_jump, wine_nx_sd_flush_path, wine_nx_sd_flush_end,
                   wine_nx_sd_flush_close, wine_nx_sd_flush_timer,
-                  __atomic_load_n( &wine_nx_sd_hits, __ATOMIC_RELAXED ), wine_nx_sd_cache_mb(), syscalls, frames,
+                  __atomic_load_n( &wine_nx_sd_hits, __ATOMIC_RELAXED ), wine_nx_sd_cache_mb(),
+                  wine_nx_sd_cache_max_mb(), syscalls, frames,
                   (unsigned long long)heap.uordblks >> 20, heap_free >> 20, systop, native, gl, audio, usb );
         {
             extern void wine_nx_thread_report( void );

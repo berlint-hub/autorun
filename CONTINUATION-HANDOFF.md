@@ -514,3 +514,41 @@ the capture as before, taps on a tab / on a row / off the panel / on the
 footer, and one tap at 1920x1080 proving the panel's pixels are scaled (the
 frame geometry at both sizes is asserted). Run it with the host stubs if SDL2
 is not installed: the picture itself only compiles where SDL2_ttf is.
+
+## More of the card cache, sized by the memory a game leaves free (2026-10-29)
+
+Asked "can't the cache be faster / the RAM used better? Dark Souls II runs with
+17 % of the memory used": the console's memory is there and mostly idle, and the
+card is the slowest thing in a run, so the read cache was the thing to grow and
+to make cheaper. Five changes, all in `source/sd_read_cache.h`, `source/sd_cache.c`
+and the tests:
+
+- **Sized by the heap, up to 512 MB** (`sd_cache_target_chunks`: half of what is
+  free above the 512 MB floor kept for the game, clamped to 32 MB–512 MB, and
+  the policy is now in the header so it can be tested). It was 32–192 MB, a
+  third above the floor. A log with `heap_free_mb=1683` (the Doom 3 runs) now
+  gives the cache 512 MB instead of 192.
+- **24 chunks a file** (3 MB) instead of 8 (1 MB): a game streaming out of one
+  big package kept a few seconds of it and read the rest again.
+- **Reads up to 256 KB go through the cache** (`SD_CACHE_DIRECT`, was 64 KB):
+  128 KB and 256 KB loads used to bypass it entirely and stay nothing, so a
+  level entered again was read from the card in full.
+- **One read buffer per thread** instead of `malloc`/`free` of up to 128 KB for
+  every read (tens of thousands during a load). The copy still happens outside
+  the cache lock, which is why the buffer is per thread rather than shared.
+- **The memory comes back when a game needs it**: `horizon_pages_alloc_any`
+  (`dlls/ntdll/unix/horizon_pool.h`) offers the cache back through the weak
+  `wine_nx_sd_cache_reclaim` before it reports an allocation failure, so a
+  bigger ceiling cannot starve a game whose appetite grows later. The existing
+  resize (every 5 s, from `mallinfo`) also shrank it, but only after the fact.
+
+What to look at in a log: `cache_mb=<held>/<may hold>` in `[PROGRESS]`, and a
+`[CACHE] the card cache went from N to M MB: … MB of heap free, … MB held` line
+whenever it moves. A run whose `cache_mb` holds at its ceiling while `sd_reads`
+keeps climbing is one the ceiling is still holding back; a run at 40 % of it is
+not.
+
+Tests: `tests/sd_read_cache.c` gained `test_pool_sized_by_heap` (the policy at
+nothing free, 1 GB, 1.7 GB, and with its own chunks counted) and `test_deep_file`
+(a file read through more than eight chunks stays cached), and
+`test_least_recently_used` was made independent of `SD_CACHE_LINES`.
