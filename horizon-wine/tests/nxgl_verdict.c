@@ -59,6 +59,48 @@ static void expect_contains( const char *what, struct nxgl_swap_state s, const c
     }
 }
 
+/* The window's own line, used by the display driver at the first swap: the
+ * same numbers the stall report prints, taken while the program is running. */
+static void check_window_line( void )
+{
+    struct nxgl_window_state w;
+    char line[256];
+
+    memset( &w, 0, sizeof(w) );
+    w.width = 800;
+    w.height = 600;
+    w.connected = 1;
+    nxgl_window_line( line, sizeof(line), &w );
+    if (strcmp( line, "0 slots, 800x600 format 0, connected, no buffer is out" ))
+    {
+        fprintf( stderr, "FAIL no slots: \"%s\"\n", line );
+        failures++;
+    }
+    w.slots = 1;
+    w.slot_out = 1;
+    w.format = 28;
+    nxgl_window_line( line, sizeof(line), &w );
+    if (strcmp( line, "1 slot, 800x600 format 28, connected, a buffer is out and has not come back" ))
+    {
+        fprintf( stderr, "FAIL one slot out: \"%s\"\n", line );
+        failures++;
+    }
+    w.slots = 3;
+    w.connected = 0;
+    nxgl_window_line( line, sizeof(line), &w );
+    if (strcmp( line, "3 slots, 800x600 format 28, not connected, a buffer is out and has not come back" ))
+    {
+        fprintf( stderr, "FAIL not connected: \"%s\"\n", line );
+        failures++;
+    }
+    /* A buffer small enough for half a line is not written past. */
+    if (nxgl_window_line( line, 8, &w ) == 0 || strlen( line ) >= 8)
+    {
+        fprintf( stderr, "FAIL short buffer: \"%s\"\n", line );
+        failures++;
+    }
+}
+
 int main(void)
 {
     struct nxgl_swap_state s;
@@ -147,6 +189,7 @@ int main(void)
     s.owner = NXGL_OWNER_NONE;
     expect_contains( "nobody owns the screen", s, "nothing", NULL );
 
+    check_window_line();
     if (failures)
     {
         fprintf( stderr, "%d failure(s)\n", failures );

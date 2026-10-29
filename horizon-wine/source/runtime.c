@@ -1678,6 +1678,26 @@ int wine_nx_vulkan_owns_screen( void )
     return wine_nx_vulkan_window;
 }
 
+/* The screen's window as libnx keeps it, for the display driver's own lines:
+ * said when a surface has just taken the window and before the program's first
+ * swap, so a run that shows no frame has the window's books at the moment it
+ * mattered, not only at the stall report ten seconds later. 0 when there is no
+ * window to read. */
+int wine_nx_gl_window_state( char *buffer, size_t size )
+{
+    struct nxgl_window_state state;
+    NWindow *window = nwindowGetDefault();
+
+    if (!window) return 0;
+    state.slots = (unsigned int)__builtin_popcountll( (unsigned long long)window->slots_configured );
+    state.width = (int)window->width;
+    state.height = (int)window->height;
+    state.format = window->format;
+    state.connected = !!window->is_connected;
+    state.slot_out = window->cur_slot >= 0;
+    return nxgl_window_line( buffer, size, &state );
+}
+
 /* What the per-game OpenGL renderer setting asked for, 1 being Zink over
  * NVK/Vulkan, for the display driver: the log names the renderer the driver
  * really answered with next to the one that was asked for, which is the only

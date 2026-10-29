@@ -315,6 +315,14 @@ runtime; the full package now ships the Mesa 26 one.
   size the surface presents at read from the swap itself
   (`wine_nx_gl_swap_surface`, `dlls/win32u/winnx_opengl.c`). A stuck first swap
   used to leave the numbers and no conclusion, which cost a run to read.
+  The same reading is now taken while the program is running, twice: when its
+  surface has just been made on the window (`the window the program's surface
+  was made on: 3 slots, 800x600 format 0, connected, no buffer is out`) and as
+  the first swap begins (`the window at the first swap: …`, `nxgl_window_line`
+  in `source/nxgl_verdict.h`). A surface whose driver never registered its
+  buffers, or a slot already out before the program ever asked, is otherwise
+  only visible ten seconds later, when nothing has moved and the cause may have
+  been replaced by its consequence.
 - **A Vulkan swapchain's buffers are not the runtime's to release.** A Vulkan
   window surface is made for the whole screen and is made again whenever its
   swapchain is (a resize, a format change), and each of those goes through the

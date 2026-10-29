@@ -59,6 +59,8 @@ extern int wine_nx_screenshot_requested( void ) __attribute__((weak));
  * whether gl-debug.txt wants the driver's own messages in the run log. */
 extern int wine_nx_gl_renderer_requested( void ) __attribute__((weak));
 extern int wine_nx_gl_debug( void ) __attribute__((weak));
+/* runtime.c: the screen's window as libnx keeps it, in one line (nxgl_verdict.h). */
+extern int wine_nx_gl_window_state( char *buffer, size_t size ) __attribute__((weak));
 extern int wine_nx_screenshot_take( const void *pixels, int width, int height, int stride_px, int format ) __attribute__((weak));
 /* The arrow whose tip is at this panel pixel (pointer_cursor.h), for a picture
  * the compositor does not draw, and which part of the surface the panel shows
@@ -1095,7 +1097,19 @@ static BOOL nx_drawable_swap( struct opengl_drawable *base )
     }
     index = __atomic_add_fetch( &nx_swap_named, 1, __ATOMIC_RELAXED );
     if (index <= 3)
+    {
         nx_log( "[NXGL] swap #%u began on the program's %dx%d surface", index, width, height );
+        /* The window's books at the moment the first present starts: a slot
+         * already out here is one nobody returned before the program asked,
+         * which no other line of the log says. */
+        if (index == 1 && &wine_nx_gl_window_state)
+        {
+            char state[160];
+
+            if (wine_nx_gl_window_state( state, sizeof(state) ))
+                nx_log( "[NXGL] the window at the first swap: %s", state );
+        }
+    }
     __atomic_store_n( &nx_swap_surface_w, (int)width, __ATOMIC_RELAXED );
     __atomic_store_n( &nx_swap_surface_h, (int)height, __ATOMIC_RELAXED );
     __atomic_store_n( &nx_swap_surface_screen, 1, __ATOMIC_RELAXED );
@@ -1266,6 +1280,18 @@ static BOOL nx_surface_create( struct client_surface *client, int format, struct
     pthread_mutex_unlock( &nx_screen_mutex );
 
     TRACE( "created drawable %s with EGL surface %p\n", debugstr_opengl_drawable( &gl->base ), gl->base.surface );
+    /* What the window holds now that the program's surface is on it. A surface
+     * whose EGL never registers its buffers shows it here, before the first
+     * swap, rather than only in a stall report; a buffer already out at this
+     * point is the handover's, not the program's. */
+    if (&wine_nx_gl_window_state)
+    {
+        static int told;
+        char state[160];
+
+        if (!told++ && wine_nx_gl_window_state( state, sizeof(state) ))
+            nx_log( "[NXGL] the window the program's surface was made on: %s", state );
+    }
     {
         static BOOL logged;
         const char *vendor = funcs->p_eglQueryString( egl->display, EGL_VENDOR );

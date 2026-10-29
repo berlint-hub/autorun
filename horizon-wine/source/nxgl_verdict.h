@@ -19,6 +19,7 @@
 #ifndef WINE_NX_NXGL_VERDICT_H
 #define WINE_NX_NXGL_VERDICT_H
 
+#include <stddef.h>
 #include <stdio.h>
 
 /* A swap inside the driver for less than this is slow, not stuck; the same
@@ -146,6 +147,31 @@ static inline int nxgl_swap_report( char *buffer, size_t size, const struct nxgl
                   "the present", whole, tenth, s->window_w, s->window_h, s->slots );
         break;
     }
+    return 1;
+}
+
+/* The screen's window as libnx keeps it, in one line of its own: printed by the
+ * display driver when a surface has just taken the window (dlls/win32u/
+ * winnx_opengl.c) and before the program's first swap. The stall report has
+ * always printed the same numbers when nothing is moving; this is the same
+ * reading taken while something is, which is what tells "the driver never
+ * registered the program's buffers" from "it did and one is still out". */
+struct nxgl_window_state
+{
+    unsigned int slots;       /* slots_configured, counted */
+    int width, height;        /* the window's own size */
+    unsigned int format;
+    int connected;
+    int slot_out;             /* cur_slot >= 0 */
+};
+
+static inline int nxgl_window_line( char *buffer, size_t size, const struct nxgl_window_state *w )
+{
+    if (!size) return 0;
+    snprintf( buffer, size, "%u slot%s, %dx%d format %u, %s, %s",
+              w->slots, w->slots == 1 ? "" : "s", w->width, w->height, w->format,
+              w->connected ? "connected" : "not connected",
+              w->slot_out ? "a buffer is out and has not come back" : "no buffer is out" );
     return 1;
 }
 
