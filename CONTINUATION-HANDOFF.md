@@ -719,3 +719,92 @@ run that ends without the runtime's own exit path says so nowhere.
 3. A run that ends without the runtime's exit path should say so, so a report
    with no outcome stops being ambiguous between "you closed it" and "it died".
 4. Fold `[INPUT] the program sets the cursor …` by count, not by coordinates.
+
+## Microstutter in Dark Souls II: the 19:51 run, and what was done about it
+
+The user asked, after a fourth run (`DarkSoulsII_20261030-195124.log`, 1120 s,
+57361 frames, quit by the chord), whether the microstutter can be tuned. Two
+causes, and they are different sizes.
+
+### The frame pacing: nothing is holding a cadence
+
+This run's `dxvk.conf` is `dxgi.syncInterval = 0`, `d3d9.presentInterval = 0`
+and **no `dxvk.maxFrameRate` at all** — VSync off, no cap, where the two runs
+before it had `syncInterval = 1` and a 45 fps cap. The swapchain is created
+`immediate` (`[NXVK] swapchain 960x540 format 37 … (immediate; …)`) where it
+used to be `fifo`. So the game runs at whatever it can and the panel takes it
+at 60 Hz: 57361 frames over 1120 s is 51 fps on average, but the ten-second
+windows are 58–61 for two thirds of the run and 20–55 for the rest. Every
+frame that overruns 16.7 ms misses a vsync and costs a whole one, which is
+what microstutter is.
+
+On a 60 Hz panel the even cadences are 60 (1:1) and 30 (2:1). The earlier
+runs' 45 fps cap is not one: 45 into 60 lands on a 17/17/33 pattern. With a
+median of 58.5 but a 5th percentile of 41.5, **30 capped with VSync on is the
+setting that paces**; 60 capped will judder wherever the game dips. Both are
+one launcher setting (`frame-limit`, `frame-limit-sync`, and VSync), no build.
+
+### The card: the dips are reads, and the numbers say so
+
+Per ten-second window, against the card time in the same window:
+
+| fps | windows | mean card ms | mean card reads |
+|---|---|---|---|
+| >=55 | 67 (65 %) | 102 | 21 |
+| 45–55 | 27 (26 %) | 308 | 86 |
+| <45 | 9 (9 %) | 609 | 230 |
+
+Correlation of frames per second against card time: **-0.56**. Over the run the
+game asked for 539 MB and the card delivered **1519 MB** — 2.8x — with a cache
+hit rate of **50 %** and `cache_mb=30/417`: the cache held 30 MB of the 417 MB
+the pool was allowed.
+
+The ceiling was never what bound it. `SD_CACHE_LINES` was a flat 24 chunks
+(3 MB) per file, so ten open files held ten times 3 MB and stopped. It is now
+a floor: a file may keep a sixteenth of the pool, up to 192 chunks (24 MB), and
+a pool at its 32 MB floor still gives the old 24. The pool's own limit bounds
+the total and its least-recently-used chunk is the one that goes when full.
+
+Four packages of half a gigabyte read through a window that moves forward and
+comes back over what it passed, card traffic per per-file cap:
+
+```
+window   24 (3 MB)   96 (12 MB)   192 (24 MB)   384 (48 MB)
+ 8 MB      4747 MB        --          190 MB        --
+16 MB      6112 MB     3788 MB        220 MB       220 MB
+64 MB      7136 MB     6359 MB       5392 MB      4733 MB
+```
+
+Below the window a game streams in, more cache buys almost nothing; above it
+the card goes quiet. Dark Souls II's 2.8x puts it between the last two rows,
+which is why 192 and not the 96 that was tried first.
+
+### Not the cause, but worth knowing
+
+- 80 threads on 1.2–2.0 of 3 cores, the main thread alone at 52–91 % of one
+  core. There is spare CPU; the machine is not saturated.
+- No `dxvk-shader-*` thread in the top twelve at any point: shader compilation
+  is not what the dips are. `dxvk.shaderCompilationMethod = async` is on.
+- `[FEX] TSO=0 multiblock=1 maxinst=1000` — TSO off and maxinst back at its
+  1000 default, where the two runs before had TSO on and maxinst 20000.
+  `FEX_MAXINST` goes up to 20000 and larger blocks optimise better; 1000 is the
+  low end of Autorun's own list, and it is per-game, so it costs nothing to try.
+- `[MESA] compiled shaders take 4 MiB in 2 driver version(s)` (was 0): the
+  shader cache is being filled. `sd_writes` climbs all run (2584 writes,
+  7598 ms) — appends to `mesa_shader_cache_sf/…/foz_cache.foz` while playing.
+- `driver-2.txt` adds nine `context creation failed … unsupported GL version`
+  lines for 4.6/4.5/4.4: SDL asking for versions Mesa 26.2.3 on the Switch does
+  not have, and falling back. Harmless, and it is the launcher's, not the game's.
+
+### Done for this
+
+`fs: a file may keep a share of the card cache, not three megabytes of it` —
+the per-file cap follows the pool, `wine_nx_sd_cache_describe()` no longer
+prints "0 to 0 MB in all" (it divided 128 KB by a megabyte), a new
+`test_lines_follow_the_pool`, and `sd_read_cache` now runs in CI, where it did
+not before. All host-tested under `cc` and ASan/UBSan; not run on a console.
+
+What to watch in the next run: `[SDCACHE]` should read
+`128 KB chunks, 24 to 192 per file, 32 to 512 MB in all`, and `cache_mb=` in
+`[PROGRESS]` should hold far more than 30 MB. If the dips stop tracking the
+card, the pacing is what is left.
