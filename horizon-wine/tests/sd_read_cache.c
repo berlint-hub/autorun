@@ -107,7 +107,9 @@ static void test_end_of_file(void)
 
 static void test_least_recently_used(void)
 {
-    struct sd_cache_pool pool = { .max = 64 };
+    /* A pool with room for a file's whole share of it: the test below walks
+     * every chunk a file may hold, and how many that is follows the pool. */
+    struct sd_cache_pool pool = { .max = SD_CACHE_LINES * SD_CACHE_LINES_SHARE };
     /* One chunk more than a file may hold, so the last of them has to take
      * one away. */
     struct fake_file f = make_file( (SD_CACHE_LINES + 4) * (long long)SD_CACHE_CHUNK );
@@ -142,6 +144,68 @@ static void test_least_recently_used(void)
     assert( pool.used == SD_CACHE_LINES );
     sd_cache_drop( &file, &pool );
     free( f.data );
+}
+
+/* What one file may keep follows the pool. Twenty-four chunks was right for a
+ * pool with 32 MB in it and badly wrong for a game streaming its levels out of
+ * three or four packages while a gigabyte of the heap sits idle: Dark Souls II
+ * held 30 MB of a 417 MB pool -- ten open files on their three megabytes each
+ * -- served half of its file reads off the card, pulled 1519 MB from it to
+ * answer 539 MB of requests, and fell from about 59 to under 45 fps in exactly
+ * the ten-second windows in which it was reading. So a file takes a share of
+ * the pool, up to the whole array, and never less than the twenty-four it had. */
+static void test_lines_follow_the_pool(void)
+{
+    struct sd_cache_pool floor_pool = { .max = SD_CACHE_POOL_MIN };
+    struct sd_cache_pool big = { .max = SD_CACHE_POOL_MAX };
+    struct sd_cache_pool roomy = { .max = SD_CACHE_LINES * SD_CACHE_LINES_SHARE };
+    struct sd_cache_pool mid = { .max = SD_CACHE_LINES_MIN * SD_CACHE_LINES_SHARE * 2 };
+
+    /* A sixteenth of the pool's own floor is sixteen, below the old number, so
+     * a game on a small pool caches exactly as much as it did before. */
+    assert( sd_cache_file_lines( &floor_pool ) == SD_CACHE_LINES_MIN );
+    /* In between it is the share, and a pool with room for the array gives it. */
+    assert( sd_cache_file_lines( &mid ) == SD_CACHE_LINES_MIN * 2 );
+    assert( sd_cache_file_lines( &roomy ) == SD_CACHE_LINES );
+    assert( sd_cache_file_lines( &big ) == SD_CACHE_LINES );
+
+    /* And a file really does keep that many on a pool that can afford it: read
+     * them all, then read them all back without asking the card again. */
+    {
+        struct fake_file f = make_file( (long long)SD_CACHE_LINES * SD_CACHE_CHUNK );
+        struct sd_cache_file file = { .cacheable = 1 };
+        char buf[256];
+        unsigned int i, before;
+
+        for (i = 0; i < SD_CACHE_LINES; i++)
+            assert( cached_read( &file, &big, &f, (long long)i * SD_CACHE_CHUNK, buf, sizeof(buf) ) ==
+                    (long long)sizeof(buf) );
+        assert( holding( &file ) == SD_CACHE_LINES );
+        before = f.requests;
+        for (i = 0; i < SD_CACHE_LINES; i++)
+            assert( cached_read( &file, &big, &f, (long long)i * SD_CACHE_CHUNK, buf, sizeof(buf) ) ==
+                    (long long)sizeof(buf) );
+        assert( f.requests == before );
+        sd_cache_drop( &file, &big );
+        assert( !big.used && !big.held );
+        free( f.data );
+    }
+    /* On the pool's floor it is the old twenty-four: eight chunks past that
+     * take eight of them, and the file never holds a twenty-fifth. */
+    {
+        struct fake_file f = make_file( (long long)(SD_CACHE_LINES_MIN + 8) * SD_CACHE_CHUNK );
+        struct sd_cache_file file = { .cacheable = 1 };
+        char buf[256];
+        unsigned int i;
+
+        for (i = 0; i < SD_CACHE_LINES_MIN + 8; i++)
+            assert( cached_read( &file, &floor_pool, &f, (long long)i * SD_CACHE_CHUNK, buf, sizeof(buf) ) ==
+                    (long long)sizeof(buf) );
+        assert( holding( &file ) == SD_CACHE_LINES_MIN );
+        sd_cache_drop( &file, &floor_pool );
+        assert( !floor_pool.used && !floor_pool.held );
+        free( f.data );
+    }
 }
 
 static void test_failures_and_memory(void)
@@ -378,7 +442,7 @@ static void test_pool_sized_by_heap(void)
 static void test_deep_file(void)
 {
     struct sd_cache_pool pool = { .max = 4096 };
-    struct fake_file f = make_file( 40LL * SD_CACHE_CHUNK );
+    struct fake_file f = make_file( (long long)(SD_CACHE_LINES + 4) * SD_CACHE_CHUNK );
     struct sd_cache_file file = { .cacheable = 1 };
     char buf[256];
     unsigned int i, before;
@@ -610,13 +674,15 @@ int main(void)
     test_many_open_files();
     test_pool_resized();
     test_pool_sized_by_heap();
+    test_lines_follow_the_pool();
     test_deep_file();
     test_readahead();
     test_replay();
     test_open_files();
     puts( "SD read cache: sprite reads, end of file, least recently used, failures, a full pool taking the "
           "oldest chunk of any file, 300 open files, a pool that grows and shrinks with the free heap and is "
-          "sized by it, a file read deeper than eight chunks, readahead, and open files a program writes to "
+          "sized by it, a file's share of it, a file read deeper than eight chunks, readahead, and open files a "
+          "program writes to "
           "passed" );
     return 0;
 }

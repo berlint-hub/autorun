@@ -40,8 +40,38 @@
 /* Chunks one open file may keep. A game that streams from a few big packages
  * rereads far more of one file than of the whole card, and eight chunks (1 MB)
  * held a few seconds of its streaming; twenty-four is 3 MB a file, and the pool
- * is still what bounds the total. */
-#define SD_CACHE_LINES  24            /* chunks kept per file */
+ * is still what bounds the total.
+ *
+ * Twenty-four is now the *smallest* a file gets, not the most. It is the right
+ * number for a pool with only 32 MB in it, and it is badly wrong for a game
+ * that streams its levels out of three or four packages while a gigabyte of
+ * the heap sits idle: Dark Souls II held 30 MB of a 417 MB pool -- ten open
+ * files on their 3 MB each -- served half of its file reads from the card,
+ * pulled 1519 MB off it to answer 539 MB of requests, and dropped from about
+ * 59 to under 45 fps in exactly the ten-second windows in which it was
+ * reading. So the cap follows the pool: a file may keep a share of what the
+ * pool has room for, up to the array below, and never less than the old
+ * twenty-four. The pool's own limit still bounds the total, and its
+ * least-recently-used chunk is still the one that goes when it is full, so a
+ * file only ever holds what it has been reading.
+ *
+ * Ninety-six was tried first and is too small to be worth the change. Four
+ * packages of half a gigabyte, read through a window that moves forward and
+ * comes back over what it passed, ask the card for this much per file cap:
+ *
+ *   window   24 (3 MB)   96 (12 MB)   192 (24 MB)   384 (48 MB)
+ *    8 MB      4747 MB        --           190 MB        --     (0.1x the bytes asked)
+ *   16 MB      6112 MB     3788 MB         220 MB       220 MB
+ *   64 MB      7136 MB     6359 MB        5392 MB      4733 MB
+ *
+ * Below the window a game streams in, more cache buys almost nothing; above
+ * it, the card goes quiet. Dark Souls II pulls 1519 MB for 539 MB asked, which
+ * puts its window between the last two rows, so 192 is where the curve turns
+ * for it and 96 is not. The array is 40 bytes a slot: 7.7 KB per open file,
+ * 2.3 MB at three hundred of them, next to a pool of hundreds of megabytes. */
+#define SD_CACHE_LINES  192           /* the most chunks one file may keep */
+#define SD_CACHE_LINES_MIN 24         /* what a file keeps when the pool is at its smallest */
+#define SD_CACHE_LINES_SHARE 16       /* a file may take a pool's sixteenth, so sixteen files can fill up */
 /* Reads up to this go through the cache: a game reading level data in 128 KB
  * or 256 KB pieces had every one of them go straight to the card and never
  * stay, so a level re-entered a minute later was read again in full. What is
@@ -269,14 +299,31 @@ static inline int sd_cache_plan( const struct sd_cache_file *file, const struct 
     return 1;
 }
 
+/* How many chunks one file may keep, given what the pool can hold: a share of
+ * it, never more than the array, never less than the old twenty-four. A pool
+ * at its 32 MB floor answers 16, which the floor raises back to 24, so a game
+ * on a small pool caches exactly as much as it did before; a pool of 192 MB or
+ * more lets a file keep the whole 96. */
+static inline unsigned int sd_cache_file_lines( const struct sd_cache_pool *pool )
+{
+    unsigned int lines = pool->max / SD_CACHE_LINES_SHARE;
+
+    if (lines > SD_CACHE_LINES) lines = SD_CACHE_LINES;
+    if (lines < SD_CACHE_LINES_MIN) lines = SD_CACHE_LINES_MIN;
+    return lines;
+}
+
 /* The line to fill: a buffer holding nothing, then a free slot, then the
- * least recently used chunk. */
-static inline struct sd_cache_line *sd_cache_victim( struct sd_cache_file *file )
+ * least recently used chunk. Only the file's own share of the pool is
+ * considered, so a package being streamed does not take slots the file is
+ * not allowed to fill while others are empty. */
+static inline struct sd_cache_line *sd_cache_victim( struct sd_cache_file *file,
+                                                     const struct sd_cache_pool *pool )
 {
     struct sd_cache_line *victim = &file->lines[0];
-    unsigned int i, rank, best = 3;
+    unsigned int lines = sd_cache_file_lines( pool ), i, rank, best = 3;
 
-    for (i = 0; i < SD_CACHE_LINES; i++)
+    for (i = 0; i < lines; i++)
     {
         struct sd_cache_line *line = &file->lines[i];
 
@@ -315,7 +362,7 @@ static inline long long sd_cache_read( struct sd_cache_file *file, struct sd_cac
             size_t want;
 
             if (!sd_cache_plan( file, pool, at, &start, &want, &window )) break;
-            line = sd_cache_victim( file );
+            line = sd_cache_victim( file, pool );
             if (!line->data && pool->used >= pool->max)
             {
                 /* Full: take the chunk read longest ago, whoever read it. */

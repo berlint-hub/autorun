@@ -192,6 +192,16 @@ jobs:
             -o fex_cache
           ./fex_cache
 
+      # The read cache in front of the card: a sprite read, the end of a file,
+      # a pool that takes the chunk read longest ago by any file, and what one
+      # file may keep of the pool -- the share that decides how much of a
+      # streaming game's packages stay off the card.
+      - name: SD read cache
+        run: |
+          cc -std=gnu11 -Wall -Wextra -Werror -O1 -g -I horizon-wine/source \
+            horizon-wine/tests/sd_read_cache.c -o sd_read_cache
+          ./sd_read_cache
+
       # The launcher's own logic that needs no SDL: the play time a game keeps,
       # the bundles that set a game's emulation and frame pacing at once, and the
       # copy of the settings a card can be put back to.

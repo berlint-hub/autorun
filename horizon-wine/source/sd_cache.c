@@ -183,10 +183,15 @@ size_t wine_nx_sd_cache_reclaim( size_t bytes )
  * said "8 per file, 32 to 192 MB" for as long as it took someone to read it. */
 void wine_nx_sd_cache_describe( char *out, size_t size )
 {
-    snprintf( out, size, "sdmc reads cached: %u KB chunks, %u per file, %u to %u MB in all (sized by the heap "
-              "the game leaves free)", SD_CACHE_CHUNK / 1024, SD_CACHE_LINES,
-              SD_CACHE_POOL_MIN * (SD_CACHE_CHUNK / (1024 * 1024)),
-              SD_CACHE_POOL_MAX * (SD_CACHE_CHUNK / (1024 * 1024)) );
+    /* The megabytes are shifted, not divided: SD_CACHE_CHUNK is smaller than a
+     * megabyte, so SD_CACHE_POOL_MIN * (SD_CACHE_CHUNK / (1024 * 1024)) is
+     * SD_CACHE_POOL_MIN * 0 and the line read "0 to 0 MB in all" on every run
+     * since the cache was grown. */
+    snprintf( out, size, "sdmc reads cached: %u KB chunks, %u to %u per file (a share of the pool), "
+              "%u to %u MB in all (sized by the heap the game leaves free)",
+              SD_CACHE_CHUNK / 1024, SD_CACHE_LINES_MIN, SD_CACHE_LINES,
+              (unsigned)((long long)SD_CACHE_POOL_MIN * SD_CACHE_CHUNK >> 20),
+              (unsigned)((long long)SD_CACHE_POOL_MAX * SD_CACHE_CHUNK >> 20) );
 }
 
 /* Megabytes the cache is holding, for the runtime's [PROGRESS] line. */
