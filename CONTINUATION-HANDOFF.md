@@ -1,7 +1,10 @@
 # Autorun continuation handoff
 
-**Updated:** 2026-10-28 (continued on `arena/16b1334a-autorun`, see "Riddick" below)
-**Branch:** `arena/97e282a9-autorun`, continued on `arena/16b1334a-autorun`
+**Updated:** 2026-10-30 (carried forward on `arena/d0bc27f7-autorun`)
+**Branch:** `arena/97e282a9-autorun`, continued on `arena/16b1334a-autorun`, carried
+forward on `arena/d0bc27f7-autorun` (its fast-forward descendant: all 164 commits of
+`arena/16b1334a-autorun` were merged in on 2026-10-30, and the five host checks and
+four `cc` host tests named below pass on it)
 **Purpose:** preserve the current task, implementation state, test/build results, and open issues for a later AI or developer.
 
 ## User request and scope
