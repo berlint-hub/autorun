@@ -808,3 +808,106 @@ What to watch in the next run: `[SDCACHE]` should read
 `128 KB chunks, 24 to 192 per file, 32 to 512 MB in all`, and `cache_mb=` in
 `[PROGRESS]` should hold far more than 30 MB. If the dips stop tracking the
 card, the pacing is what is left.
+
+## The console's sleep, and HOME
+
+*"a když hru uspím, tak mi znovu nenajede, jde to spravit?"* — a console put to
+sleep in a game comes back to a frozen picture and has to be powered off.
+
+### What was wrong
+
+Nothing in the tree handled focus at all. Zero uses of
+`appletSetFocusHandlingMode`, `appletHook`, `AppletHookType`,
+`appletGetFocusState`, `AppletFocus*` anywhere before this. libnx's default is
+`AppletFocusHandlingMode_SuspendHomeSleep`: **the process is frozen where it
+stands and told nothing**. And `appletMainLoop()` ran only in
+`launcher_ui.c:54-58` (`platform_running()`), `game_forwarder.c:39,49`,
+`launcher_console.c:116`, and the recovery-failure loop at `runtime.c:5745` —
+**never while a game was running**, so the applet's messages were not even read.
+A console put to sleep in a game froze mid-anything (possibly holding
+`wine_nx_fb_mutex` inside `framebufferBegin`/`End`, or mid-Vulkan present) and
+came back to a display nobody owned: `framebufferCreate` happens once in
+`wine_nx_fb_init()`, so the framebuffer, the EGL surface and the DXVK
+swapchain were all gone and nothing re-took the panel.
+
+The user's symptom, asked and answered: **frozen** — the last frame stays on the
+screen, nothing responds, it takes a power off.
+
+### What was done — the safe half only
+
+Scope the user chose: detect the focus change, give the screen back before the
+freeze, write the run's time and books, take the screen again on return, and if
+it will not come back **end the run cleanly** rather than hang. Explicitly not
+done: rebuilding EGL/swapchain/DXVK under a live D3D device. That is the big
+piece and it cannot be verified without hardware.
+
+- `horizon-wine/source/focus_sleep.h` — the decision, kept away from the Switch
+  calls so a host can test it. `focus_sleep_change()` maps (what the console
+  said, whether this program holds the display) to one of
+  `FOCUS_STEP_NONE / RELEASE / REACQUIRE / END_RUN`. Two things it exists for:
+  a second notice while the console is already away is **not** a second sleep
+  and must not release a screen that is already gone; and a screen that fails
+  to come back three times (`FOCUS_SLEEP_RETRIES`) ends the run instead of
+  leaving a game on a panel nobody can read.
+- `horizon-wine/tests/focus_sleep.c` + a **Console focus** step in
+  `.github/workflows/build.yml`. Passes under `cc` and under
+  `-fsanitize=address,undefined`.
+- `horizon-wine/source/runtime.c` — the wiring, all inside `#ifdef __SWITCH__`:
+  `appletSetFocusHandlingMode( AppletFocusHandlingMode_SuspendHomeSleepNotify )`
+  at start-up (legal: `__nx_applet_type = AppletType_Application`), an
+  `AppletHookType_OnFocusState` hook, and a **`Thread` of this runtime's that
+  calls `appletMainLoop()` every 50 ms** — without it the hook can never fire
+  while a game runs. On release: `library_run_keep()` (the play time is
+  credited to the moment of the freeze) then the existing
+  `release_screen_buffers()` (bounded 300×10 ms trylock, `framebufferClose` +
+  `consoleExit` + `nwindowReleaseBuffers`). On return: `wine_nx_fb_init()`.
+  Two side effects this also fixes: `appletMainLoop()` returning false during a
+  game (an exit request) now reaches `wine_nx_request_quit()`, and
+  `start_focus_watch()` is stopped in `leave_cleanly()` so its heap-lent stack
+  is not left for the loader.
+
+**The risk the user accepted, and it is real:** `OnFocusState` fires for the
+HOME menu too, so any bug in the release/restore pair turns pressing HOME into
+"the game died". `release_screen_buffers()` is bounded and the restore is a
+bounded `framebufferCreate`, so the failure mode is a blank screen and a log
+line, not a hang — but if a game dies on HOME, this is why.
+
+### Why the mode is `SuspendHomeSleepNotify` and not `NoSuspend`
+
+From libnx master (`nx/source/services/applet.c`, `nx/include/switch/services/applet.h`):
+
+| mode | value | `invals` | what it does |
+|---|---|---|---|
+| `SuspendHomeSleep` | 0 | `{0,0,1,0}` | **the default.** Freezes on HOME-open and on sleep, **no hook** |
+| `NoSuspend` | 1 | `{1,1,0,0}` | keeps running — and keeps drawing to a screen it does not have |
+| `SuspendHomeSleepNotify` | 2 | `{1,0,1,0}` | same suspension **plus** the `OnFocusState` hook — the one to use |
+| `AlwaysSuspend` | 3 | `{0,0,1,1}` | the only one that sets `invals[3]`, i.e. enables out-of-focus suspending |
+
+`appletSetFocusHandlingMode` requires `__nx_applet_type ==
+AppletType_Application` (true for the runtime). libnx's init sets
+`SuspendHomeSleep`; its exit sets `NoSuspend`. `appletMainLoop()` is
+`appletGetMessage` + `appletProcessMessage`; the latter handles
+`AppletMessage_FocusStateChanged` (→ `_appletGetCurrentFocusState` +
+`appletCallHook(AppletHookType_OnFocusState)`) and `AppletMessage_Resume` (→
+`AppletHookType_OnResume`).
+
+### What to look for in the next run
+
+`[FOCUS] the console's sleep is announced to this program: rc=0x0` near the
+top — if `rc` is not 0, the hook never fires and nothing below it happens. Then,
+after a sleep and a wake:
+
+```
+[FOCUS] the console is going away; the screen was given back and the run's time written
+[FOCUS] the console is back; the screen was taken again
+```
+
+The third line to know is `[FOCUS] the console is back; the screen has not come
+back yet (1 of 3)` — that is the game's own GL or Vulkan surface, and it is
+exactly the piece this change does not do. If it reaches 3, the run closes with
+`[FOCUS] the screen would not come back; the run is being closed`.
+
+**Net effect to expect on a console:** a console put to sleep in a game should
+still show a dead picture for that game's own surface — but it should no longer
+be a system the user has to power off; the run's play time is banked, and the
+run's report is written. Not verified on hardware.

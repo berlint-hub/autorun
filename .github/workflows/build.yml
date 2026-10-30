@@ -202,6 +202,15 @@ jobs:
             horizon-wine/tests/sd_read_cache.c -o sd_read_cache
           ./sd_read_cache
 
+      # What the console does to a run when it is put to sleep, or when HOME is
+      # pressed: the screen is given back before the freeze, and a run whose
+      # screen will not come back is closed rather than left on a dead panel.
+      - name: Console focus
+        run: |
+          cc -std=gnu11 -Wall -Wextra -Werror -O1 -g -I horizon-wine/source \
+            horizon-wine/tests/focus_sleep.c -o focus_sleep
+          ./focus_sleep
+
       # The launcher's own logic that needs no SDL: the play time a game keeps,
       # the bundles that set a game's emulation and frame pacing at once, and the
       # copy of the settings a card can be put back to.

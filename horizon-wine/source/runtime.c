@@ -60,6 +60,7 @@
 #include "dxvk_releases.h"
 #include "horizon_dlls.h"
 #include "horizon_dll_features.h"
+#include "focus_sleep.h"
 #include "game_fixes.h"
 #include "screen_fit.h"
 #include "nxgl_verdict.h"
@@ -605,6 +606,18 @@ static void cap_heap_pool_for_shared_data(void)
  * InvalidMemoryState. Every thread this runtime owns has to end before it does. */
 /* Its stack is heap lent to it, like every thread's, so it has to end and be
  * waited for before the loader can take the process back. */
+/* The console's sleep: the thread that reads the applet's messages, and the
+ * hook that gives the screen back before the freeze. focus_sleep.h decides what
+ * to do and is tested on a host; the wiring is Horizon's and is below, past
+ * everything it calls. */
+static void start_focus_watch( void );
+static void stop_focus_watch( void );
+#ifndef __SWITCH__
+/* No console to watch on a host. */
+static void start_focus_watch( void ) { }
+static void stop_focus_watch( void ) { }
+#endif
+
 static void stop_stall_watch( void )
 {
     if (!stall_watch_running) return;
@@ -4954,6 +4967,10 @@ static int leave_cleanly( void )
     after = memory_left_behind( 0 );
     log_line( "[EXIT] sockets closed: %d regions lent, was %d", after, left );
     left = after;
+    stop_focus_watch();
+    after = memory_left_behind( 0 );
+    log_line( "[EXIT] the console's watch ended: %d regions lent, was %d", after, left );
+    left = after;
     stop_log_flusher();
     after = memory_left_behind( 0 );
     log_line( "[EXIT] flusher thread ended: %d regions lent, was %d", after, left );
@@ -5255,10 +5272,128 @@ static void release_thread_local_pages( void )
 static int runtime_components_run;
 /* The program this runtime started, for game_fixes_finish when it ends. */
 static char runtime_program[512];
+/* Whether a program is running: runtime_program is written once and never
+ * cleared, so it cannot say. The launcher owns the screen when this is 0. */
+static volatile int runtime_program_running;
 
 /* The exit code the program gave NtTerminateProcess (dlls/ntdll/unix/process.c);
  * ~0 while it has not ended by itself. */
 unsigned int wine_nx_program_exit_code = ~0u;
+
+#ifdef __SWITCH__
+/*
+ * The console's sleep, and the HOME menu.
+ *
+ * Nothing here ran before. libnx's default is AppletFocusHandlingMode_SuspendHomeSleep:
+ * the process is frozen where it stands and told nothing, and this runtime never
+ * called appletMainLoop() while a program was running, so the applet's messages
+ * were not even read. A console put to sleep in a game froze inside a present,
+ * holding the framebuffer and whatever the GPU had out, and came back to a
+ * display nobody owned -- the last frame stays on the panel and nothing answers.
+ *
+ * Now the console still sleeps, but the hook is called first (SuspendHomeSleepNotify),
+ * and a thread of this runtime's reads the messages so that it can be. The
+ * screen is given back before the freeze and taken again after it. The HOME
+ * menu comes through the same hook, so both have to be safe to undo; a run is
+ * closed rather than left on a panel that shows nothing.
+ */
+static struct focus_sleep runtime_focus;
+static AppletHookCookie runtime_focus_cookie;
+static volatile int runtime_focus_quit, runtime_focus_running;
+static Thread runtime_focus_thread;
+
+/* Whether this program has the display at all: the framebuffer, or a surface
+ * the program presents through. In the launcher it is the launcher's own loop
+ * that owns it, and the hook leaves it alone. */
+static int runtime_focus_holds_screen( void )
+{
+    return wine_nx_fb_ready || wine_nx_gl_window || wine_nx_vulkan_window || wine_nx_console_active;
+}
+
+static void runtime_focus_hook( AppletHookType type, void *param )
+{
+    (void)type;
+    (void)param;
+    /* Only while a program is running: in the launcher it is the launcher's
+     * own loop that answers for the screen. */
+    if (!__atomic_load_n( (int *)&runtime_program_running, __ATOMIC_RELAXED )) return;
+    switch (focus_sleep_change( &runtime_focus, appletGetFocusState(), runtime_focus_holds_screen() ))
+    {
+    case FOCUS_STEP_RELEASE:
+        /* Before the freeze: the run's time is credited up to this moment and
+         * its books are in order, rather than left for the next launcher open. */
+        library_run_keep();
+        release_screen_buffers();
+        log_line( "[FOCUS] the console is going away; the screen was given back and the run's time written" );
+        break;
+    case FOCUS_STEP_REACQUIRE:
+        /* The framebuffer can be made again. A program's own OpenGL or Vulkan
+         * surface cannot: that is the game's device, and rebuilding it under a
+         * running program is the piece this does not do. */
+        if (!wine_nx_gl_window && !wine_nx_vulkan_window && wine_nx_fb_init())
+        {
+            focus_sleep_reacquired( &runtime_focus );
+            log_line( "[FOCUS] the console is back; the screen was taken again" );
+        }
+        else if (focus_sleep_reacquire_failed( &runtime_focus ))
+            log_line( "[FOCUS] the screen would not come back: the run is closed on the next return" );
+        else
+            log_line( "[FOCUS] the console is back; the screen has not come back yet (%u of %u)",
+                      runtime_focus.failures, FOCUS_SLEEP_RETRIES );
+        break;
+    case FOCUS_STEP_END_RUN:
+        log_line( "[FOCUS] the screen would not come back; the run is being closed" );
+        wine_nx_request_quit( "the screen did not come back after the console slept" );
+        break;
+    case FOCUS_STEP_NONE:
+        break;
+    }
+}
+
+static void runtime_focus_watch( void *arg )
+{
+    (void)arg;
+    while (!__atomic_load_n( (int *)&runtime_focus_quit, __ATOMIC_RELAXED ))
+    {
+        /* appletMainLoop() drains the applet's messages, and so it is what
+         * calls the hook. It answers false on an exit request, which nothing
+         * read while a program was running before this thread either. */
+        if (!appletMainLoop() && __atomic_load_n( (int *)&runtime_program_running, __ATOMIC_RELAXED ))
+            wine_nx_request_quit( "the console asked this program to close" );
+        svcSleepThread( 50000000LL );
+    }
+}
+
+static void start_focus_watch( void )
+{
+    Result rc;
+
+    if (runtime_focus_running) return;
+    focus_sleep_init( &runtime_focus, appletGetFocusState() );
+    /* SuspendHomeSleepNotify: the console still sleeps, but this program is told
+     * before it does. Without it the process is frozen wherever it stands. */
+    rc = appletSetFocusHandlingMode( AppletFocusHandlingMode_SuspendHomeSleepNotify );
+    log_line( "[FOCUS] the console's sleep is announced to this program: rc=0x%x", rc );
+    appletHook( &runtime_focus_cookie, runtime_focus_hook, NULL );
+    rc = threadCreate( &runtime_focus_thread, runtime_focus_watch, NULL, NULL, 0x8000, 0x38, -2 );
+    if (R_SUCCEEDED( rc )) rc = threadStart( &runtime_focus_thread );
+    if (R_FAILED( rc )) log_line( "[FOCUS] the thread that reads the console's messages did not start: rc=0x%x", rc );
+    else runtime_focus_running = 1;
+}
+
+static void stop_focus_watch( void )
+{
+    if (!runtime_focus_running) return;
+    runtime_focus_running = 0;
+    __atomic_store_n( (int *)&runtime_focus_quit, 1, __ATOMIC_RELAXED );
+    /* Bounded, and its stack is left lent out before the loader is asked -- the
+     * same rule every thread of this runtime's follows. */
+    if (R_SUCCEEDED( waitSingle( waiterForThread( &runtime_focus_thread ), 3000000000ULL ) ))
+        threadClose( &runtime_focus_thread );
+    else log_line( "[EXIT] the console's watch did not end; its stack stays lent out" );
+    appletUnhook( &runtime_focus_cookie );
+}
+#endif /* __SWITCH__ */
 
 /* The components setup takes the program's place when it has not run on this
  * card; the program goes to run-next.txt, which the runtime started again
@@ -5496,6 +5631,7 @@ static int return_to_launcher( void )
             game_fixes_finish( RUNTIME_DIR, runtime_program, wine_nx_program_exit_code, line, sizeof(line) ))
             log_line( "%s", line );
     }
+    __atomic_store_n( (int *)&runtime_program_running, 0, __ATOMIC_RELAXED );
     /* The run is over: what it was worth goes to the game's play time now, so
      * the launcher that comes next already has it. */
     library_run_end();
@@ -5768,6 +5904,9 @@ int main( int argc, char **argv )
     log_memory_map( "start-up" );
     log_line( "[MAP] start-up: %d regions the loader already had lent", loader_lent_count );
     wine_nx_runtime_network_init();
+    /* Before the launcher takes the screen: from here the console's sleep is
+     * announced, and a thread of this runtime's reads the messages. */
+    start_focus_watch();
     log_lent_memory( "the network" );
 
 #ifdef WINE_NX_USB_STORAGE
@@ -6038,6 +6177,7 @@ int main( int argc, char **argv )
 
     run_components_first( target, sizeof(target) );
     snprintf( runtime_program, sizeof(runtime_program), "%s", target );
+    __atomic_store_n( (int *)&runtime_program_running, 1, __ATOMIC_RELAXED );
 
     /* From here a thread may be asked to end; this one comes back here. */
     if (setjmp( quit_jump )) return return_to_launcher();
