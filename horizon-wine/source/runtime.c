@@ -6332,13 +6332,18 @@ int main( int argc, char **argv )
                 struct launcher_kv conf;
                 char voodoo_conf[520], game_ddraw[520], *slash;
                 int have_wrappers;
+                /* D3D12 exists here only while vkd3d-proton is in use for this
+                 * program: DXVK stops at D3D11, and a wrapper told to draw into
+                 * a D3D12 that is not there does not fall back. */
+                int have_d3d12 = runtime_d3d == LAUNCHER_D3D_DXVK_VKD3D;
+                const char *voodoo_api = launcher_voodoo_api_value( settings.voodoo_api, have_d3d12 );
 
                 snprintf( game_ddraw, sizeof(game_ddraw), "%s", target );
                 if ((slash = strrchr( game_ddraw, '/' )))
                     strcpy( slash + 1, "ddraw.dll" );
                 have_wrappers = voodoo_drop_directories() || (slash && !access( game_ddraw, F_OK ));
                 if (have_wrappers) voodoo_system_ddraw( 1 );
-                if ((conf.size = launcher_voodoo_config( &settings, conf.text, sizeof(conf.text) )))
+                if ((conf.size = launcher_voodoo_config( &settings, have_d3d12, conf.text, sizeof(conf.text) )))
                 {
                     snprintf( voodoo_conf, sizeof(voodoo_conf), "%s", target );
                     if ((slash = strrchr( voodoo_conf, '/' )) &&
@@ -6346,9 +6351,13 @@ int main( int argc, char **argv )
                     {
                         strcpy( slash + 1, "dgVoodoo.conf" );
                         if (launcher_kv_save( &conf, voodoo_conf ))
-                            log_line( "[VOODOO] %s written, scaling %s, API %s", voodoo_conf,
-                                      launcher_voodoo_scaling_values[settings.voodoo_scaling],
-                                      launcher_voodoo_api_values[settings.voodoo_api] );
+                            log_line( "[VOODOO] %s written, scaling %s, API %s%s", voodoo_conf,
+                                      launcher_voodoo_scaling_values[settings.voodoo_scaling], voodoo_api,
+                                      settings.voodoo_api == LAUNCHER_VOODOO_API_BEST
+                                          ? (have_d3d12 ? " (best available; vkd3d-proton is in use)"
+                                                        : " (best available here: no D3D12, so D3D11)")
+                                      : (launcher_voodoo_api_is_d3d12( voodoo_api ) && !have_d3d12
+                                             ? " (no vkd3d-proton is in use for this program)" : "") );
                         else
                             log_line( "[VOODOO] %s could not be written", voodoo_conf );
                     }

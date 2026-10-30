@@ -243,14 +243,16 @@ static void test_settings( const char *dir )
     settings.voodoo = 0;
     assert( launcher_settings_write( &kv, &settings ) && !strstr( kv.text, "voodoo=" ) );
     settings.voodoo = 1;
-    assert( launcher_voodoo_config( &settings, config, sizeof(config) ) );
+    /* No vkd3d-proton in use: D3D11 FL 10.1 is asked for outright, so it is
+     * written as it was chosen. */
+    assert( launcher_voodoo_config( &settings, 0, config, sizeof(config) ) );
     assert( strstr( config, "Version = 0x280\n" ) && strstr( config, "[General]\n" ) &&
             strstr( config, "OutputAPI = d3d11_fl10_1\n" ) && strstr( config, "ScalingMode = stretched\n" ) &&
             strstr( config, "[DirectX]\n" ) && strstr( config, "Resolution = 1024x768\n" ) &&
             strstr( config, "Antialiasing = 4x\n" ) && strstr( config, "VRAM = 1024\n" ) &&
             strstr( config, "dgVoodooWatermark = false\n" ) );
     settings.voodoo_api = LAUNCHER_VOODOO_API_COUNT;
-    assert( !launcher_voodoo_config( &settings, config, sizeof(config) ) );
+    assert( !launcher_voodoo_config( &settings, 0, config, sizeof(config) ) );
     settings.voodoo_api = 0;
     assert( launcher_settings_write( &kv, &settings ) && strstr( kv.text, "voodoo=1\n" ) );
 
@@ -592,6 +594,47 @@ static void test_panel_follow(void)
     }
 }
 
+/* dgVoodoo's output API. "Best available" is the newest this runtime can hand
+ * the wrapper, and D3D12 is not among them while no vkd3d-proton is in use --
+ * a wrapper pointed at a D3D12 that is not there calls through a device that
+ * was never made and takes the game with it. */
+static void test_voodoo_output_api(void)
+{
+    struct launcher_settings settings;
+    char config[1024];
+
+    memset( &settings, 0, sizeof(settings) );
+
+    /* Best available, with and without vkd3d: the conf says which it picked. */
+    assert( !strcmp( launcher_voodoo_api_value( LAUNCHER_VOODOO_API_BEST, 0 ), "d3d11_fl11_0" ) );
+    assert( !strcmp( launcher_voodoo_api_value( LAUNCHER_VOODOO_API_BEST, 1 ), "d3d12_fl12_0" ) );
+    assert( launcher_voodoo_config( &settings, 0, config, sizeof(config) ) );
+    assert( strstr( config, "OutputAPI = d3d11_fl11_0" ) );
+    assert( strstr( config, "ScalingMode = stretched_ar" ) );
+    assert( strstr( config, "dgVoodooWatermark = false" ) );
+    assert( launcher_voodoo_config( &settings, 1, config, sizeof(config) ) );
+    assert( strstr( config, "OutputAPI = d3d12_fl12_0" ) );
+
+    /* An explicit choice is the user's, and goes out as they made it -- even a
+     * D3D12 one without vkd3d, which the runtime says in the log. */
+    settings.voodoo_api = 4;  /* D3D12 FL 11.0 */
+    assert( !strcmp( launcher_voodoo_api_value( settings.voodoo_api, 0 ), "d3d12_fl11_0" ) );
+    assert( launcher_voodoo_config( &settings, 0, config, sizeof(config) ) );
+    assert( strstr( config, "OutputAPI = d3d12_fl11_0" ) );
+    settings.voodoo_api = 3;  /* D3D11 FL 11.0 */
+    assert( !strcmp( launcher_voodoo_api_value( settings.voodoo_api, 1 ), "d3d11_fl11_0" ) );
+    assert( !launcher_voodoo_api_is_d3d12( launcher_voodoo_api_value( settings.voodoo_api, 1 ) ) );
+    assert( launcher_voodoo_api_is_d3d12( "d3d12_fl12_0" ) );
+
+    /* A setting out of range is answered with something the wrapper reads, and
+     * refused outright by the conf. */
+    settings.voodoo_api = LAUNCHER_VOODOO_API_COUNT;
+    assert( !strcmp( launcher_voodoo_api_value( settings.voodoo_api, 0 ), "d3d11_fl11_0" ) );
+    assert( !launcher_voodoo_config( &settings, 0, config, sizeof(config) ) );
+    settings.voodoo_api = LAUNCHER_VOODOO_API_BEST;
+    assert( launcher_voodoo_config( &settings, 0, config, sizeof(config) ) );
+}
+
 int main(void)
 {
     char dir[] = "/tmp/launcher-settings.XXXXXX", command[64];
@@ -602,6 +645,7 @@ int main(void)
     test_write_refuses_what_it_cannot_say();
     test_copy();
     test_panel_follow();
+    test_voodoo_output_api();
     test_settings( dir );
     snprintf( command, sizeof(command), "rm -rf '%s'", dir );
     /* A test directory left behind is not a failure of what was tested, but the

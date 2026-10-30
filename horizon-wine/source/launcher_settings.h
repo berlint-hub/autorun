@@ -289,13 +289,36 @@ static const char *const launcher_voodoo_msaa_labels[] =
     { "Off", "App driven", "2x", "4x", "8x" };
 static const char *const launcher_voodoo_msaa_values[] =
     { "off", "appdriven", "2x", "4x", "8x" };
+/* Index 0 of the two tables above. */
+#define LAUNCHER_VOODOO_API_BEST 0
+
+/* "Best available" is the newest Direct3D this runtime can actually hand the
+ * wrapper, not the newest one the wrapper knows: DXVK answers for D3D9, 10 and
+ * 11, and nothing here answers for D3D12 unless vkd3d-proton is in use for the
+ * program. A wrapper pointed at a D3D12 that is not there does not fall back,
+ * it calls through a device that was never made: Dark Souls II with Voodoo on
+ * ended in 0xc0000005 inside C:\\dgVoodoo\\MS\\x86\\d3d9.dll with no frames
+ * drawn and no output DLL ever loaded. */
+static inline const char *launcher_voodoo_api_value( int api, int have_d3d12 )
+{
+    if (api < 0 || api >= LAUNCHER_VOODOO_API_COUNT) api = LAUNCHER_VOODOO_API_BEST;
+    if (api != LAUNCHER_VOODOO_API_BEST) return launcher_voodoo_api_values[api];
+    return have_d3d12 ? "d3d12_fl12_0" : "d3d11_fl11_0";
+}
+
+/* Whether an output API the wrapper is given is one of the D3D12 ones. */
+static inline int launcher_voodoo_api_is_d3d12( const char *value )
+{
+    return value && !strncmp( value, "d3d12", 5 );
+}
 
 /* The dgVoodoo.conf written beside the program: the 2.80 format the wrapper
  * migrates forward, only the keys the menu drives plus the two every guide
  * agrees on (VRAM, no watermark). Keys left out stay at the wrapper's own
  * defaults. The file is written before every start, so hand edits to it do
  * not survive. */
-static inline int launcher_voodoo_config( const struct launcher_settings *settings, char *out, size_t size )
+static inline int launcher_voodoo_config( const struct launcher_settings *settings, int have_d3d12,
+                                           char *out, size_t size )
 {
     int length;
 
@@ -315,7 +338,7 @@ static inline int launcher_voodoo_config( const struct launcher_settings *settin
                        "Antialiasing = %s\n"
                        "VRAM = 1024\n"
                        "dgVoodooWatermark = false\n",
-                       launcher_voodoo_api_values[settings->voodoo_api],
+                       launcher_voodoo_api_value( settings->voodoo_api, have_d3d12 ),
                        launcher_voodoo_scaling_values[settings->voodoo_scaling],
                        launcher_voodoo_resolution_values[settings->voodoo_resolution],
                        launcher_voodoo_msaa_values[settings->voodoo_msaa] );
