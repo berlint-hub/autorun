@@ -911,3 +911,75 @@ exactly the piece this change does not do. If it reaches 3, the run closes with
 still show a dead picture for that game's own surface — but it should no longer
 be a system the user has to power off; the run's play time is banked, and the
 run's report is written. Not verified on hardware.
+
+## Voodoo (dgVoodoo2): "Best available" pointed at a D3D12 that is not here
+
+*"nejede voodoo"* — Dark Souls II with the Voodoo switch on.
+
+### What the logs showed (logs-2026-10-30-voodoo/)
+
+Seven runs of the evening. `dgVoodoo` appears in **only two** of them — the
+`22:07:04` and `22:07:41` runs — and both died identically:
+
+```
+[NXLDR] load name=C:\dgVoodoo\MS\x86\d3d9.dll status=00000000 base=7F5D0000
+[EXC] fault 1 to the program: tid=0004 code=0xc0000005 reading 0x0 ... x86=0x7b82786e
+[LIFECYCLE] final tid=4 code=c0000005 running=1 ...
+```
+`[PROGRESS] 25s ... frames=0`. No `d3d11.dll`, no `d3d12.dll`, no `dxgi.dll` is
+loaded anywhere in either log. `vkd3d` appears in **none** of the seven.
+
+The `preceding=` bytes the runtime printed before the return address
+(`c074198b7dd885ff74128b078bcfff10`) disassemble, from `8b`, to
+
+```
+8b 7d d8   mov edi,[ebp-28]
+85 ff      test edi,edi
+74 12      jz +0x12
+8b 07      mov eax,[edi]
+8b cf      mov ecx,edi
+ff 10      call dword ptr [eax]
+```
+
+A pointer that **was** checked for null, whose first member was never set. The
+wrapper calls through a device it never got.
+
+### The cause
+
+`launcher_voodoo_config()` wrote `OutputAPI = bestavailable` literally.
+`bestavailable` is newest-first, and the newest dgVoodoo2 knows is **D3D12**.
+Nothing here answers for D3D12: DXVK stops at D3D11, and vkd3d-proton is not
+installed for this program. So the wrapper reached for a device that does not
+exist and called through it.
+
+The tokens themselves are correct — `OutputAPI` really does accept
+`bestavailable`, `d3d11_fl10_0`, `d3d11_fl10_1`, `d3d11_fl11_0`,
+`d3d12_fl11_0`, `d3d12_fl12_0` (and `d3d11warp`), and `Version = 0x28x` is the
+current conf family. It was what `bestavailable` *resolves to* that was wrong.
+
+### The fix (`afb37529`)
+
+`launcher_voodoo_api_value( api, have_d3d12 )` in `launcher_settings.h`:
+`bestavailable` now resolves here — `d3d12_fl12_0` only while vkd3d-proton is
+in use for the program (`runtime_d3d == LAUNCHER_D3D_DXVK_VKD3D`), otherwise
+`d3d11_fl11_0`, which is the chain the menu already describes (wrapper → DXVK
+→ Vulkan → panel). An explicit D3D12 choice with no vkd3d is still written as
+asked, but the log says so. New `test_voodoo_output_api` in
+`tests/launcher_settings.c`, passing under `cc` and ASan/UBSan.
+
+**What to look for next run:** `[VOODOO] ... API d3d11_fl11_0 (best available
+here: no D3D12, so D3D11)`. If it still crashes, the cause is not the output
+API — the two live alternatives are the `Version = 0x280` we write against the
+wrapper build actually dropped at `C:\dgVoodoo`, and dgVoodoo2's own init under
+FEX. Neither can be settled without hardware.
+
+### Side observations from the same logs, not acted on
+
+- The `21:59:58` run has **no** dgVoodoo and still managed `frames=10` at 85 s
+  and no outcome section — that is a different problem, and it is the run whose
+  log ends in the middle of a stall dump.
+- DXVK moved between the evening's runs: `dxvk-sarek 1.14.1` at 19:30 and
+  19:51 (the two runs that worked), `dxvk 3.1.1` from 19:36 on.
+- No `[FOCUS]` line in any log: the sleep/wake change is not in this build yet.
+- `[THREAD] create failed rc=0x10801 threads=96/96` at start-up in the 22:07
+  runs — the placeholder threads hit the ceiling before the game started.
