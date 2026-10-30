@@ -584,3 +584,138 @@ stops at 2 GB however much the console has, so free RAM cannot make the game
 hold more. It can only go to what the runtime keeps in it -- which is the card
 cache (`cache_mb=<held>/<may hold>`, now up to 512 MB) and the shader caches on
 the card.
+
+## The two Dark Souls II runs of 2026-10-30: what their logs say
+
+Two runs of *Dark Souls II: Crown of the Ivory King*, read from the logs the
+user attached — `DarkSoulsII_20261030-193021.log` (417 s, no outcome) and
+`DarkSoulsII_20261030-193618.log` (211 s, ended by the quit chord). Both:
+32-bit program, FEX `-opt`, 39-bit forwarder, `memory=3285 MB`,
+`[IMAGE] the image is not Large Address Aware, so 2 GB`.
+
+### They are not the same run twice: different DXVK
+
+- 19:30:21 — `[DXVK] x86 payload C:\dxvk-sarek\versions\1.14.1` (DXVK-Sarek 1.14.1)
+- 19:36:18 — `[DXVK] x86 payload C:\dxvk\versions\3.1.1` (DXVK 3.1.1)
+
+**The Tegra defaults this branch writes do reach Sarek.** Run 1's effective
+configuration prints `d3d11.disableMsaa = True`, `dxvk.framePace = low-latency`,
+`d3d9.numBackBuffers = 2`, `dxgi.numBackBuffers = 2`, `d3d9.maxFrameLatency = 2`,
+`dxgi.maxFrameLatency = 2`, `d3d9.samplerAnisotropy = 4`,
+`d3d11.samplerAnisotropy = 4`. Those were dead on the console before: the
+fork's `isTegraX1()` wants deviceID `0x1380` and NVK reports `0x0fe0`. Two
+values the player has set win over the profile, which is the design:
+`dxvk.numShaderCompilerThreads = 4` (Tegra says 3) and `dxvk.maxMemoryBudget = 0`
+(Tegra says 2048). Run 2, on plain DXVK 3.1.1, gets none of them — correct, the
+profile is Sarek 1.14's.
+
+### 45 fps is the cap, not the ceiling
+
+Both runs print `dxvk.maxFrameRate = 45`, `dxgi.maxFrameRate = 45`,
+`d3d9.maxFrameRate = 45`. The 45 fps plateau is the frame limit working; the
+number worth reading is how far under it a run falls.
+
+- run 2 (3.1.1): first frame at ~49 s, 45 fps from ~90 s to ~130 s, then
+  6–28 fps for the rest of the run.
+- run 1 (Sarek): first frame at ~135 s, 45 fps from ~176 s to ~256 s, then
+  8–28 fps.
+
+Run 1 reached the same amount of work (`syscalls=6336`, `sd_reads≈590`,
+`cache_hits≈1340`) at **115 s** that run 2 reached at **25 s**. The 90 s is
+wall time, not work — a different DXVK payload and colder caches are the
+likely reason; nothing in the logs proves which.
+
+### Quitting the game closes Autorun: 36 code mappings that would not go
+
+This is the one thing a player feels. Run 2 ends:
+
+```
+[QUIT] 12802 code mappings given back, 36 refused
+[QUIT] 0 threads and 39 lent regions left, 37 of them ours
+[EXIT] pages are still lent out; the loader must not take the process back
+[EXIT] closing this program; the console goes back to the menu
+```
+
+The 39 regions are **439 MB** of heap — 19 x 16 MB plus 9 x 2432 KB and the
+rest — which is the whole 460 MB code arena (`[MEMPOOL] arena_mb=460`). They
+read `perm=0 attr=1 borrowed`: `svcMapProcessCodeMemory` reprotects its source
+to `Perm_None` and marks it `MemAttr_IsBorrowed`, and the 36 mappings whose
+unmap was refused keep every arena one of their pages lives in. The loader
+then refuses to reset the process, and the console goes to the menu instead of
+back to the launcher. It is the fail-closed guard working; the cost is a full
+restart of Autorun after every run.
+
+**The log cannot say why, and that is a bug in the log, not in the unmap.**
+`unmap_code_memory_range()` (`dlls/ntdll/unix/horizon.c`) does:
+
+```c
+rc = svcUnmapProcessCodeMemory( envGetOwnProcessHandle(), (u64)addr, (u64)source, size );
+if (R_FAILED(rc))
+{
+    if (releasing_everything) return -1;      /* no reason, no address, no count */
+    ... horizon_trace( "[HMAP] unmap_code failed ..." );
+```
+
+`releasing_everything` is set by `horizon_release_code_mappings()` itself, so
+exactly the failures that decide whether Autorun can go back to the launcher
+are the ones that print nothing. Both logs contain **zero** `[HMAP]` lines. The
+same silence covers `horizon_memfile_alias()` for the section-view loop above it.
+
+### Run 1 never came back at all
+
+It has no `[QUIT]` and no `[EXIT]` lines: the log stops at 417 s in the middle
+of `[EXC]` traffic, and its report carries no outcome. Either the console was
+forced off or the process died. Nothing in the log distinguishes the two — a
+run that ends without the runtime's own exit path says so nowhere.
+
+### Smaller things the same logs show
+
+- **`[EXC]` flood, both runs (893 and 661 lines).** Every one is
+  `tid=0004 … code=0xc0000005` at a fixed `pc=0x7fffabb0a8`, reading or writing
+  around `0x7ffe…`, folded 1,2,3,…,2048. They are forwarded *to the program*
+  and it keeps running, so these are deliveries its own handlers take; nothing
+  here says they cost anything.
+- **`[INPUT] the program sets the cursor …` x200 in run 2.** The line carries
+  coordinates, so `log_repeat` never folds it. 200 lines of one line's worth
+  of information.
+- **`[THREAD] create failed rc=0x10801 threads=96/96`** and `[TLS] 90
+  placeholder threads` at every start-up, both runs: 96 threads are created to
+  reserve thread-local pages and the 97th is refused.
+- **`[QUIT] 61 of the program's 60 threads parked after 250 ms`** — 61 of 60.
+- **The card cache's ceiling is not what binds.** `cache_mb=17/512` early,
+  `28/268` at the end: the ceiling moves 512 → 228 MB as the game's heap grows
+  (the new policy, and the reclaim, both working), but only 25–28 MB is ever
+  held. Dark Souls II reads a few large archives, and the per-file cap —
+  24 chunks of 128 KB, 3 MB a file — is what stops it.
+- **The picture is fine.** `[NXVK] swapchain 960x540 … scaled into 1280x720`;
+  readbacks go from `12 of 14400 samples lit` (black) through
+  `2157 lit, 538 white` to `14391 of 14400 lit`. No lost frame, no late
+  `[STALL]` — the watcher fired only during loading, three reports, and stopped
+  once frames came. `[NXGL] the first context made current is NV12B, OpenGL 4.3
+  (Compatibility Profile) Mesa 26.2.3` and `it is the renderer this program
+  asked for (native NVC0)`: the new renderer check answers.
+- 72 threads over 1.65–2.73 of 3 cores; the main thread alone holds 74–91 % of
+  one core (`[THREADS] one thread carries the program`), the rest is
+  `dxvk-cs`, `DrawCommandThread`, `RPCSystemThread` and the `dxvk-shader-*`
+  pool. ~22 000 syscalls a second, most of them `NtQueryPerformanceCounter`
+  (0x31), `NtQuerySystemTime` (0x5a) and `NtWaitForSingleObject` (0x4).
+- The launcher session in `autorun_runtime.log` ends `closed without starting a
+  program`, and carries `[FIXES] check in 0 ms: The DLL repository returned a
+  manifest or file that is not valid.; the published index was not read` — the
+  card's own index was read (5 fixes, serial 6), the online check was not.
+  `stdout.txt`, `stderr.txt` and `stdin.txt` are empty; `driver.txt` is three
+  lines of `found a slow EGL config`.
+
+### What to do next, from these logs
+
+1. **Log the refusals.** Make `unmap_code_memory_range()` and the
+   `horizon_memfile_alias()` loop print during `releasing_everything` too —
+   the result code, the address, the source and the size for the first few,
+   then a folded count. Without it the next run says "36 refused" and nothing
+   else, and that is the number that decides whether the launcher comes back.
+2. **Then the guard's cost**: 36 refused unmaps hold 439 MB of the code arena
+   hostage. Whether they can be unmapped later, or the arena given back some
+   other way, is a second question and needs the first answer.
+3. A run that ends without the runtime's exit path should say so, so a report
+   with no outcome stops being ambiguous between "you closed it" and "it died".
+4. Fold `[INPUT] the program sets the cursor …` by count, not by coordinates.

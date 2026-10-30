@@ -10,3 +10,4 @@ debug
 
 # The host tests write their screenshots and failure notes here.
 shots/
+/logs-*/
