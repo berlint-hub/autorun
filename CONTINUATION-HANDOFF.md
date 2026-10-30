@@ -983,3 +983,93 @@ FEX. Neither can be settled without hardware.
 - No `[FOCUS]` line in any log: the sleep/wake change is not in this build yet.
 - `[THREAD] create failed rc=0x10801 threads=96/96` at start-up in the 22:07
   runs — the placeholder threads hit the ceiling before the game started.
+
+## Riddick: Dark Athena — OpenGL titul, první swap se nevrátil
+
+`logs-2026-10-30-athena/DarkAthena_20261030-235045.log` (556 řádek, bez
+outcome sekce — běh byl ukončen násilně; poslední řádek logu je useklý
+uprostřed `[LOG`).
+
+### Co je jisté
+
+- **DXVK se nikdy nenačetl**: `grep -c '^info:' log` = **0**. Jediná zmínka je
+  příprava cesty (`[DXVK] x86 payload C:\dxvk-sarek\versions\1.14.1`). Hra je
+  čisté OpenGL: `[NXLDR] load name=RndrGL.DLL base=06070000`,
+  `opengl32.dll base=4E630000`. Renderer `NV12B, OpenGL 4.3 (Compatibility
+  Profile) Mesa 26.2.3`, `MESA_SWITCH_GL_DRIVER=nvc0`. Žádné `dxvk.*`
+  nastavení na tuhle hru nemá vliv, tečka.
+- **První `wglSwapBuffers` se nevrátil.** Sled v `dlls/win32u/opengl.c:3082`
+  je 8 stadí; log má poslední `[NXGL] WGL swap #1: about to call the drawable's
+  EGL swap` (stadium 5) a **chybí stadium 6 (`drawable's EGL swap returned`) a
+  7 (`wglSwapBuffers is returning`)**. Zaseknutí je tedy uvnitř
+  `opengl_drawable_swap()` → `nx_drawable_swap()`, až poté, co
+  `opengl_drawable_flush()` vrátil.
+- `[STALL] the screen's window: 3 slots registered, 800x600 format 0,
+  connected, a buffer is out and has not come back`
+- `[STALL] no new frame ... presented 5 times in all (0 by the program's
+  OpenGL, the rest by the compositor)` — hra sama neprezentovala ani jednou.
+- **Heap**: 45 s → `heap_used_mb=462 heap_free_mb=216`; 55 s → `899 / 20`;
+  85 s → `899 / 20`. Mezi 45. a 55. vteřinou narostl o 437 MB a tam to
+  ztuhlo — `frames=5` zůstalo stejné od 55 s do 85 s.
+
+### Kde se liším od analýzy, která přišla s logy
+
+1. **Log nekončí u swapu.** Za řádkem `about to call the drawable's EGL swap`
+   následuje ještě 130+ řádků (EXC záplava, dva PROGRESS, tři stall reporty).
+   Co končí, je *trace swapu*, na stadiu 5 z 8. Právě absence stadií 6 a 7 je
+   ten důkaz — ne to, že by log skončil.
+2. **Adresní prostor je 2 GB, ne 1 GiB**: `[INIT] processors=3 memory=2048 MB
+   used=208 MB (32-bit address space: the most this run can hold)`. Heap je
+   region ~919 MB a je z 98 % plný; zbytek prostoru nezmizel. Rozdíl je
+   důležitý pro to, jestli má runtime vůbec kam heap zvětšit.
+3. **Hlavní thread nečeká na GPU, ale točí se na zámku.** Oba stall dumpy
+   (od sebe 30 s):
+   `thread 4w at ntdll.dll!RtlEnterCriticalSection+0x4 ...
+   NtQueryPerformanceCounter(0x31) x18 | inside wglSwapBuffers <
+   ntdll.dll!RtlLookupFunctionEntry+0x30 < runtime+0x1052528 <
+   runtime+0xf9eaac < ... | also at ntdll.dll!RtlLeaveCriticalSection+0x44`
+   Druhý dump má `DbgUserBreakPoint+0x534` a `NtQueryPerformanceCounter(0x31)`
+   bez počítadla. Různé offsety ve dvou dumpu = thread se **pohybuje**, nejde o
+   zaparkování na fence. `Enter`/`Leave` critical section na jednom stacku =
+   retry smyčka, ne deadlock. **To naopak posiluje větev OOM**: ovladač, který
+   nedostane buffer pro swap, vrátí chybu a něco to zkouší znovu bez
+   backing-offu — přesně to dává 99,7 % jádra a `NtQueryPerformanceCounter`.
+4. **Třetí věc, která v analýze chybí**: trvalá bouře `0xc0000005` na
+   **tid 0034** (desítky až stovky, log je skládá jako `x6 more like`,
+   `x7 more like`). Čte se z hostovských adres `0xf75xxxxx` (těsně pod stropem
+   2GB prostoru) z JIT kódu (`pc=0x236a…`, `0x22ff…`) a jednou zapisuje
+   (`writing 0xf75a4100 pc=0xff90b2d0`). Ten thread má 7,8 % jádra, takže
+   neběží naprázdno — je to druhá velká cena, a je to kandidát na to, kdo drží
+   zámek, na kterém hlavní thread točí.
+
+### Co by řekl build z aktuálního headu
+
+Build, ze kterého je tento log, má řádky `WGL swap #%u` (stadium), ale **nemá**
+řádky, které `nx_drawable_swap()` přidává (`dlls/win32u/winnx_opengl.c:1086`):
+
+```
+[NXGL] swap #1 began on the program's 800x600 surface
+[NXGL] the window at the first swap: <slot state>
+```
+
+Ty padnou až za `nx_osk_draw()` / `nx_cursor_draw()` /
+`nx_drawable_screenshot()`, těsně před samotné `eglSwapBuffers`. **Jediná
+řádka rozliší** „`eglSwapBuffers` se nevrátil" od „nikdy jsme se k němu
+nedostali". To je nejlevnější další krok: přeložit z headu a pustit to znovu.
+
+### Rozlišovací experiment (OOM vs. handover)
+
+Ten navržený platí, jen doplňuji: v tomto běhu zamrzlo při `heap_free_mb=20`,
+což je **jeden** bod, ne důkaz. Sleduj při dalším běhu jednak `heap_free_mb`
+v momentu ztuhnutí, jednak jestli se offset spinu mezi dvěma stall dumpy
+posouvá (pohyb = smyčka, shoda = parkování).
+
+### Vedlejší nálezy
+
+- `[THREAD] create failed rc=0x10801 threads=96/96` — strop placeholder
+  vláken, stejný jako v bězích 22:07.
+- `[IMAGE] relocs=0x0/0x0 (fixed-address image)`, jiný forwarder title
+  (`01eca0f18344c000`, DS2 mělo `01b19bbad533e000`).
+- `[FEX] TSO=0 multiblock=1 maxinst=1000`.
+- SD cache zůstala na 32 MB, protože se počítá z volného heapu; 849 MB z karty
+  se četlo 12,4 s (`sd_reads=2016 sd_ms=12443`). Důsledek, ne příčina.
