@@ -1073,3 +1073,87 @@ posouvá (pohyb = smyčka, shoda = parkování).
 - `[FEX] TSO=0 multiblock=1 maxinst=1000`.
 - SD cache zůstala na 32 MB, protože se počítá z volného heapu; 849 MB z karty
   se četlo 12,4 s (`sd_reads=2016 sd_ms=12443`). Důsledek, ne příčina.
+
+## Dark Athena, druhý běh: není to OOM, je to swap
+
+`logs-2026-10-31-athena/DarkAthena_20261031-002304.log` (571 řádek). Stejná
+hra, stejné nastavení, stejný build (oba běhy **nemají** řádky `swap #%u began`
+z headu).
+
+### Rozlišovací experiment dopadl
+
+| | běh 1 (23:50:45) | běh 2 (00:23:04) |
+|---|---|---|
+| `heap_used_mb` v momentu ztuhnutí | **899** | **899** |
+| `heap_free_mb` tamtéž | **20** | **966** |
+| velikost heap regionu | 919 MB | 1865 MB |
+| poslední stadium swapu | 5 z 8 | 5 z 8 |
+| prezentováno (program / compositor) | 0 / 5 | 0 / 5 |
+| okno | 3 sloty, 800x600, buffer venku | totéž |
+
+Stejné `heap_used_mb` (899 MB je prostě kolik ta hra zabírá), ale **`heap_free`
+20 MB vs 966 MB** — a zamrzlo to v **identickém** místě. S polovinou haldy
+volné to ztuhlo úplně stejně. **Není to OOM.** Vyčerpání haldy v prvním běhu
+byla shoda: tenkrát mohl heap narůst jen na 919 MB, podruhé na 1865 MB. Proč
+se liší, nevíme — adresní prostor je v obou případech 2 GB
+(`memory=2048 MB`), liší se only `[VA] early guest reservations: ... largest
+332 MB` vs `454 MB`.
+
+Běh 2 navíc zůstal zaseklý od 65 s do 115 s (PROGRESS na 115 s je pořád
+`frames=5`). Stabilní deadlock, ne pomalý postup.
+
+### Kde přesně, z kódu
+
+`nx_drawable_swap()` (`dlls/win32u/winnx_opengl.c:1025`) má tuhle posloupnost:
+
+1. bez obrazovky → `return TRUE` (pbuffer)
+2. Vulkan má obrazovku → `return TRUE`
+3. `eglQuerySurface(WIDTH/HEIGHT)` → `wine_nx_present_fit_stretched()`
+4. `nx_osk_draw()` — vrací se hned, když není OSK/overlay
+5. `nx_cursor_draw()` — vrací se hned, když `wine_nx_cursor_panel()` nechce
+6. `nx_drawable_screenshot()` — vrací se hned, když nikdo nežádá screenshot
+7. `funcs->p_eglSwapBuffers( egl->display, base->surface )`  ← **řádek 1108**
+
+V logu obou běhů je řádka
+
+```
+[NXGL] the Scaling setting does not reach an OpenGL surface: the display stretches
+       its 800x600 picture over the 1280x720 panel, and input maps through that
+```
+
+a ta padá **z `wine_nx_present_fit_stretched()`** (`runtime.c:1382`), tj. z bodu
+3. To znamená, že v okamžiku zaseknutí:
+
+- drawable **má** obrazovku (jinak by bod 1 vrátil),
+- Vulkan ji nemá (jinak by bod 2 vrátil),
+- **`eglQuerySurface` odpověděl 800×600** — EGL surface žije a ovladač na dotazy
+  odpovídá,
+- body 4–6 jsou za normálních okolností prázdné (OSK/overlay neviditelný,
+  žádný screenshot; kurzor viz `[INPUT] the program's cursor: shown 1, count 0,
+  handle 0x0`).
+
+Zbývá tedy **bod 7: `eglSwapBuffers` na okně, které hlásí *a buffer is out and
+has not come back***. A ten buffer venku je compositorův — stall říká
+„presented 5 times in all (0 by the program's OpenGL, the rest by the
+compositor)".
+
+**Shoda s tím, co se dělo předtím:** `wglCreateContext` ×8, `wglMakeCurrent`
+×16 na jednom okně, a `nx_surface_create()` má větev *„previous surface may
+hold the screen: let it go first"* → `opengl_drawable_release(previous)`. Když
+k release dojde ve chvíli, kdy má compositor buffer venku, další swap čeká na
+buffer, který se nevrátí.
+
+### Co ještě chybí a jak to získat
+
+Head (`winnx_opengl.c:1086`) přidává před bod 7:
+
+```
+[NXGL] swap #1 began on the program's 800x600 surface
+[NXGL] the window at the first swap: <stav slotů>
+```
+
+Druhá řádka (`wine_nx_gl_window_state`) řekne stav slotů **předtím, než se
+ovladače na něco zeptáme**. Když tam bude „a buffer is out", je buffer ztracený
+ještě před prvním prezentem programu → chyba je v release/handoveru a oprava je
+nepouštět předchozí drawable, dokud je buffer venku. **Jeden běh z headu to
+potvrdí.**
