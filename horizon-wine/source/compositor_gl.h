@@ -96,6 +96,8 @@ struct compositor_gl
     GLuint program, vertex_array, vertex_buffer;
     GLint rect_uniform, src_uniform, window_uniform, image_uniform;
     struct compositor_gl_texture cursor;
+    int row_length;   /* GL_UNPACK_ROW_LENGTH as it stands, so an upload that
+                       * needs the default does not walk back through it */
     char error[256];  /* why compositor_gl_init failed */
 };
 

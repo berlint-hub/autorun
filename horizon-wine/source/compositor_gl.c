@@ -92,6 +92,19 @@ int compositor_gl_init( struct compositor_gl *comp, const struct compositor_gl_f
     comp->window_uniform = gl->GetUniformLocation( comp->program, "window" );
     comp->image_uniform = gl->GetUniformLocation( comp->program, "image" );
 
+    /* Everything the frames need and nothing ever changes: the byte alignment
+     * of an upload, packed rows until an upload says otherwise, the colour the
+     * screen is cleared to, and the one texture unit the sampler reads. Set
+     * here rather than per upload or per frame, where they would be driver
+     * work for the same state every time. */
+    gl->PixelStorei( GL_UNPACK_ALIGNMENT, 4 );
+    gl->PixelStorei( GL_UNPACK_ROW_LENGTH, 0 );
+    comp->row_length = 0;
+    gl->ClearColor( 0.0f, 0.0f, 0.0f, 1.0f );
+    gl->ActiveTexture( GL_TEXTURE0 );
+    gl->UseProgram( comp->program );
+    gl->Uniform1i( comp->image_uniform, 0 );
+
     gl->GenVertexArrays( 1, &comp->vertex_array );
     gl->BindVertexArray( comp->vertex_array );
     gl->GenBuffers( 1, &comp->vertex_buffer );
@@ -165,11 +178,21 @@ void compositor_gl_upload( struct compositor_gl *comp, struct compositor_gl_text
     if (bottom > height) bottom = height;
     if (left >= right || top >= bottom) return;
 
-    gl->PixelStorei( GL_UNPACK_ALIGNMENT, 4 );
-    gl->PixelStorei( GL_UNPACK_ROW_LENGTH, stride );
+    /* A rectangle as wide as the stride has its rows next to each other, which
+     * is what the default row length says: only a range of columns needs the
+     * stride named, and only a change of it needs a call. */
+    if (stride != right - left && comp->row_length != stride)
+    {
+        gl->PixelStorei( GL_UNPACK_ROW_LENGTH, stride );
+        comp->row_length = stride;
+    }
+    else if (stride == right - left && comp->row_length)
+    {
+        gl->PixelStorei( GL_UNPACK_ROW_LENGTH, 0 );
+        comp->row_length = 0;
+    }
     gl->TexSubImage2D( GL_TEXTURE_2D, 0, left, top, right - left, bottom - top, GL_RGBA, GL_UNSIGNED_BYTE,
                        pixels + (size_t)top * stride + left );
-    gl->PixelStorei( GL_UNPACK_ROW_LENGTH, 0 );
 }
 
 void compositor_gl_release( struct compositor_gl *comp, struct compositor_gl_texture *texture )
@@ -201,13 +224,13 @@ void compositor_gl_draw( struct compositor_gl *comp, const struct compositor_gl_
     const struct compositor_gl_funcs *gl = comp->gl;
     int i;
 
+    /* The clear colour, the texture unit and the sampler's value are init's;
+     * a frame leaves them alone. The viewport can follow a resized screen and
+     * the program can be another one, so both are said here. */
     gl->Viewport( 0, 0, comp->screen_width, comp->screen_height );
-    gl->ClearColor( 0.0f, 0.0f, 0.0f, 1.0f );
     gl->Clear( GL_COLOR_BUFFER_BIT );
     gl->UseProgram( comp->program );
     gl->BindVertexArray( comp->vertex_array );
-    gl->ActiveTexture( GL_TEXTURE0 );
-    gl->Uniform1i( comp->image_uniform, 0 );
 
     gl->Disable( GL_BLEND );
     gl->Uniform1i( comp->window_uniform, 1 );
