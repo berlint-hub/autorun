@@ -13,6 +13,9 @@ test_support.need_tool('cmake', 'the check builds FEXCore first')
 horizon_wine = root / "horizon-wine"
 source = Path(os.environ.get("WINE_NX_FEX_DIR", horizon_wine / "toolchains/fex-2609"))
 build = Path(os.environ.get("WINE_NX_FEX_CORE_BUILD_DIR", horizon_wine / "toolchains/build-fex-2609-core-check"))
+# cmake alone is not the dependency: the library this links against is a FEX
+# tree that horizon-wine/check-fex-core.sh configured and built first.
+test_support.path(build / "CMakeCache.txt", "run sh horizon-wine/check-fex-core.sh first")
 subprocess.run(["cmake", "--build", str(build), "--target", "FEXCore", "JemallocDummy", "Common", "-j", "4"], check=True)
 definitions = re.findall(r"^#define (CPU_FEATURE_\w+) (0x[0-9a-fA-F]+)",
                          (source / "Source/Windows/include/winternl.h").read_text(), re.M)

@@ -22,6 +22,7 @@ fixture = r'''
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>  /* usleep */
 typedef int BOOL, LONG;
 typedef unsigned int UINT, DWORD;
 typedef uintptr_t HWND, ULONG_PTR;

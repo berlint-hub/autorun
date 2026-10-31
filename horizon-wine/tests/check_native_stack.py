@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Exercise native stack binding with the production Horizon helper."""
+import os
 from pathlib import Path
 import subprocess
 import tempfile
@@ -60,4 +61,10 @@ with tempfile.TemporaryDirectory(prefix='wine-nx-native-stack-') as temp:
     src, exe = Path(temp) / 'test.c', Path(temp) / 'test'
     src.write_text(fixture + source[start:end] + tests)
     subprocess.run([test_support.compiler(), '-fsanitize=address,undefined', str(src), '-o', str(exe)], check=True)
-    subprocess.run([str(exe)], check=True)
+    # horizon_bind_native_stack() reads the current stack position as the
+    # address of one of its own locals, and the fixture models the stack the
+    # same way. clang's ASan on Linux sends locals to a fake stack by default
+    # (detect_stack_use_after_return), which is not the real stack: off here,
+    # for that reason, as it is off on macOS where the feature does not exist.
+    environment = dict(os.environ, ASAN_OPTIONS='detect_stack_use_after_return=0:detect_leaks=1')
+    subprocess.run([str(exe)], check=True, env=environment)

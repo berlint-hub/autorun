@@ -14,6 +14,22 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--mingw-include", help="MinGW CRT headers for the Windows ABI checks")
 options = parser.parse_args()
 
+# Wine's headers reach the C library through winnt.h, so a target without one
+# cannot be compiled for at all: clang on macOS carries the MinGW headers, a
+# Linux one does not until --mingw-include names them.
+def cross_headers( target : str ) -> bool:
+    args = [test_support.compiler(), '--target=' + target, '-ffreestanding', '-E', '-x', 'c', '-']
+    if options.mingw_include:
+        args[1:1] = ['-isystem', options.mingw_include]
+    done = subprocess.run(args, input='#include <ctype.h>\n', text=True,
+                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    return done.returncode == 0
+
+for target in ('i686-w64-windows-gnu', 'x86_64-w64-windows-gnu'):
+    if not cross_headers(target):
+        test_support.skip(f'needs the MinGW headers for --target={target} '
+                          '(pass --mingw-include, or use a clang that carries them)')
+
 with tempfile.TemporaryDirectory(prefix="horizon-nsi-") as directory:
     directory = Path(directory)
     layouts = []
