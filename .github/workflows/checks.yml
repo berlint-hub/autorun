@@ -60,17 +60,20 @@ jobs:
       - name: Install clang
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends clang
 
-      # Every failure is its own annotation naming the file, so it is findable
-      # without the log; a run goes on to the other tests either way.
+      # Every failure is its own annotation naming the file and carrying the
+      # last of its output, so it is findable without the log; a run goes on to
+      # the other tests either way.
       - name: Host tests
         run: |
           failed=0
           for test in horizon-wine/tests/check_*.py; do
               echo "::group::$test"
-              python3 "$test" || {
+              out=$(python3 "$test" 2>&1) || {
                   failed=1
-                  echo "::error file=$test,title=Check failed::$test"
+                  tail=$(printf '%s' "$out" | tail -n 20 | tr '\n' '\v' | sed 's/%/%25/g; s/\v/%0A/g' | cut -c1-3000)
+                  echo "::error file=$test,title=Check failed::$test%0A$tail"
               }
+              printf '%s\n' "$out"
               echo "::endgroup::"
           done
           exit $failed
