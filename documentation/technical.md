@@ -439,6 +439,15 @@ runtime; the full package now ships the Mesa 26 one.
   `fex-cache=1` from that program's settings as it falls back. This keeps the
   cache off for later starts too, until the owner deliberately re-enables it
   (`fex_cache_marker_*`).
+- **A start that keeps dying.** A program whose starts end on an NT status -- an
+  unhandled exception, which Wine leaves as the exit code -- has those starts
+  counted beside its settings (`source/start_guard.h`,
+  `program-settings/<hash>.start.txt`). After two in a row, the next start
+  begins with the Compatibility fast paths -- standard synchronization, no fast
+  file loading, no 4-core split -- for that start only: what the card holds is
+  not rewritten, the translator is left alone, and one clean exit puts the count
+  back to nothing (`[STABILITY] ...` in the log). The line also lands in the run
+  report a player sends, so "it crashed twice and then ran" reads as one story.
 - **Two environments, one per kind of library.** The translator's switches
   (`FEX_*`) are read by FEX's own Windows CRT, which takes them from the
   process environment block (`Source/Windows/Common/CRT/Misc.cpp` reads

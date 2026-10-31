@@ -63,6 +63,11 @@ CC="$cc" python3 "$root/horizon-wine/tests/check_cursor_mapping.py"
 # And that the runtime still names that directory to it: the translator's cache
 # is where fex_cache.h says the launcher measures it, both halves of it.
 python3 "$root/horizon-wine/tests/check_sd_cache_exclusion.py"
+# A program whose starts in a row did not come back begins the next one with the
+# Compatibility fast paths, and a clean exit puts the count back to nothing.
+"$cc" $flags "$root/horizon-wine/tests/start_guard.c" -o "$build/start_guard"
+"$build/start_guard"
+python3 "$root/horizon-wine/tests/check_start_guard.py"
 "$cc" $flags "$root/horizon-wine/tests/box64_code_arena.c" -o "$build/box64_code_arena"
 "$build/box64_code_arena"
 "$cc" $flags "$root/horizon-wine/tests/horizon_registry.c" -o "$build/registry"

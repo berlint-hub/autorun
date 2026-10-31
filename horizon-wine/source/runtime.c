@@ -38,6 +38,8 @@
 #include "launcher_catalog.h"
 #include "launcher_list.h"
 #include "launcher_settings.h"
+#include "launcher_preset.h"
+#include "start_guard.h"
 #include "gears_startup.h"
 #include "fallout_startup.h"
 #include "game_settings.h"
@@ -823,7 +825,7 @@ static int run_report_log_line( const char *line )
     static const char *const prefixes[] = {
         "[BUILD]", "[TARGET]", "[SETTINGS]", "[DXVK]", "[VKD3D]", "[FEX]", "[BOX64]",
         "[SYNC]", "[GL]", "[UPSCALE]", "[LSFG]", "[FRAME]", "[CPU]", "[VULKAN]",
-        "[MISS]", "[FAIL]", "[EXCEPTION]",
+        "[MISS]", "[FAIL]", "[EXCEPTION]", "[STABILITY]",
         /* Which OpenGL renderer was asked for and which one answered: the two
          * questions "Zink does not work" is made of, and the reason a program
          * with no settings line at all runs on the default. The rest of the
@@ -5423,9 +5425,52 @@ static void run_components_first( char *target, size_t size )
     runtime_components_run = 1;
 }
 
+/* The file that counts this program's starts in a row that did not come back
+ * (start_guard.h), once one has begun. Empty while no start of this runtime is
+ * being counted. */
+static char runtime_start_guard[520];
+
+/* A program that dies the same way twice begins its next start with the
+ * Compatibility fast paths -- the ones a misbehaving game trips over -- so its
+ * owner is not left starting it again to watch the same crash. The bundle is
+ * applied to this start only: what the card holds is not rewritten, and a
+ * clean exit puts the count back to nothing. The translator is left alone;
+ * choosing another one behind the player's back is a bigger change than a
+ * failed start can justify. */
+static void apply_start_guard( struct launcher_settings *settings, const char *settings_path,
+                               const char *program )
+{
+    unsigned int streak = 0;
+    int changed;
+
+    runtime_start_guard[0] = 0;
+    if (!nx_start_guard_path( runtime_start_guard, sizeof(runtime_start_guard), settings_path )) return;
+    nx_start_guard_read( runtime_start_guard, &streak );
+    if (nx_start_guard_safe( streak ))
+    {
+        changed = launcher_preset_apply( settings, LAUNCHER_PRESET_COMPATIBILITY, 0 );
+        log_line( "[STABILITY] the last %u starts of %s did not come back; this one begins with the "
+                  "Compatibility fast paths%s, with the translator and the card's settings left as they are",
+                  streak, program_name( program ), changed ? "" : ", which it already had" );
+    }
+    if (!nx_start_guard_write( runtime_start_guard, nx_start_guard_next( streak ) ))
+    {
+        log_line( "[STABILITY] %s could not be written, so a start of %s that does not come back will not "
+                  "be counted", runtime_start_guard, program_name( program ) );
+        runtime_start_guard[0] = 0;
+    }
+}
+
 static int return_to_launcher( void )
 {
     int i, still_lent = 0;
+
+    /* A start that came home closes the streak; one that ended on an NT status
+     * -- an unhandled exception -- leaves it for the next start to count, and
+     * begin safe if that is what the count says (start_guard.h). A quit the
+     * player asked for reports no code and is not a failed start. */
+    if (runtime_start_guard[0] && !nx_start_guard_crash( wine_nx_program_exit_code ))
+        nx_start_guard_clear( runtime_start_guard );
 
     /* The program came back, so the cache did not keep it from starting: the
      * next start with it is judged on its own. */
@@ -6237,6 +6282,9 @@ int main( int argc, char **argv )
             launcher_kv_load( &kv, settings_path ))
         {
             launcher_settings_read( &kv, &settings );
+            /* Before the settings are used: a program whose last starts did not
+             * come back begins this one with the safe fast paths. */
+            apply_start_guard( &settings, settings_path, target );
             horizon_fast_sync_enabled = settings.fast_sync;
             runtime_windows_xp = settings.windows_xp;
             if (runtime_windows_xp)
