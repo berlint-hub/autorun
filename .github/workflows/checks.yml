@@ -60,25 +60,35 @@ jobs:
       - name: Install clang
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends clang
 
+      # Every failure is its own annotation naming the file, so it is findable
+      # without the log; a run goes on to the other tests either way.
       - name: Host tests
         run: |
-          set -eu
+          failed=0
           for test in horizon-wine/tests/check_*.py; do
               echo "::group::$test"
-              python3 "$test"
+              python3 "$test" || {
+                  failed=1
+                  echo "::error file=$test,title=Check failed::$test"
+              }
               echo "::endgroup::"
           done
+          exit $failed
 
       # Each script prints SKIP and exits 0 when its tool, host or checkout is
       # missing, so the ones that can run here run and the rest say why not.
       - name: Runtime and console tests
         run: |
-          set -eu
+          failed=0
           for script in horizon-wine/check-*.sh horizon-wine/tests/check-*.sh; do
               echo "::group::$script"
-              sh "$script"
+              sh "$script" || {
+                  failed=1
+                  echo "::error file=$script,title=Check failed::$script"
+              }
               echo "::endgroup::"
           done
+          exit $failed
 
   build:
     name: Build the runtime
