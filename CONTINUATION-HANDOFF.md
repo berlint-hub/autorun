@@ -1157,3 +1157,69 @@ ovladače na něco zeptáme**. Když tam bude „a buffer is out", je buffer ztr
 ještě před prvním prezentem programu → chyba je v release/handoveru a oprava je
 nepouštět předchozí drawable, dokud je buffer venku. **Jeden běh z headu to
 potvrdí.**
+
+## Dark Athena vs. Doom 3: dvě OpenGL hry, jedna jede
+
+`logs-2026-10-31-doom3/` — Athena potřetí (`DarkAthena_20261031-102117.log`,
+592 řádek, bez outcome) a Doom 3 (`doom3_20261031-102419.log`, 715 řádek,
+**Completed with exit code 0x00000000**). Stejný build, stejný večer.
+
+### Tabulka rozdílů
+
+| | Doom 3 (jede) | Dark Athena (ztuhne) |
+|---|---|---|
+| `[INIT] windows shown by` | **the framebuffer** | **the OpenGL compositor** |
+| `[NXCOMP]` řádek | **0** | 2 |
+| `[MESA] OpenGL commands are marshalled on a worker thread` | **ano** | ne |
+| `[NXGL] the screen is … (a display mode)` | ne | **800x600 (was 1280x720)** |
+| surface | 1280x720 = panel | 800x600 |
+| `wglSetPixelFormat` formát | 26 | 28 |
+| první swap | `swap #1 came back after 4 ms` | nikdy |
+
+Athena má navíc:
+
+```
+[NXCOMP] presenting the screen through OpenGL on NV12B, 4.3 (Core Profile) Mesa 26.2.3
+[NXCOMP] screen handed to an OpenGL program
+```
+
+Compositor si dělá **vlastní** GL kontext — *Core* profil — na stejném EGL
+displayu a prezentuje okno sám; hra pak dostane surface (kompatibilní profil
+4.3). Dva presenters na jednom okně. Doom 3 žádného druhého nemá.
+
+### Co to vyvrací
+
+Moje hypotéza z předchozího běhu (**i ta v analýze, co přišla s logy**) byla,
+že swap čeká na buffer, který má venku compositor. **Doom 3 to vyvrací:**
+
+```
+[NXGL] the window at the first swap: 3 slots, 1280x720 format 0, connected,
+       a buffer is out and has not come back
+[NXGL] swap #1 came back after 4 ms
+```
+
+„a buffer is out and has not come back" je při prvním swapu **normální stav**,
+ne diagnóza. Doom 3 ho má taky a swap se vrátí za 4 ms.
+
+### Co to nevyvrací
+
+Heap. Třetí běh Atény ztuhl znovu při `heap_used_mb=899 heap_free_mb=20`
+(heap region 919 MB), druhý běh při `899 / 966` (region 1865 MB). Stejné
+místo, jiná halda. **Není to OOM** — potvrzeno podruhé.
+
+### Tři jedno-políčkové experimenty, v tomto pořadí
+
+1. **„Windows shown by" → Framebuffer** pro Dark Athenu. Největší strukturální
+   rozdíl proti jediné OpenGL hře, která tu jde. Vypne compositor, tedy i ten
+   druhý kontext a druhého presentera.
+2. **„OpenGL on a worker thread" → Enabled.** Doom 3 ho má. Athena visí
+   hlavním threadem uvnitř `wglSwapBuffers` — přesně to, co ten přepínač
+   odsunuje jinam.
+3. **„Resolution" → 1280x720.** Athena jako jediná přepíná display mode
+   (`[NXGL] the screen is 800x600 (a display mode; was 1280x720)`), Doom 3
+   zůstává na panelu. Když by byl problém v přepnutí velikosti, tohle ho
+   obejde.
+
+Do té doby nemá smysl sahat do `nx_drawable_swap()` — je to deterministické
+(tři běhy, stejné místo), takže jedno nastavení to rozsekne levněji než zásah
+do grafiky, který tu nejde ani přeložit.
