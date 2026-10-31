@@ -31,8 +31,8 @@ clean=0
 [ "${1:-}" = "--clean" ] && clean=1
 
 if [ ! -d "$source_dir/FEXCore" ]; then
-    echo "No FEX checkout at $source_dir; set WINE_NX_FEX_DIR." >&2
-    exit 1
+    echo "SKIP: needs a FEX checkout at $source_dir (FEX is fetched into horizon-wine/toolchains; set WINE_NX_FEX_DIR)" >&2
+    exit 0
 fi
 if [ ! -f "$abi_dir/cache_policy.h" ]; then
     echo "No Horizon ABI headers at $abi_dir; set WINE_NX_FEX_ABI_DIR." >&2

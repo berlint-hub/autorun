@@ -52,11 +52,16 @@ static int svcGetInfo(u64 *out, int type, Handle process, int subtype) {
     *out = type == InfoType_CoreMask ? allowed_cores : priorities;
     return fail_info;
 }
+/* Only handle 10 is a thread here: the registry has empty slots, and the
+ * code under test reads each of them as it looks for one to move. libnx
+ * answers an error for a handle that is not a thread, so this does too. */
 static int svcGetThreadCoreMask(s32 *core, u64 *mask, Handle handle) {
-    assert(handle == 10); *core = current_core; *mask = current_mask; return 0;
+    if (handle != 10) return 1;
+    *core = current_core; *mask = current_mask; return 0;
 }
 static int svcGetThreadPriority(s32 *priority, Handle handle) {
-    assert(handle == 10); *priority = current_priority; return 0;
+    if (handle != 10) return 1;
+    *priority = current_priority; return 0;
 }
 Result __wrap_svcSetThreadCoreMask(Handle handle, s32 core, u32 mask);
 #define svcSetThreadCoreMask __wrap_svcSetThreadCoreMask
@@ -87,6 +92,11 @@ void horizon_follow_thread_cores(void *teb, unsigned mask) { assert(teb == (void
 '''
 globals_ = r'''
 static struct nx_prof_thread registry[NX_PROF_MAX_THREADS];
+/* The profiler's registry keeps each thread's handle in its slot, written last
+ * and read without the lock (thread_profile.c). The fixture has the real
+ * array, so it has the real pair of accessors around it. */
+static Handle registry_handle(unsigned int i) { return registry[i].handle; }
+static void registry_set_handle(unsigned int i, Handle handle) { registry[i].handle = handle; }
 static pthread_mutex_t registry_mutex = PTHREAD_MUTEX_INITIALIZER;
 static int four_cores_enabled;
 int wine_nx_balance_enabled = 1;

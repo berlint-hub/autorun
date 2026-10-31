@@ -146,15 +146,19 @@ void wine_nx_thread_configure_cores( int enabled )
                                      "[CORES] application cores 0-2" );
 }
 
-static int offload_thread_locked( struct nx_prof_thread *thread )
+/* The handle is the caller's, not the slot's: a thread registering publishes
+ * it last (registry_set_handle), and this runs before that, so the slot's own
+ * is still 0 here -- which is not a thread, and every call below would be
+ * refused. */
+static int offload_thread_locked( struct nx_prof_thread *thread, Handle handle )
 {
     if (!four_cores_enabled || thread->fixed || thread->helper) return 0;
-    if (R_FAILED( svcGetThreadCoreMask( &thread->app_core, &thread->app_mask, thread->handle ) ) ||
-        R_FAILED( svcGetThreadPriority( &thread->app_priority, thread->handle ) )) return -1;
-    if (R_FAILED( __real_svcSetThreadCoreMask( thread->handle, 3, 8 ) )) return -1;
-    if (R_FAILED( svcSetThreadPriority( thread->handle, 63 ) ))
+    if (R_FAILED( svcGetThreadCoreMask( &thread->app_core, &thread->app_mask, handle ) ) ||
+        R_FAILED( svcGetThreadPriority( &thread->app_priority, handle ) )) return -1;
+    if (R_FAILED( __real_svcSetThreadCoreMask( handle, 3, 8 ) )) return -1;
+    if (R_FAILED( svcSetThreadPriority( handle, 63 ) ))
     {
-        svcSetThreadCoreMask( thread->handle, thread->app_core, thread->app_mask );
+        svcSetThreadCoreMask( handle, thread->app_core, thread->app_mask );
         return -1;
     }
     thread->helper = 1;
@@ -258,7 +262,7 @@ void wine_nx_thread_set_name( unsigned int tid, const char *name )
         }
         else if (nx_thread_graphics_worker( name ))
         {
-            if ((moved = offload_thread_locked( thread )))
+            if ((moved = offload_thread_locked( thread, registry_handle( i ) )))
                 snprintf( line, sizeof(line), "[CORES] %u %s: %s", tid, name,
                           moved > 0 ? "core 3, priority 63" : "could not offload graphics worker" );
         }
@@ -331,7 +335,7 @@ void wine_nx_thread_register( char kind, unsigned int tid, void *teb )
         if (kind == 'c')
         {
             snprintf( registry[slot].name, sizeof(registry[slot].name), "compositor" );
-            offload_thread_locked( &registry[slot] );
+            offload_thread_locked( &registry[slot], handle );
         }
         registry_set_handle( slot, handle );  /* the slot is a thread from here on */
     }

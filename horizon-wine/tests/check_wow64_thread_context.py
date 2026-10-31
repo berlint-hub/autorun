@@ -83,6 +83,9 @@ static NTSTATUS pBTCpuSetContext(HANDLE thread, HANDLE process, void *unknown, v
     return set_thread_wow64_context((HANDLE)4, ctx, sizeof(I386_CONTEXT));
 }
 #define ERR(...) ((void)0)
+/* The startup breadcrumb thread_init writes through (syscall.c); the test is
+ * about the context, not where the line goes. */
+static void wow64_diag(const char *step, ULONG_PTR value) { (void)step; (void)value; }
 '''
 tests = r'''
 int main(void) {

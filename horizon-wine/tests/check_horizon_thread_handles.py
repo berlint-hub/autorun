@@ -6,6 +6,8 @@ import re
 import subprocess
 import tempfile
 
+import test_support
+
 root = Path(__file__).resolve().parents[2]
 source = (root / 'dlls/ntdll/unix/horizon.c').read_text()
 
@@ -500,7 +502,7 @@ with tempfile.TemporaryDirectory(prefix='horizon-handles-') as directory:
     build = Path(directory)
     path = build / 'handles.c'
     path.write_text(fixture + helpers + dispatch + query + ntcalls + context_fixture + contexts + tls_fixture + tests)
-    subprocess.run([os.environ.get('WINE_NX_HOST_CC', '/usr/bin/clang'), '-std=gnu11',
+    subprocess.run([test_support.host_cc(), '-std=gnu11',
                     '-fms-extensions', '-Wall', '-Wextra', '-Werror', '-Wno-missing-field-initializers',
                     '-fsanitize=address,undefined', '-pthread', '-D__WINESRC__', '-D_WIN64',
                     '-I' + str(root / 'include'), '-I' + str(root / 'dlls/ntdll/unix'),

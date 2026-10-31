@@ -34,6 +34,10 @@ fixture += section('enum nx_shader_affinity', '/* horizon.c:')
 fixture += r'''
 static pthread_mutex_t registry_mutex = PTHREAD_MUTEX_INITIALIZER;
 static struct nx_prof_thread registry[NX_PROF_MAX_THREADS];
+/* The slot's handle, as thread_profile.c reads it without the lock. */
+static Handle registry_handle(unsigned int i) { return registry[i].handle; }
+static void registry_set_handle(unsigned int i, Handle handle) __attribute__((unused));
+static void registry_set_handle(unsigned int i, Handle handle) { registry[i].handle = handle; }
 static int four_cores_enabled = 1;
 static Handle current_handle = 123;
 static s32 current_core, current_priority;
