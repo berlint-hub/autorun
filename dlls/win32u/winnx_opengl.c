@@ -901,7 +901,14 @@ static void nx_cursor_prepare( EGLContext context )
     uint32_t sprite[POINTER_CURSOR_W * POINTER_CURSOR_H];
     struct nx_cursor_gl *slot;
     GLint texture, framebuffer;
+    static int prepares;
+    int say;
 
+    /* Said for the first few: which context a program presents with is not
+     * always the first one it makes current, and the one that matters is the
+     * one the arrow is drawn with. */
+    say = (++prepares <= 4);
+    if (say) nx_log( "[NXGL] the mouse arrow: preparing for context %p", context );
     if (!context) return;
     if (!p_glBlitFramebuffer)
     {
@@ -917,6 +924,8 @@ static void nx_cursor_prepare( EGLContext context )
         if (!p_glBlitFramebuffer) return;
     }
     slot = nx_cursor_slot( context );
+    if (say) nx_log( "[NXGL] the mouse arrow: the slot has texture %u framebuffer %u, attached %d",
+                     slot->texture, slot->framebuffer, slot->attached );
     if (slot->attached && funcs->p_glIsTexture( slot->texture ) && p_glIsFramebuffer( slot->framebuffer ))
         return;
     funcs->p_glGetIntegerv( GL_TEXTURE_BINDING_2D, &texture );
@@ -937,6 +946,8 @@ static void nx_cursor_prepare( EGLContext context )
     funcs->p_glBindTexture( GL_TEXTURE_2D, texture );
     slot->uploaded = 1;
     slot->attached = 1;
+    if (say) nx_log( "[NXGL] the mouse arrow: its names are made before the first present, "
+                     "texture %u framebuffer %u", slot->texture, slot->framebuffer );
 }
 
 static void nx_cursor_draw( struct opengl_drawable *base )
@@ -992,6 +1003,8 @@ static void nx_cursor_draw( struct opengl_drawable *base )
 
     slot = nx_cursor_slot( context );
     created = 0;
+    if (!traced) nx_log( "[NXGL] the mouse arrow: the slot has texture %u framebuffer %u, attached %d",
+                         slot->texture, slot->framebuffer, slot->attached );
     if (!slot->texture || !funcs->p_glIsTexture( slot->texture ) || !p_glIsFramebuffer( slot->framebuffer ))
     {
         funcs->p_glGenTextures( 1, &slot->texture );

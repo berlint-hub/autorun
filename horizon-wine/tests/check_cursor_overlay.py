@@ -317,6 +317,8 @@ int wine_nx_surface_picture( int surface_w, int surface_h, int *x, int *y, int *
 '''
 
 checks = r'''
+static char first_draw_line[256];
+
 static void check_runs( int px, int py, int width, int height )
 {
     struct pointer_overlay_run runs[POINTER_OVERLAY_MAX_RUNS];
@@ -373,6 +375,7 @@ int main(void)
     cursor_visible = 1;
     nx_cursor_draw( &drawable );
     assert(program.uploads == 1 && program.copies > 0);
+    snprintf( first_draw_line, sizeof(first_draw_line), "%s", overlay_log_line );
     check_runs( cursor_panel_x, cursor_panel_y, surface_width, surface_height );
     check_state_restored();
 
@@ -447,6 +450,7 @@ int main(void)
     mock_context = (EGLContext)0x5678;
     nx_cursor_prepare( funcs->p_eglGetCurrentContext() );
     assert( program.uploads == uploads_before + 1 && program.attaches == 1 );
+    assert( strstr( overlay_log_line, "before the first present" ) );
     check_state_restored();
     program.copies = program.framebuffer_binds = program.attaches = 0;
     nx_cursor_draw( &drawable );
@@ -458,7 +462,12 @@ int main(void)
     /* The arrow's own words for the draw it made: a run that froze on its first
      * swap is read out of these lines, so they are part of what is checked. */
     assert( overlay_logged > 0 );
-    assert( !strcmp( overlay_log_line, "[NXGL] the mouse arrow: the GL state is put back" ) );
+    /* The arrow says what it did into the runtime's log, and a program frozen on
+     * its first swap is read out of those lines, so they are part of what is
+     * checked: the first draw's own words, end to end.  (Only the first draw
+     * says them; a context prepared before it ever presents says its own, later.) */
+    assert( overlay_logged > 0 );
+    assert( !strcmp( first_draw_line, "[NXGL] the mouse arrow: the GL state is put back" ) );
 
     printf( "cursor overlay: the arrow's runs blitted into the picture, once per context\n" );
     return 0;
