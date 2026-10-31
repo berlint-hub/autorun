@@ -138,7 +138,10 @@ static int mock_query_surface( EGLDisplay display, EGLSurface surface, EGLint at
     else return 0;
     return 1;
 }
-static EGLContext mock_current_context( void ) { return (EGLContext *)0x1234; }
+/* Which context is current is set by the checks: the overlay keeps the arrow's
+ * names per context, so a test of two of them has to be able to switch. */
+static EGLContext mock_context = (EGLContext)0x1234;
+static EGLContext mock_current_context( void ) { return mock_context; }
 static void *mock_get_proc_address( const char *name );
 
 static void mock_gen_textures( GLsizei count, GLuint *textures )
@@ -355,6 +358,7 @@ static void check_state_restored( void )
 int main(void)
 {
     struct opengl_drawable drawable = {0};
+    unsigned int uploads_before;
 
     funcs = &mock_functions;
     drawable.surface = mock_surface;
@@ -433,6 +437,23 @@ int main(void)
     surface_width = 1280; surface_height = 720;
     nx_cursor_draw( &drawable );
     check_runs( cursor_panel_x, cursor_panel_y, 1280, 720 );
+
+    /* A context prepared the way activation prepares it, before it ever
+     * presents: the names and the sprite are made outside any swap, so the first
+     * frame drawn with it uploads nothing again and attaches nothing again --
+     * the work that used to fall to the program's first wglSwapBuffers. */
+    program.copies = program.framebuffer_binds = program.attaches = 0;
+    uploads_before = program.uploads;
+    mock_context = (EGLContext)0x5678;
+    nx_cursor_prepare( funcs->p_eglGetCurrentContext() );
+    assert( program.uploads == uploads_before + 1 && program.attaches == 1 );
+    check_state_restored();
+    program.copies = program.framebuffer_binds = program.attaches = 0;
+    nx_cursor_draw( &drawable );
+    assert( program.uploads == uploads_before + 1 && program.attaches == 0 && program.copies > 0 );
+    check_runs( cursor_panel_x, cursor_panel_y, surface_width, surface_height );
+    check_state_restored();
+    mock_context = (EGLContext)0x1234;
 
     /* The arrow's own words for the draw it made: a run that froze on its first
      * swap is read out of these lines, so they are part of what is checked. */

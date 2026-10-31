@@ -860,8 +860,9 @@ struct nx_cursor_gl
     EGLContext context;
     GLuint texture, framebuffer;
     int uploaded;
+    int attached;
 };
-static struct nx_cursor_gl nx_cursor_gl[8];
+static struct nx_cursor_gl nx_cursor_gl[16];
 static unsigned int nx_cursor_gl_next;
 static int nx_cursor_traced;   /* said once, in the runtime's log */
 
@@ -875,12 +876,67 @@ static struct nx_cursor_gl *nx_cursor_slot( EGLContext context )
     if (!slot)
     {
         /* A context not seen before: the names in the slot it takes belong to
-         * another context, which this one cannot delete. */
-        slot = &nx_cursor_gl[nx_cursor_gl_next++ % ARRAY_SIZE(nx_cursor_gl)];
+         * another context, which this one cannot delete.  A slot nobody has
+         * taken goes first, so a context that is only ever made current cannot
+         * take the names away from one that is presenting. */
+        for (i = 0; i < ARRAY_SIZE(nx_cursor_gl) && !slot; i++)
+            if (!nx_cursor_gl[i].context) slot = &nx_cursor_gl[i];
+        if (!slot) slot = &nx_cursor_gl[nx_cursor_gl_next++ % ARRAY_SIZE(nx_cursor_gl)];
         memset( slot, 0, sizeof(*slot) );
         slot->context = context;
     }
     return slot;
+}
+
+/* The arrow's texture and framebuffer, made now rather than when the arrow is
+ * first drawn.  A program whose cursor is visible at its first present used to
+ * make them inside wglSwapBuffers, with a frame already on its way out, and that
+ * is where such a program stops: the first names any driver is asked for in the
+ * whole run, asked for in the one place nothing else is.  Everything else a
+ * program makes -- its shaders, its render targets, its own textures -- is made
+ * outside the swap, and none of it hangs.  Safe anywhere the context is current;
+ * nx_cursor_draw() still makes its own names if it ever gets there without them. */
+static void nx_cursor_prepare( EGLContext context )
+{
+    uint32_t sprite[POINTER_CURSOR_W * POINTER_CURSOR_H];
+    struct nx_cursor_gl *slot;
+    GLint texture, framebuffer;
+
+    if (!context) return;
+    if (!p_glBlitFramebuffer)
+    {
+        p_glGenFramebuffers = (void *)funcs->p_eglGetProcAddress( "glGenFramebuffers" );
+        p_glBindFramebuffer = (void *)funcs->p_eglGetProcAddress( "glBindFramebuffer" );
+        p_glFramebufferTexture2D = (void *)funcs->p_eglGetProcAddress( "glFramebufferTexture2D" );
+        p_glIsFramebuffer = (void *)funcs->p_eglGetProcAddress( "glIsFramebuffer" );
+        p_glBindBuffer = (void *)funcs->p_eglGetProcAddress( "glBindBuffer" );
+        if (!p_glGenFramebuffers || !p_glBindFramebuffer || !p_glFramebufferTexture2D || !p_glIsFramebuffer ||
+            !p_glBindBuffer)
+            return;
+        p_glBlitFramebuffer = (void *)funcs->p_eglGetProcAddress( "glBlitFramebuffer" );
+        if (!p_glBlitFramebuffer) return;
+    }
+    slot = nx_cursor_slot( context );
+    if (slot->attached && funcs->p_glIsTexture( slot->texture ) && p_glIsFramebuffer( slot->framebuffer ))
+        return;
+    funcs->p_glGetIntegerv( GL_TEXTURE_BINDING_2D, &texture );
+    funcs->p_glGetIntegerv( GL_READ_FRAMEBUFFER_BINDING, &framebuffer );
+    funcs->p_glGenTextures( 1, &slot->texture );
+    p_glGenFramebuffers( 1, &slot->framebuffer );
+    funcs->p_glBindTexture( GL_TEXTURE_2D, slot->texture );
+    /* The sprite does not change: once per context, the same upload the draw
+     * makes when it has to make the names itself. */
+    pointer_cursor_image( sprite );
+    funcs->p_glTexImage2D( GL_TEXTURE_2D, 0, GL_RGBA8, POINTER_CURSOR_W, POINTER_CURSOR_H, 0,
+                           GL_RGBA, GL_UNSIGNED_BYTE, sprite );
+    funcs->p_glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST );
+    funcs->p_glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST );
+    p_glBindFramebuffer( GL_READ_FRAMEBUFFER, slot->framebuffer );
+    p_glFramebufferTexture2D( GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, slot->texture, 0 );
+    p_glBindFramebuffer( GL_READ_FRAMEBUFFER, framebuffer );
+    funcs->p_glBindTexture( GL_TEXTURE_2D, texture );
+    slot->uploaded = 1;
+    slot->attached = 1;
 }
 
 static void nx_cursor_draw( struct opengl_drawable *base )
@@ -980,7 +1036,11 @@ static void nx_cursor_draw( struct opengl_drawable *base )
     if (srgb) funcs->p_glDisable( GL_FRAMEBUFFER_SRGB );
     p_glBindFramebuffer( GL_READ_FRAMEBUFFER, slot->framebuffer );
     /* The sprite is attached once, when the framebuffer is made. */
-    if (created) p_glFramebufferTexture2D( GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, slot->texture, 0 );
+    if (created || !slot->attached)
+    {
+        p_glFramebufferTexture2D( GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, slot->texture, 0 );
+        slot->attached = 1;
+    }
     p_glBindFramebuffer( GL_DRAW_FRAMEBUFFER, 0 );
     /* The sprite's first row is its top, the framebuffer's first row is its
      * bottom; the runs are in the picture's own, top-down pixels. */
@@ -1503,6 +1563,10 @@ static BOOL nx_context_activate( struct opengl_context *context, struct opengl_d
     }
     if (&wine_nx_gl_debug && wine_nx_gl_debug()) nx_install_debug( context );
     nx_note_first_context();
+    /* The arrow's names, before the program's first present rather than by it
+     * (nx_cursor_prepare): a swap is no place to be asking a driver for the
+     * first GL objects of the run. */
+    nx_cursor_prepare( funcs->p_eglGetCurrentContext() );
     /* Only the program's own window tells us what it got; a context that draws
      * into a pbuffer or the compositor's own is none of our business. */
     if (draw && draw->surface == nx_screen_surface) nx_note_program_gl();
