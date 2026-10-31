@@ -60,6 +60,14 @@ jobs:
       - name: Install clang
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends clang
 
+      # Box64 is an ARM64 program and one check builds and runs it in the
+      # switch-dev container: qemu's binfmt handler makes that possible on an
+      # x86_64 runner. The check skips by itself when it is not registered.
+      # Not fatal: without it the ARM64 checks skip and say why.
+      - name: Register qemu for the ARM64 checks
+        run: docker run --privileged --rm tonistiigi/binfmt --install arm64 ||
+             echo "::warning::qemu's arm64 handler is not registered; the ARM64 checks will skip."
+
       # Every failure is its own annotation naming the file and carrying the
       # last of its output, so it is findable without the log; a run goes on to
       # the other tests either way.
@@ -70,7 +78,7 @@ jobs:
               echo "::group::$test"
               out=$(python3 "$test" 2>&1) || {
                   failed=1
-                  tail=$(printf '%s' "$out" | tail -n 20 | tr '\n' '\v' | sed 's/%/%25/g; s/\v/%0A/g' | cut -c1-3000)
+                  tail=$(printf '%s' "$out" | tr -d '\r' | tail -n 20 | tr '\n' '\v' | sed 's/%/%25/g; s/\v/%0A/g' | cut -c1-3000)
                   echo "::error file=$test,title=Check failed::$test%0A$tail"
               }
               printf '%s\n' "$out"
@@ -85,10 +93,12 @@ jobs:
           failed=0
           for script in horizon-wine/check-*.sh horizon-wine/tests/check-*.sh; do
               echo "::group::$script"
-              sh "$script" || {
+              out=$(sh "$script" 2>&1) || {
                   failed=1
-                  echo "::error file=$script,title=Check failed::$script"
+                  tail=$(printf '%s' "$out" | tr -d '\r' | tail -n 20 | tr '\n' '\v' | sed 's/%/%25/g; s/\v/%0A/g' | cut -c1-3000)
+                  echo "::error file=$script,title=Check failed::$script%0A$tail"
               }
+              printf '%s\n' "$out"
               echo "::endgroup::"
           done
           exit $failed
