@@ -1223,3 +1223,74 @@ místo, jiná halda. **Není to OOM** — potvrzeno podruhé.
 Do té doby nemá smysl sahat do `nx_drawable_swap()` — je to deterministické
 (tři běhy, stejné místo), takže jedno nastavení to rozsekne levněji než zásah
 do grafiky, který tu nejde ani přeložit.
+
+## Dark Athena: oprava shaderu z PC (`HLInclude_GLSL.xrg`)
+
+Uživatel musel na PC upravit `System/GL/HLInclude_GLSL.xrg`, aby hra vůbec
+naběhla. Diff (uloženo v `logs-2026-10-31-athena-gl/`):
+
+```diff
+-float4 tex2DBias(sampler2D _tex, float2 _st, float _bias) { return texture2D(_tex, _st, _bias); }
+-float4 texCubeBias(samplerCube _tex, float3 _str, float _bias) { return textureCube(_tex, _str, _bias); }
++float4 tex2DBias(sampler2D _tex, float2 _st, float _bias) { return texture2D(_tex, _st); }
++float4 texCubeBias(samplerCube _tex, float3 _str, float _bias) { return textureCube(_tex, _str); }
+```
+
+Tedy: z vnitřního volání se odstraní parametr bias. Moderní ovladače troj-
+argumentové `texture2D/textureCube` odmítnou; na PC to končí pádem v
+`MRndrGL_GLSL.cpp(829)` hned při startu.
+
+### Co o tom říkají logy ze Switche
+
+**`HLInclude_GLSL.xrg` se neobjeví v žádném ze tří běhů.** Co se objeví, jsou
+jiné soubory ze stejné složky — z čehož plyne, že cesta na kartě je
+`sdmc:/Roms/Windows/The Chronicles of Riddick - Assault on Dark Athena/System/GL/`:
+
+```
+[FS] stat 9500: .../System/GL/ARB_Fragment_Program/VBOp_FP20_Water.fp
+[FS] stat 5000: .../System/GL/HL_Shading/XREngine_GlowPrep.fp
+```
+
+(`.xrg` je v téhle hře kontejner dialogů —
+`Content/Dialogues/Dlg_Default_Inmate1.xrg` —, `HLInclude_GLSL.xrg` je shader,
+který má jen stejnou příponu.)
+
+### Je to příčina ztuhnutí? Skoro jistě ne
+
+Na PC to padá **při startu**, ještě před oknem. Na Switchi hra dojde mnohem dál:
+
+- 8× `wglCreateContext`, 16× `wglMakeCurrent` (zkouší formáty a profily),
+- přepnutí display mode na 800×600,
+- `[NXGL] the program's OpenGL: 4.3 (Compatibility Profile) … its extension
+  list is 7743 bytes` — dotaz na rozšíření projde,
+- načte 899 MB,
+- **vstoupí do prvního `wglSwapBuffers`**.
+
+Selhání shaderu by ji zastavilo dřív. `driver-2.txt` navíc neobsahuje jedinou
+GLSL chybu — jen vyjednávání verze kontextu (4.6/4.5/4.4 odmítnuto, 4.3 vzato).
+
+### Přesto to stojí za aplikování, a to jako první krok
+
+Je to zadarmo a je to **předpoklad**: dokud je na kartě starý soubor, může Mesa
+ty shadery tiše odmítnout a chování je pak nedefinované — ztuhnutí není
+vyloučené. Nikdo z logů nevidíme, jestli se kompilace povedla.
+
+### Pořadí pokusů, po téhle informaci
+
+1. **Nakopírovat opravený `HLInclude_GLSL.xrg`** do
+   `sdmc:/Roms/Windows/The Chronicles of Riddick - Assault on Dark Athena/System/GL/`
+   (originál si nechat jako `.bak`). Zadarmo, a bez něj nemá smysl nic dalšího.
+2. **„OpenGL on a worker thread" → Enabled.** Tohle po zjištění o spinu na
+   zámku vede: Athena visí hlavním threadem v `RtlEnterCriticalSection` uvnitř
+   `wglSwapBuffers` (99,7 % jádra, `NtQueryPerformanceCounter`), zatímco
+   **tid 0034** chrlí stovky `0xc0000005`. Se zapnutým worker threadem jde
+   veškeré GL přes jedno vlákno — žádná konkurence o zámek, žádná šance, že
+   faultující vlákno zámek drží. Doom 3, který jede, ho má zapnutý.
+3. **„Windows shown by" → Framebuffer** (vypne compositor, tedy jeho druhý GL
+   kontext — *Core* profil — na stejném okně).
+
+### Co zůstává otevřené
+
+Jestli existuje game-fix, který by opravený shader do `System/GL/` dodal
+sám (`games/*.h`, `game_fixes_finish`, `tools/`). Pokud ano, je to čistější než
+ruční kopírování — k ověření.
