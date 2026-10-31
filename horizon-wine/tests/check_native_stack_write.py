@@ -4,8 +4,10 @@ from pathlib import Path
 import os
 import subprocess
 import tempfile
+import test_support
 
 root = Path(__file__).resolve().parents[2]
+test_support.need_arm64('Wine\'s CONTEXT and frame layout are the ARM64 ones')
 
 
 def extract(path, signature):
@@ -174,7 +176,7 @@ with tempfile.TemporaryDirectory(prefix='native-stack-write-') as directory:
     build = Path(directory)
     path = build / 'stack.c'
     path.write_text(fixture + functions + dispatcher_fixture + dispatcher + tests)
-    subprocess.run([os.environ.get('WINE_NX_HOST_CC', '/usr/bin/clang'), '-std=gnu11',
+    subprocess.run([test_support.host_cc(), '-std=gnu11',
                     '-Wall', '-Wextra', '-Werror', '-fsanitize=address,undefined', '-pthread',
                     '-D__SWITCH__', '-D__WINESRC__', '-D_WIN64', '-fms-extensions',
                     '-I' + str(root / 'include'), str(path), '-o', str(build / 'stack')], check=True)

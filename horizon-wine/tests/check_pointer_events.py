@@ -4,6 +4,8 @@ from pathlib import Path
 import subprocess
 import tempfile
 
+import test_support
+
 root = Path(__file__).resolve().parents[2]
 source = (root / 'dlls/win32u/winnx_drv.c').read_text()
 defines = source[source.index('/* Buttons reported by wine_nx_pointer_poll(). */'):source.index('struct wine_nx_surface\n')]
@@ -263,7 +265,7 @@ with tempfile.TemporaryDirectory(prefix='wine-nx-pointer-') as temp:
     src = Path(temp) / 'test.c'
     exe = Path(temp) / 'test'
     src.write_text(fixture + defines + events + tests)
-    subprocess.run(['cc', '-g', '-Wall', '-Werror', '-Wno-unused-function', '-Wno-address',
+    subprocess.run([test_support.compiler(), '-g', '-Wall', '-Werror', '-Wno-unused-function', '-Wno-address',
                     '-fsanitize=address,undefined',
                     '-I', str(root / 'horizon-wine/source'), str(src), '-o', str(exe)], check=True)
     subprocess.run([str(exe)], check=True)

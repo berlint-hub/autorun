@@ -5,6 +5,8 @@ import subprocess
 import sys
 import tempfile
 
+import test_support
+
 root = Path(__file__).resolve().parents[2]
 source = (root / 'dlls/win32u/winnx_drv.c').read_text()
 if '--baseline' in sys.argv:
@@ -175,6 +177,6 @@ with tempfile.TemporaryDirectory(prefix='wine-nx-popup-') as temp:
     src = Path(temp) / 'test.c'
     exe = Path(temp) / 'test'
     src.write_text(fixture + core + position + tests)
-    subprocess.run(['cc', '-g', '-Wno-pointer-bool-conversion', '-fsanitize=address,undefined',
-                    '-pthread', str(src), '-o', str(exe)], check=True)
+    subprocess.run([test_support.compiler(), '-g', '-Wno-pointer-bool-conversion',
+                    '-fsanitize=address,undefined', str(src), '-o', str(exe)], check=True)
     subprocess.run([str(exe)], check=True)

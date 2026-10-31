@@ -3,6 +3,7 @@
 from pathlib import Path
 import subprocess
 import tempfile
+import test_support
 
 root = Path(__file__).resolve().parents[2]
 horizon = (root / 'dlls/ntdll/unix/horizon.c').read_text()
@@ -152,6 +153,6 @@ with tempfile.TemporaryDirectory(prefix='wine-nx-window-list-') as temp:
         'static void horizon_server_window_tree_locked(',
         'static void horizon_server_append_window_locked(',
         'static void horizon_server_window_list_locked(')) + tests)
-    subprocess.run(['cc', '-g', '-Wall', '-Werror', '-fsanitize=address,undefined', str(src), '-o', str(exe)],
+    subprocess.run([test_support.compiler(), '-g', '-Wall', '-Werror', '-fsanitize=address,undefined', str(src), '-o', str(exe)],
                    check=True)
     subprocess.run([str(exe)], check=True)

@@ -8,6 +8,7 @@ a card moved between builds would lose a setting every time."""
 from pathlib import Path
 import subprocess
 import tempfile
+import test_support
 
 root = Path(__file__).resolve().parents[2]
 header = (root / 'horizon-wine/source/config_json.h').read_text()
@@ -104,7 +105,7 @@ with tempfile.TemporaryDirectory() as tmp:
     source = Path(tmp) / 'config.c'
     source.write_text(fixture.replace('@HEADER@', header))
     binary = Path(tmp) / 'config'
-    subprocess.run(['cc', '-o', str(binary), str(source)], check=True)
+    subprocess.run([test_support.compiler(), '-o', str(binary), str(source)], check=True)
     out = subprocess.run([str(binary), str(Path(tmp) / 'settings.json')],
                          check=True, capture_output=True, text=True)
     print(out.stdout.strip())

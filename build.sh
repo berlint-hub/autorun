@@ -10,9 +10,10 @@
 #   --jobs   parallel jobs (default: the machine's cores)
 #
 # Needs Docker, git, Python 3, make and bison (Homebrew's, on a Mac). It fetches
-# the llvm-mingw toolchain Wine's Windows side is built with, and builds the
-# boot payloads Quick setup installs, when they are missing. The Windows DLLs
-# are not in the archive: Autorun downloads them.
+# the submodules (horizon-dlls and game-fixes, when missing), the llvm-mingw
+# toolchain Wine's Windows side is built with, and builds the boot payloads
+# Quick setup installs. The Windows DLLs are not in the archive: Autorun
+# downloads them.
 set -eu
 root="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 hw="$root/horizon-wine"
@@ -37,11 +38,21 @@ done
 docker info >/dev/null 2>&1 || { echo "Docker is not running." >&2; exit 1; }
 image="$(cat "$hw/switch-dev.txt")"
 
-# The DLL repository: the package is checked against it.
-if [ ! -f "$root/horizon-dlls/switch/wine/horizon-dlls/manifest.json" ]; then
-    step "Fetching the DLL repository (horizon-dlls)"
-    git -C "$root" submodule update --init horizon-dlls
+# Both submodules: the package is checked against the DLL repository, and it
+# ships the game fixes repository's index. Packaging needs them, so fetch them
+# before the long builds rather than failing at the last step.
+if [ ! -f "$root/horizon-dlls/switch/wine/horizon-dlls/manifest.json" ] ||
+   [ ! -f "$root/game-fixes/switch/wine/game-fixes/index.json" ]; then
+    step "Fetching the submodules (horizon-dlls, game-fixes)"
+    git -C "$root" submodule update --init horizon-dlls game-fixes
 fi
+for needed in "$root/horizon-dlls/switch/wine/horizon-dlls/manifest.json" \
+              "$root/game-fixes/switch/wine/game-fixes/index.json"; do
+    [ -f "$needed" ] || {
+        echo "Missing $needed. Run 'git submodule update --init' in $root." >&2
+        exit 1
+    }
+done
 
 # llvm-mingw, for Wine's headers and Windows modules.
 llvm_version=20260505

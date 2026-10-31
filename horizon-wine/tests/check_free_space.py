@@ -8,6 +8,7 @@ Horizon server, which has no get_volume_info, so the game saw no free space."""
 from pathlib import Path
 import subprocess
 import tempfile
+import test_support
 
 root = Path(__file__).resolve().parents[2]
 file_c = (root / 'dlls/ntdll/unix/file.c').read_text()
@@ -184,6 +185,6 @@ with tempfile.TemporaryDirectory() as tmp:
     c_file = Path(tmp) / 'free_space.c'
     exe = Path(tmp) / 'free_space'
     c_file.write_text(source)
-    subprocess.run(['cc', '-std=gnu99', '-D__SWITCH__', '-Wall', '-Wextra', '-Wno-unused-parameter', '-Werror',
+    subprocess.run([test_support.compiler(), '-std=gnu99', '-D__SWITCH__', '-Wall', '-Wextra', '-Wno-unused-parameter', '-Werror',
                     '-o', str(exe), str(c_file)], check=True)
     subprocess.run([str(exe)], check=True)

@@ -14,8 +14,13 @@
 #include "autorun_update.h"
 #include "json_reader.h"
 
-#define RELEASE_API "https://api.github.com/repos/danfromtico/autorun/releases/latest"
-#define DOWNLOAD_PREFIX "https://github.com/danfromtico/autorun/releases/download/"
+/* The one repository Autorun installs from. A fork, a renamed account or a
+ * build from an old tree must not become the source of an "official" update, so
+ * the release lookup and every asset URL are spelled from this name and
+ * official_url() checks the whole prefix it makes. */
+#define RELEASE_REPO "autorunhq/autorun"
+#define RELEASE_API "https://api.github.com/repos/" RELEASE_REPO "/releases/latest"
+#define DOWNLOAD_PREFIX "https://github.com/" RELEASE_REPO "/releases/download/"
 #define METADATA_MAX (1024u * 1024u)
 #define ARCHIVE_MAX (1024u * 1024u * 1024u)
 
@@ -162,10 +167,12 @@ static int parse_asset( struct parser *p, struct asset *asset )
     }
 }
 
+/* An update archive is an "autorun*.zip": anything else in the release is not
+ * something this program installs, even when it is the only archive there. */
 static int zip_name( const char *name )
 {
     size_t length = strlen( name );
-    return length > 4 && !strcasecmp( name + length - 4, ".zip" );
+    return length > 11 && !strncasecmp( name, "autorun", 7 ) && !strcasecmp( name + length - 4, ".zip" );
 }
 
 static int canonical_asset( const struct asset *asset, const char *tag )

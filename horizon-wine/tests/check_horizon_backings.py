@@ -7,6 +7,7 @@ from pathlib import Path
 import re
 import subprocess
 import tempfile
+import test_support
 root = Path(__file__).resolve().parents[2]
 s = (root / 'dlls/ntdll/unix/horizon.c').read_text()
 def function(name):
@@ -167,7 +168,7 @@ with tempfile.TemporaryDirectory() as tmp:
     c = Path(tmp) / 'backings.c'
     c.write_text(fixture)
     exe = Path(tmp) / 'backings'
-    subprocess.run(['cc', '-std=gnu11', '-O1', '-Wall', '-Wextra', '-Werror', '-Wno-unused-variable',
+    subprocess.run([test_support.compiler(), '-std=gnu11', '-O1', '-Wall', '-Wextra', '-Werror', '-Wno-unused-variable',
                     '-fsanitize=address,undefined', '-fno-omit-frame-pointer',
                     '-I'+str(root/'include'), '-I'+str(root/'dlls/ntdll/unix'), str(c), '-o', str(exe)], check=True)
     subprocess.run([str(exe)], check=True)

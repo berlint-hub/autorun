@@ -9,6 +9,7 @@ from pathlib import Path
 import re
 import subprocess
 import tempfile
+import test_support
 
 root = Path(__file__).resolve().parents[2]
 header = (root / 'dlls/ntdll/unix/horizon_async.h').read_text()
@@ -170,5 +171,5 @@ with tempfile.TemporaryDirectory() as tmp:
     source = Path(tmp) / 'async.c'
     source.write_text(fixture.replace('@HEADER@', header))
     binary = Path(tmp) / 'async'
-    subprocess.run(['cc', '-Wall', '-Werror', '-o', str(binary), str(source)], check=True)
+    subprocess.run([test_support.compiler(), '-Wall', '-Werror', '-o', str(binary), str(source)], check=True)
     print(subprocess.run([str(binary)], check=True, capture_output=True, text=True).stdout.strip())

@@ -13,7 +13,9 @@ static long long test_now(void) { return ++ticks; }
 struct fake_event { unsigned int signaled; };
 static void test_signal( void *event ) { ((struct fake_event *)event)->signaled++; }
 
-/* UTF-16 of an ASCII string, in one of a few rotating buffers. */
+/* UTF-16 of an ASCII string, in one of a few rotating buffers. The length is
+ * written through *len: callers read it in a statement of its own, since the
+ * order in which a call's arguments are evaluated is not specified. */
 static const unsigned short *w( const char *s, unsigned int *len )
 {
     static unsigned short buffers[8][512];
@@ -141,8 +143,12 @@ static void test_key_information(void)
     {
         unsigned int namelen;
         unsigned short name[4];
+        const unsigned short *str;
 
-        memcpy( name, w( names[i], &namelen ), namelen );
+        /* w() sets namelen: it is read after the call, never as an argument
+         * beside it, whose evaluation order the standard leaves open. */
+        str = w( names[i], &namelen );
+        memcpy( name, str, namelen );
         class = w( "MyClass", &len );
         assert( horizon_reg_create( &reg, software, name, namelen, 0, 0, i ? NULL : class, i ? 0 : len, &key ) ==
                 HORIZON_REG_SUCCESS );
@@ -213,12 +219,15 @@ static void test_values(void)
     assert( set_sz( &reg, key, "Name", "abc" ) == HORIZON_REG_SUCCESS );
     assert( horizon_reg_set_value( &reg, key, NULL, 0, HORIZON_REG_BINARY, "\1\2", 2 ) == HORIZON_REG_SUCCESS );
 
-    assert( horizon_reg_get_value( key, w( "NAME", &len ), len, &type, &total, data, sizeof(data), &size ) ==
+    const unsigned short *name_utf16 = w( "NAME", &len );
+    assert( horizon_reg_get_value( key, name_utf16, len, &type, &total, data, sizeof(data), &size ) ==
             HORIZON_REG_SUCCESS );
     assert( type == HORIZON_REG_SZ && total == 6 && size == 6 && same( data, size, "abc" ) );
-    assert( horizon_reg_get_value( key, w( "Name", &len ), len, &type, &total, data, 4, &size ) ==
+    const unsigned short *name_utf16_2 = w( "Name", &len );
+    assert( horizon_reg_get_value( key, name_utf16_2, len, &type, &total, data, 4, &size ) ==
             HORIZON_REG_SUCCESS && total == 6 && size == 4 );
-    assert( horizon_reg_get_value( key, w( "Nope", &len ), len, &type, &total, data, 4, &size ) ==
+    const unsigned short *nope_utf16 = w( "Nope", &len );
+    assert( horizon_reg_get_value( key, nope_utf16, len, &type, &total, data, 4, &size ) ==
             HORIZON_REG_NAME_NOT_FOUND && type == -1 );
 
     /* Setting the same data leaves the key unmodified. */
@@ -246,8 +255,10 @@ static void test_values(void)
     assert( horizon_reg_enum_value( key, 0, 3, &type, &total, &namelen, data, 0, &size ) ==
             HORIZON_REG_INVALID_PARAMETER );
 
-    assert( horizon_reg_delete_value( &reg, key, w( "NAME", &len ), len ) == HORIZON_REG_SUCCESS );
-    assert( horizon_reg_delete_value( &reg, key, w( "NAME", &len ), len ) == HORIZON_REG_NAME_NOT_FOUND );
+    const unsigned short *name_utf16_3 = w( "NAME", &len );
+    assert( horizon_reg_delete_value( &reg, key, name_utf16_3, len ) == HORIZON_REG_SUCCESS );
+    const unsigned short *name_utf16_4 = w( "NAME", &len );
+    assert( horizon_reg_delete_value( &reg, key, name_utf16_4, len ) == HORIZON_REG_NAME_NOT_FOUND );
     assert( key->value_count == 1 );
 
     long_name = calloc( 16384, sizeof(*long_name) );
@@ -282,18 +293,24 @@ static void test_delete_and_rename(void)
     horizon_reg_release( &reg, child );
 
     for (i = 0; i < 3; i++) assert( create( &reg, parent, names[i], 0, &keys[i] ) == HORIZON_REG_SUCCESS );
-    assert( horizon_reg_rename( &reg, keys[0], w( "Zeta", &len ), len ) == HORIZON_REG_SUCCESS );
-    assert( horizon_reg_rename( &reg, keys[2], w( "Aaa", &len ), len ) == HORIZON_REG_SUCCESS );
+    const unsigned short *zeta_utf16 = w( "Zeta", &len );
+    assert( horizon_reg_rename( &reg, keys[0], zeta_utf16, len ) == HORIZON_REG_SUCCESS );
+    const unsigned short *aaa_utf16 = w( "Aaa", &len );
+    assert( horizon_reg_rename( &reg, keys[2], aaa_utf16, len ) == HORIZON_REG_SUCCESS );
     assert( horizon_reg_enum_key( parent, 0, HORIZON_REG_KEY_BASIC, &info, data, sizeof(data), &size ) == 0 &&
             same( data, size, "Aaa" ) );
     assert( horizon_reg_enum_key( parent, 1, HORIZON_REG_KEY_BASIC, &info, data, sizeof(data), &size ) == 0 &&
             same( data, size, "Beta" ) );
     assert( horizon_reg_enum_key( parent, 2, HORIZON_REG_KEY_BASIC, &info, data, sizeof(data), &size ) == 0 &&
             same( data, size, "Zeta" ) );
-    assert( horizon_reg_rename( &reg, keys[0], w( "beta", &len ), len ) == HORIZON_REG_CANNOT_DELETE );
-    assert( horizon_reg_rename( &reg, keys[0], w( "a\\b", &len ), len ) == HORIZON_REG_INVALID_PARAMETER );
-    assert( horizon_reg_rename( &reg, keys[0], w( "", &len ), len ) == HORIZON_REG_INVALID_PARAMETER );
-    assert( horizon_reg_rename( &reg, reg.root, w( "Other", &len ), len ) == HORIZON_REG_CANNOT_DELETE );
+    const unsigned short *beta_utf16 = w( "beta", &len );
+    assert( horizon_reg_rename( &reg, keys[0], beta_utf16, len ) == HORIZON_REG_CANNOT_DELETE );
+    const unsigned short *a_b_utf16 = w( "a\\b", &len );
+    assert( horizon_reg_rename( &reg, keys[0], a_b_utf16, len ) == HORIZON_REG_INVALID_PARAMETER );
+    const unsigned short *empty_utf16 = w( "", &len );
+    assert( horizon_reg_rename( &reg, keys[0], empty_utf16, len ) == HORIZON_REG_INVALID_PARAMETER );
+    const unsigned short *other_utf16 = w( "Other", &len );
+    assert( horizon_reg_rename( &reg, reg.root, other_utf16, len ) == HORIZON_REG_CANNOT_DELETE );
     assert( open_key( &reg, machine, "Parent\\ZETA", 0, &other ) == HORIZON_REG_SUCCESS && other == keys[0] );
     horizon_reg_release( &reg, other );
 
@@ -453,7 +470,8 @@ static void test_registry_files(void)
     assert( horizon_reg_get_value( key, NULL, 0, &type, &total, data, sizeof(data), &size ) == 0 );
     assert( type == HORIZON_REG_SZ && size == 26 && !memcmp( data, w( "mmdevapi.dll", &len ), 26 - 2 ) &&
             !data[24] && !data[25] );
-    assert( horizon_reg_get_value( key, w( "threadingmodel", &len ), len, &type, &total, data, sizeof(data), &size ) ==
+    const unsigned short *threadingmodel_utf16 = w( "threadingmodel", &len );
+    assert( horizon_reg_get_value( key, threadingmodel_utf16, len, &type, &total, data, sizeof(data), &size ) ==
             0 && size == 10 && same( data, 8, "Both" ) );
     horizon_reg_release( &reg, key );
 
@@ -461,22 +479,29 @@ static void test_registry_files(void)
     assert( key->classlen == 8 && same( key->class, 6, "Cls" ) && !key->class[3] );
     assert( horizon_reg_get_value( key, quote_name, sizeof(quote_name), &type, &total, data, sizeof(data), &size ) ==
             0 && type == HORIZON_REG_SZ && size == sizeof(quoted) && !memcmp( data, quoted, size ) );
-    assert( horizon_reg_get_value( key, w( "Utf8", &len ), len, &type, &total, data, sizeof(data), &size ) == 0 &&
+    const unsigned short *utf8_utf16 = w( "Utf8", &len );
+    assert( horizon_reg_get_value( key, utf8_utf16, len, &type, &total, data, sizeof(data), &size ) == 0 &&
             size == sizeof(utf8) && !memcmp( data, utf8, size ) );
-    assert( horizon_reg_get_value( key, w( "Expand", &len ), len, &type, &total, data, sizeof(data), &size ) == 0 &&
+    const unsigned short *expand_utf16 = w( "Expand", &len );
+    assert( horizon_reg_get_value( key, expand_utf16, len, &type, &total, data, sizeof(data), &size ) == 0 &&
             type == HORIZON_REG_EXPAND_SZ && size == 26 );
-    assert( horizon_reg_get_value( key, w( "Multi", &len ), len, &type, &total, data, sizeof(data), &size ) == 0 &&
+    const unsigned short *multi_utf16 = w( "Multi", &len );
+    assert( horizon_reg_get_value( key, multi_utf16, len, &type, &total, data, sizeof(data), &size ) == 0 &&
             type == HORIZON_REG_MULTI_SZ && size == 10 && !memcmp( data, "A\0\0\0B\0\0\0\0\0", 10 ) );
-    assert( horizon_reg_get_value( key, w( "Bin", &len ), len, &type, &total, data, sizeof(data), &size ) == 0 &&
+    const unsigned short *bin_utf16 = w( "Bin", &len );
+    assert( horizon_reg_get_value( key, bin_utf16, len, &type, &total, data, sizeof(data), &size ) == 0 &&
             type == HORIZON_REG_BINARY && size == 4 && !memcmp( data, "\1\2\3\xff", 4 ) );
-    assert( horizon_reg_get_value( key, w( "Dword", &len ), len, &type, &total, data, sizeof(data), &size ) == 0 &&
+    const unsigned short *dword_utf16 = w( "Dword", &len );
+    assert( horizon_reg_get_value( key, dword_utf16, len, &type, &total, data, sizeof(data), &size ) == 0 &&
             type == HORIZON_REG_DWORD && size == 4 && !memcmp( data, "\x2a\0\0\0", 4 ) );
-    assert( horizon_reg_get_value( key, w( "Bad", &len ), len, &type, &total, data, sizeof(data), &size ) == 0 &&
+    const unsigned short *bad_utf16 = w( "Bad", &len );
+    assert( horizon_reg_get_value( key, bad_utf16, len, &type, &total, data, sizeof(data), &size ) == 0 &&
             type == HORIZON_REG_NONE && size == 0 );
     horizon_reg_release( &reg, key );
 
     assert( open_key( &reg, machine, "System\\CurrentControlSet\\Control", 0, &key ) == HORIZON_REG_SUCCESS );
-    assert( horizon_reg_get_value( key, w( "Value", &len ), len, &type, &total, data, sizeof(data), &size ) == 0 &&
+    const unsigned short *value_utf16 = w( "Value", &len );
+    assert( horizon_reg_get_value( key, value_utf16, len, &type, &total, data, sizeof(data), &size ) == 0 &&
             type == HORIZON_REG_DWORD && !memcmp( data, "\1\0\0\0", 4 ) );
     horizon_reg_release( &reg, key );
 

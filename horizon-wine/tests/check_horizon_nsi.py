@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
 """Exercise Wine's adapter API and verify its cross-architecture wire layout."""
 from pathlib import Path
+import test_support
 import argparse
 import re
 import subprocess
 import tempfile
 
 root = Path(__file__).resolve().parents[2]
+# --target and -emit-llvm are clang's: gcc has neither.
+test_support.need_tool('clang', 'the ABI test cross-compiles for i686 and AMD64 with --target')
 parser = argparse.ArgumentParser()
 parser.add_argument("--mingw-include", help="MinGW CRT headers for the Windows ABI checks")
 options = parser.parse_args()
@@ -16,7 +19,7 @@ with tempfile.TemporaryDirectory(prefix="horizon-nsi-") as directory:
     layouts = []
     for target in ("i686-w64-windows-gnu", "x86_64-w64-windows-gnu", "aarch64-linux-gnu"):
         output = directory / (target + ".ll")
-        args = ["clang", "--target=" + target, "-ffreestanding", "-D__WINESRC__", "-Iinclude", "-S", "-emit-llvm"]
+        args = [test_support.compiler(), "--target=" + target, "-ffreestanding", "-D__WINESRC__", "-Iinclude", "-S", "-emit-llvm"]
         if target.startswith("aarch64"):
             args += ["-D_WIN64", "-DWINE_UNIX_LIB"]
         elif options.mingw_include:
@@ -28,7 +31,7 @@ with tempfile.TemporaryDirectory(prefix="horizon-nsi-") as directory:
     print("NSI wire sizes/offsets match on i386, AMD64 and native AArch64")
     output = directory / "nsi-test"
     subprocess.run([
-        "clang", "-std=gnu11", "-DWIN32_LEAN_AND_MEAN", "-D_WIN64", "-DWINE_UNIX_LIB", "-DWINBASEAPI=",
+        test_support.compiler(), "-std=gnu11", "-DWIN32_LEAN_AND_MEAN", "-D_WIN64", "-DWINE_UNIX_LIB", "-DWINBASEAPI=",
         "-DWINE_NO_DEBUG_MSGS", "-DWINE_NO_TRACE_MSGS", "-fshort-wchar", "-ffunction-sections",
         "-include", "horizon-wine/tests/nsi_host_shim.h", "-Dwcslen=test_wcslen", "-Dwcscpy=test_wcscpy",
         "-Dwcscmp=test_wcscmp", "-Iinclude", "-Idlls/ntdll/unix", "-g", "-fsanitize=address,undefined",

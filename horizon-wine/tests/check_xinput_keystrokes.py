@@ -1,6 +1,7 @@
 from pathlib import Path
 import subprocess
 import tempfile
+import test_support
 
 root = Path(__file__).resolve().parents[2]
 source = (root / 'dlls/xinput1_3/main.c').read_text()
@@ -71,7 +72,7 @@ with tempfile.TemporaryDirectory(prefix='autorun-xinput-') as directory:
     path = Path(directory)
     test = path / 'keystrokes.c'
     test.write_text(fixture + source[start:end] + checks)
-    subprocess.run(['clang', '-std=gnu11', '-Wall', '-Wextra', '-Werror',
+    subprocess.run([test_support.compiler(), '-std=gnu11', '-Wall', '-Wextra', '-Werror',
                     '-Wno-unused-parameter', '-Wno-sign-compare',
                     '-D__WINESRC__', '-D_WIN64', '-I' + str(root / 'include'),
                     '-fsanitize=address,undefined', '-fno-sanitize-recover=all',

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Exercise Horizon input ownership and cross-thread foreground transitions."""
 from pathlib import Path
+import test_support
 import re
 import subprocess
 import tempfile
@@ -243,6 +244,6 @@ body = "\n".join(function(name) for name in (
 with tempfile.TemporaryDirectory(prefix="horizon-thread-input-") as tmp:
     code, exe = Path(tmp) / "test.c", Path(tmp) / "test"
     code.write_text(fixture + body + tests)
-    subprocess.run(["clang", "-std=gnu11", "-g", "-Wall", "-Wextra", "-Werror", "-pthread",
+    subprocess.run([test_support.compiler(), "-std=gnu11", "-g", "-Wall", "-Wextra", "-Werror", "-pthread",
                     "-fsanitize=address,undefined", str(code), "-o", str(exe)], check=True)
     subprocess.run([str(exe)], check=True, timeout=10)

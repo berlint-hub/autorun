@@ -5,6 +5,7 @@ import subprocess
 import tempfile
 
 from check_horizon_async_sockets import definition, root
+import test_support
 
 fixture = r'''
 #include <assert.h>
@@ -103,6 +104,6 @@ fixture = (fixture.replace('@HEADER@', (root / 'dlls/ntdll/unix/horizon_byte_pip
 with tempfile.TemporaryDirectory(prefix='wine-nx-pipe-descriptors-') as tmp:
     tmp = Path(tmp)
     (tmp / 'test.c').write_text(fixture, errors='surrogateescape')
-    subprocess.run([os.environ.get('CC', 'cc'), '-g', '-Wall', '-Werror', '-Wno-unused-function',
+    subprocess.run([test_support.compiler(), '-g', '-Wall', '-Werror', '-Wno-unused-function',
                     '-fsanitize=address,undefined', str(tmp / 'test.c'), '-o', str(tmp / 'test')], check=True)
     print(subprocess.run([str(tmp / 'test')], check=True, capture_output=True, text=True).stdout.strip())

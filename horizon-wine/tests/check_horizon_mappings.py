@@ -11,6 +11,7 @@ from pathlib import Path
 import re
 import subprocess
 import tempfile
+import test_support
 
 root = Path(__file__).resolve().parents[2]
 horizon = (root / 'dlls/ntdll/unix/horizon.c').read_text()
@@ -177,6 +178,6 @@ with tempfile.TemporaryDirectory() as tmp:
     c_file = Path(tmp) / 'horizon_mappings.c'
     exe = Path(tmp) / 'horizon_mappings'
     c_file.write_text(source)
-    subprocess.run(['cc', '-std=gnu99', '-O1', '-Wall', '-Wno-unused-parameter', '-Wno-unused-function', '-Werror',
+    subprocess.run([test_support.compiler(), '-std=gnu99', '-O1', '-Wall', '-Wno-unused-parameter', '-Wno-unused-function', '-Werror',
                     '-I', str(root / 'include'), '-o', str(exe), str(c_file)], check=True)
     subprocess.run([str(exe)], check=True)

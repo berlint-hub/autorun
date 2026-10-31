@@ -1,0 +1,81 @@
+# The checks that run on an ordinary x86_64 machine: every script compiles,
+# every shell script parses, every JSON file loads, and the host tests that do
+# not need a Switch, an ARM64 host or a container.  The ARM64 and Switch builds
+# stay in .gitlab-ci.yml, which needs a runner with devkitA64 and Docker.
+name: Checks
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: checks-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  syntax:
+    name: Syntax
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Python files compile
+        run: |
+          set -eu
+          git ls-files -z '*.py' | xargs -0 python3 -m py_compile
+
+      - name: Shell scripts parse
+        run: |
+          set -eu
+          git ls-files -z '*.sh' | xargs -0 -n1 sh -n
+
+      - name: JSON files load
+        run: |
+          set -eu
+          python3 - <<'PY'
+          import json
+          import subprocess
+
+          files = subprocess.run( [ 'git', 'ls-files', '-z', '*.json' ], capture_output=True, check=True ).stdout.decode().split( '\0' )
+          files = [ name for name in files if name ]
+          for name in files:
+              with open( name, 'rb' ) as file:
+                  json.load( file )
+          print( f'{len( files )} JSON files load' )
+          PY
+
+  host-tests:
+    name: Host tests
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      # The C fixtures are written for clang's diagnostics; tests/test_support.py
+      # falls back to cc, so a machine without it still runs them.
+      - name: Install clang
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends clang
+
+      - name: Host tests
+        run: |
+          set -eu
+          for test in horizon-wine/tests/check_*.py; do
+              echo "::group::$test"
+              python3 "$test"
+              echo "::endgroup::"
+          done
+
+      # Each script prints SKIP and exits 0 when its tool, host or checkout is
+      # missing, so the ones that can run here run and the rest say why not.
+      - name: Runtime and console tests
+        run: |
+          set -eu
+          for script in horizon-wine/check-*.sh horizon-wine/tests/check-*.sh; do
+              echo "::group::$script"
+              sh "$script"
+              echo "::endgroup::"
+          done

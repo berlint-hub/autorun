@@ -14,10 +14,13 @@ So: the runtime's profile must be named after GetUserName, its environment must
 agree with it, the per-user folders shell32 precreates must be made, and the
 settings the runtime writes for a game must sit inside that profile."""
 from pathlib import Path
+import test_support
 import re
 import sys
 
 root = Path(__file__).resolve().parents[2]
+test_support.path(root / 'game-fixes/profiles/falloutnv.json',
+                  'the profiles are the game fixes repository, game-fixes')
 runtime = (root / 'horizon-wine/source/runtime.c').read_text()
 advapi = (root / 'dlls/advapi32/advapi.c').read_text()
 shellpath = (root / 'dlls/shell32/shellpath.c').read_text()

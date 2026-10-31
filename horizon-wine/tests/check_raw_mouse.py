@@ -11,6 +11,7 @@ the payload has to carry."""
 from pathlib import Path
 import subprocess
 import tempfile
+import test_support
 
 root = Path(__file__).resolve().parents[2]
 header = (root / 'dlls/ntdll/unix/horizon_mouse.h').read_text()
@@ -120,5 +121,5 @@ with tempfile.TemporaryDirectory() as tmp:
     source = Path(tmp) / 'raw_mouse.c'
     source.write_text(fixture.replace('@HEADER@', header))
     binary = Path(tmp) / 'raw_mouse'
-    subprocess.run(['cc', '-o', str(binary), str(source)], check=True)
+    subprocess.run([test_support.compiler(), '-o', str(binary), str(source)], check=True)
     print(subprocess.run([str(binary)], check=True, capture_output=True, text=True).stdout.strip())

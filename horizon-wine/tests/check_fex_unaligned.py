@@ -4,9 +4,11 @@ from pathlib import Path
 import os
 import subprocess
 import tempfile
+import test_support
 
 horizon_wine = Path(__file__).resolve().parents[1]
-source = Path(os.environ.get('WINE_NX_FEX_DIR', horizon_wine / 'toolchains/fex-2609'))
+source = test_support.path(Path(os.environ.get('WINE_NX_FEX_DIR', horizon_wine / 'toolchains/fex-2609')),
+                           'FEX is fetched into horizon-wine/toolchains, or set WINE_NX_FEX_DIR')
 
 
 def structure(path, name):
@@ -154,9 +156,9 @@ with tempfile.TemporaryDirectory(prefix='fex-unaligned-') as temp:
     cpp = build / 'unaligned.cpp'
     cpp.write_text(fixture + handler + tests)
     sanitizers = ['-fsanitize=address,undefined', '-fno-sanitize=function']
-    subprocess.run([os.environ.get('WINE_NX_HOST_CC', '/usr/bin/clang'), '-g', '-pthread',
+    subprocess.run([test_support.host_cc(), '-g', '-pthread',
                     *sanitizers, '-c', str(horizon_wine / 'source/fex_jit.c'), '-o', str(build / 'jit.o')], check=True)
-    subprocess.run([os.environ.get('WINE_NX_HOST_CXX', '/usr/bin/clang++'), '-std=c++20', '-O2', '-g',
+    subprocess.run([test_support.host_cxx(), '-std=c++20', '-O2', '-g',
                     '-pthread', *sanitizers, '-DFEX_HORIZON', '-DARCHITECTURE_arm64',
                     '-DFEX_DISABLE_TELEMETRY', '-DFMT_HEADER_ONLY',
                     '-I', str(source / 'CodeEmitter'), '-I', str(source / 'FEXCore/include'),

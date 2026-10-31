@@ -4,6 +4,7 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+import test_support
 
 root = Path(__file__).resolve().parents[2]
 def read(path):
@@ -152,5 +153,5 @@ with tempfile.TemporaryDirectory(prefix='wine-nx-ancestry-') as temp:
     src = Path(temp) / 'test.c'
     exe = Path(temp) / 'test'
     src.write_text(code)
-    subprocess.run(['cc', '-g', '-fsanitize=address,undefined', '-pthread', str(src), '-o', str(exe)], check=True)
+    subprocess.run([test_support.compiler(), '-g', '-fsanitize=address,undefined', '-pthread', str(src), '-o', str(exe)], check=True)
     subprocess.run([str(exe)], check=True)

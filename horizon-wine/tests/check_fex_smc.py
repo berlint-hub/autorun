@@ -3,6 +3,7 @@ from pathlib import Path
 import os
 import subprocess
 import tempfile
+import test_support
 
 root = Path(__file__).resolve().parents[2]
 vm = (root / 'dlls/ntdll/unix/virtual.c').read_text()
@@ -161,7 +162,7 @@ with tempfile.TemporaryDirectory(prefix='fex-smc-') as directory:
     (path / 'smc.c').write_text(fixture + function(vm, 'static int get_unix_prot(') +
                               function(host, 'int horizon_protect_fex_page(') +
                               function(vm, 'NTSTATUS wine_nx_fex_protect_code(') + tests)
-    cc = os.environ.get('WINE_NX_HOST_CC', '/usr/bin/clang')
+    cc = test_support.host_cc()
     subprocess.run([cc, '-Wall', '-Wextra', '-Werror', '-pthread', '-fsanitize=address,undefined',
                     str(path / 'smc.c'), '-o', str(path / 'smc')], check=True)
     subprocess.run([str(path / 'smc')], check=True)

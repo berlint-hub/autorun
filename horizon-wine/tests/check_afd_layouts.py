@@ -5,6 +5,7 @@ import os
 import re
 import subprocess
 import tempfile
+import test_support
 
 root = Path(__file__).resolve().parents[2]
 source = (root / 'dlls/ntdll/unix/horizon.c').read_text()
@@ -143,7 +144,7 @@ with tempfile.TemporaryDirectory() as tmp:
     c = Path(tmp) / 'afd.c'
     exe = Path(tmp) / 'afd'
     c.write_text(fixture)
-    subprocess.run([os.environ.get('CC', 'cc'), '-std=gnu11', '-Wall', '-Wextra', '-Werror',
+    subprocess.run([test_support.compiler(), '-std=gnu11', '-Wall', '-Wextra', '-Werror',
                     '-fsanitize=address,undefined', '-fno-omit-frame-pointer', '-pthread',
                     str(c), '-o', str(exe)], check=True)
     subprocess.run([str(exe)], check=True)

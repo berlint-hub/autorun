@@ -4,6 +4,7 @@ from pathlib import Path
 import os
 import subprocess
 import tempfile
+import test_support
 
 root = Path(__file__).resolve().parents[2]
 source = (root / 'dlls/opengl32/unix_wgl.c').read_text()
@@ -162,6 +163,6 @@ with tempfile.TemporaryDirectory() as tmp:
     c = Path(tmp) / 'buffer.c'
     exe = Path(tmp) / 'buffer'
     c.write_text(fixture)
-    subprocess.run([os.environ.get('CC', 'cc'), '-std=gnu11', '-Wall', '-Wextra', '-Werror',
+    subprocess.run([test_support.compiler(), '-std=gnu11', '-Wall', '-Wextra', '-Werror',
                     '-fsanitize=address,undefined', '-fno-omit-frame-pointer', str(c), '-o', str(exe)], check=True)
     subprocess.run([str(exe)], check=True)

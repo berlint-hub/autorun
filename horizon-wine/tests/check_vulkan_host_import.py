@@ -10,8 +10,10 @@ import re
 import subprocess
 import sys
 import tempfile
+import test_support
 
-mesa = Path(sys.argv[1]) if len(sys.argv) > 1 else Path.home() / "mesa-switch"
+mesa = test_support.path(Path(sys.argv[1]) if len(sys.argv) > 1 else Path.home() / "mesa-switch",
+                         "the files under test are mesa-switch's")
 
 
 def function(path, name):
@@ -132,7 +134,7 @@ with tempfile.TemporaryDirectory(prefix="wine-nx-vulkan-") as tmp:
     src, exe = Path(tmp) / "test.c", Path(tmp) / "test"
     src.write_text(prefix + code + test)
     for defines in (["-D__SWITCH__"], []):
-        subprocess.run(["cc", "-std=c11", "-fsanitize=address,undefined", "-g",
+        subprocess.run([test_support.compiler(), "-std=c11", "-fsanitize=address,undefined", "-g",
                         "-I", str(mesa / "include"), *defines, str(src), "-o", str(exe)], check=True)
         subprocess.run([str(exe)], check=True)
         print("PASS:", "Switch" if defines else "non-Switch", "import policy, cache mode, failure cleanup")

@@ -13,6 +13,7 @@ import re
 import socket
 import subprocess
 import tempfile
+import test_support
 
 root = Path(__file__).resolve().parents[2]
 source = (root / 'dlls/ntdll/unix/horizon.c').read_text()
@@ -227,7 +228,7 @@ int main( void )
 with tempfile.TemporaryDirectory(prefix='wine-nx-sock-bind-') as tmp:
     tmp = Path(tmp)
     (tmp / 'test.c').write_text(fixture)
-    subprocess.run(['cc', '-g', '-Wall', '-Werror', '-Wno-unused-function', '-fsanitize=address,undefined',
+    subprocess.run([test_support.compiler(), '-g', '-Wall', '-Werror', '-Wno-unused-function', '-fsanitize=address,undefined',
                     str(tmp / 'test.c'), '-o', str(tmp / 'test')], check=True)
     out = subprocess.run([str(tmp / 'test')], check=True, capture_output=True, text=True).stdout.splitlines()
 

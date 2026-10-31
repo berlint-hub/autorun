@@ -3,8 +3,10 @@
 from pathlib import Path
 import subprocess
 import tempfile
+import test_support
 
 root = Path(__file__).resolve().parents[2]
+test_support.need_arm64('the fixture is AArch64 assembly from horizon.c')
 source = (root / 'dlls/ntdll/unix/horizon.c').read_text()
 start = source.index('void horizon_continue_context( const CONTEXT *context )')
 end = source.index('\n}\n', start) + 3
@@ -47,5 +49,5 @@ with tempfile.TemporaryDirectory(prefix='wine-nx-continue-') as tmp:
     c = Path(tmp) / 'test.c'
     exe = Path(tmp) / 'test'
     c.write_text(fixture + function + tests)
-    subprocess.run(['clang', '-Wall', '-Wextra', '-Werror', '-fsanitize=address,undefined', str(c), '-o', str(exe)], check=True)
+    subprocess.run([test_support.compiler(), '-Wall', '-Wextra', '-Werror', '-fsanitize=address,undefined', str(c), '-o', str(exe)], check=True)
     subprocess.run([str(exe)], check=True)

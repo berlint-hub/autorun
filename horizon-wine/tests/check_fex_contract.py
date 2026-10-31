@@ -6,9 +6,11 @@ import re
 import subprocess
 import sys
 
+import test_support
+
 horizon_wine = Path(__file__).resolve().parents[1]
 # FEX is built by the DLL repository, horizon-dlls; its ABI stays here.
-sys.path.insert(0, str(horizon_wine.parent / 'horizon-dlls/tools'))
+test_support.add_path(horizon_wine.parent / 'horizon-dlls/tools')
 from fex_payload import required_exports, validate_image
 
 parser = argparse.ArgumentParser(description=__doc__)

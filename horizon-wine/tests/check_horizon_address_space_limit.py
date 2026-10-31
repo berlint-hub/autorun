@@ -4,6 +4,7 @@ from pathlib import Path
 import os
 import subprocess
 import tempfile
+import test_support
 
 
 root = Path(__file__).resolve().parents[2]
@@ -132,6 +133,6 @@ with tempfile.TemporaryDirectory(prefix='wine-nx-address-limit-') as temp:
     test = temp / 'address_limit.c'
     binary = temp / 'address_limit'
     test.write_text(fixture)
-    subprocess.run([os.environ.get('CC', 'cc'), '-std=gnu11', '-Wall', '-Wextra', '-Werror',
+    subprocess.run([test_support.compiler(), '-std=gnu11', '-Wall', '-Wextra', '-Werror',
                     '-fsanitize=address,undefined', str(test), '-o', str(binary)], check=True)
     subprocess.run([str(binary)], check=True)

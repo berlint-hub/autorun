@@ -2,6 +2,7 @@ from pathlib import Path
 import os
 import subprocess
 import tempfile
+import test_support
 
 horizon_wine = Path(__file__).resolve().parents[1]
 source = (horizon_wine / 'source/fex_exceptions.c').read_text().replace(
@@ -79,7 +80,7 @@ with tempfile.TemporaryDirectory(prefix='autorun-swap-threads-') as directory:
     unit = Path(directory) / 'threads.c'
     binary = Path(directory) / 'threads'
     unit.write_text(source + tests)
-    subprocess.run([os.environ.get('CC', 'clang'), '-std=gnu11', '-pthread', '-DWINE_NX_SWAP_POC',
+    subprocess.run([test_support.compiler(), '-std=gnu11', '-pthread', '-DWINE_NX_SWAP_POC',
                     '-Wall', '-Wextra', '-Werror', '-fsanitize=address,undefined', '-fno-sanitize-recover=undefined',
                     '-I' + str(horizon_wine / 'tests/swap_threads'), str(unit), '-o', str(binary)], check=True)
     subprocess.run([str(binary)], check=True)

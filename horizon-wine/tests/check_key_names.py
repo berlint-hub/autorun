@@ -3,6 +3,7 @@
 from pathlib import Path
 import subprocess
 import tempfile
+import test_support
 
 root = Path(__file__).resolve().parents[2]
 fixture = r'''
@@ -34,6 +35,6 @@ with tempfile.TemporaryDirectory() as tmp:
     source = Path(tmp) / 'keys.c'
     source.write_text(fixture)
     binary = Path(tmp) / 'keys'
-    subprocess.run(['cc', '-Wall', '-Wextra', '-Werror', '-I', str(root / 'horizon-wine/source'),
+    subprocess.run([test_support.compiler(), '-Wall', '-Wextra', '-Werror', '-I', str(root / 'horizon-wine/source'),
                     '-o', str(binary), str(source)], check=True)
     subprocess.run([str(binary)], check=True)

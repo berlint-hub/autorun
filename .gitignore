@@ -1,7 +1,8 @@
 /horizon-wine/build-*/
 /horizon-wine/toolchains/
 /horizon-wine/vendor/
-/horizon-wine/**/__pycache__/
+__pycache__/
+*.py[cod]
 .DS_Store
 
 debug

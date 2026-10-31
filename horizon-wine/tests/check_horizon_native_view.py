@@ -3,6 +3,7 @@ from pathlib import Path
 import os
 import subprocess
 import tempfile
+import test_support
 
 root = Path(__file__).resolve().parents[2]
 source = (root / 'dlls/ntdll/unix/virtual.c').read_text()
@@ -80,7 +81,7 @@ int main(void)
 with tempfile.TemporaryDirectory(prefix='horizon-native-view-') as directory:
     path = Path(directory)
     (path / 'view.c').write_text(fixture)
-    subprocess.run([os.environ.get('CC', 'cc'), '-Wall', '-Wextra', '-Werror', '-O1',
+    subprocess.run([test_support.compiler(), '-Wall', '-Wextra', '-Werror', '-O1',
                     '-fsanitize=address,undefined', '-pthread', str(path / 'view.c'),
                     '-o', str(path / 'view')], check=True)
     subprocess.run([str(path / 'view')], check=True)

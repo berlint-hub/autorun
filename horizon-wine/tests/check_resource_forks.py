@@ -14,6 +14,7 @@ program sees."""
 from pathlib import Path
 import subprocess
 import tempfile
+import test_support
 
 root = Path(__file__).resolve().parents[2]
 horizon = (root / 'dlls/ntdll/unix/horizon.c').read_text()
@@ -89,6 +90,6 @@ with tempfile.TemporaryDirectory() as tmp:
     source = tmp / 'forks.c'
     source.write_text(fixture.replace('@BODY@', body))
     binary = tmp / 'forks'
-    subprocess.run(['cc', '-o', str(binary), str(source)], check=True)
+    subprocess.run([test_support.compiler(), '-o', str(binary), str(source)], check=True)
     out = subprocess.run([str(binary), str(card)], check=True, capture_output=True, text=True)
     print(out.stdout.strip())

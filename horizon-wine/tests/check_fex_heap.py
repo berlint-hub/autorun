@@ -4,9 +4,11 @@ from pathlib import Path
 import os
 import subprocess
 import tempfile
+import test_support
 
 horizon_wine = Path(__file__).resolve().parents[1]
-source = Path(os.environ.get('WINE_NX_FEX_DIR', horizon_wine / 'toolchains/fex-2609'))
+source = test_support.path(Path(os.environ.get('WINE_NX_FEX_DIR', horizon_wine / 'toolchains/fex-2609')),
+                           'FEX is fetched into horizon-wine/toolchains, or set WINE_NX_FEX_DIR')
 crt = source / 'Source/Windows/Common/CRT'
 header = (crt / 'HorizonHeap.h').read_text().replace('#pragma once', '')
 for include in ('../Priv.h', 'unixlib.h'):
@@ -302,7 +304,7 @@ int main() {
   puts("FEX virtual allocations: wide/compact hosts, fixed commits, merged limits and no low-address retry passed");
 }
 '''
-cc = os.environ.get('WINE_NX_HOST_CXX', '/usr/bin/clang++')
+cc = test_support.host_cxx()
 with tempfile.TemporaryDirectory(prefix='fex-heap-') as directory:
     build = Path(directory)
     for name, code, defines in (

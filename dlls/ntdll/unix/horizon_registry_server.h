@@ -264,7 +264,9 @@ static int horizon_registry_load_file( struct horizon_reg_key *base, const char 
 
 static void horizon_registry_load_hive( struct horizon_reg_key *base, const char *name )
 {
-    char path[256];
+    /* Room for the directory, a hive name and the ".tmp" of a half-written
+     * one, which is what a build that stopped mid-save leaves behind. */
+    char path[512];
 
     snprintf( path, sizeof(path), "%s%s", HORIZON_REGISTRY_DIR, name );
     if (horizon_registry_load_file( base, path )) return;

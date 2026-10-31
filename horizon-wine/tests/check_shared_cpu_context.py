@@ -3,8 +3,10 @@ from pathlib import Path
 import os
 import subprocess
 import tempfile
+import test_support
 
 root = Path(__file__).resolve().parents[2]
+test_support.need_arm64('ARM64EC and ARM64 contexts come from dlls/ntdll/unwind.h, which only defines them on AArch64')
 virtual = (root / 'dlls/ntdll/unix/virtual.c').read_text()
 system = (root / 'dlls/ntdll/unix/system.c').read_text()
 exception = (root / 'dlls/ntdll/exception.c').read_text()
@@ -119,7 +121,7 @@ int main(void) {
 with tempfile.TemporaryDirectory(prefix='wine-nx-shared-context-') as directory:
     path = Path(directory)
     (path / 'test.c').write_text(fixture + code + tests)
-    subprocess.run([os.environ.get('WINE_NX_HOST_CC', '/usr/bin/clang'), '-std=gnu11', '-g', '-O2',
+    subprocess.run([test_support.host_cc(), '-std=gnu11', '-g', '-O2',
                     '-fms-extensions', '-fshort-wchar', '-fsanitize=address,undefined',
                     '-D__WINESRC__', '-D_WIN64', '-D__SWITCH__',
                     '-I' + str(root / 'include'), '-I' + str(root / 'dlls/ntdll'),

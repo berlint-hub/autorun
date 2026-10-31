@@ -4,6 +4,7 @@ from pathlib import Path
 import os
 import subprocess
 import tempfile
+import test_support
 
 root = Path(__file__).resolve().parents[2]
 source = (root / 'dlls/ntdll/unix/virtual.c').read_text()
@@ -73,7 +74,7 @@ int main(void)
 with tempfile.TemporaryDirectory(prefix='fex-memory-') as directory:
     path = Path(directory)
     (path / 'memory.c').write_text(fixture + function + tests)
-    cc = os.environ.get('WINE_NX_HOST_CC', '/usr/bin/clang')
+    cc = test_support.host_cc()
     subprocess.run([cc, '-Wall', '-Wextra', '-Werror', '-pthread', '-fsanitize=address,undefined',
                     str(path / 'memory.c'), '-o', str(path / 'memory')], check=True)
     subprocess.run([str(path / 'memory')], check=True)

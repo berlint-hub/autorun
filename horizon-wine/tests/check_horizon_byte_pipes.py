@@ -5,6 +5,7 @@ import subprocess
 import tempfile
 
 from check_horizon_async_sockets import definition, fixture, root, source, struct
+import test_support
 
 fixture = fixture.replace('int main(', 'int socket_test_main(')
 fixture = fixture.replace('int type, refs, signaled, file_fd;', '''int type, refs, signaled, file_fd;
@@ -423,6 +424,6 @@ fixture += extra
 with tempfile.TemporaryDirectory(prefix='wine-nx-byte-pipes-') as tmp:
     tmp = Path(tmp)
     (tmp / 'test.c').write_text(fixture, errors='surrogateescape')
-    subprocess.run([os.environ.get('CC', 'cc'), '-g', '-Wall', '-Werror', '-Wno-unused-function',
+    subprocess.run([test_support.compiler(), '-g', '-Wall', '-Werror', '-Wno-unused-function',
                     '-fsanitize=address,undefined', str(tmp / 'test.c'), '-o', str(tmp / 'test')], check=True)
     print(subprocess.run([str(tmp / 'test')], check=True, capture_output=True, text=True).stdout.strip())

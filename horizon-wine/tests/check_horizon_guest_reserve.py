@@ -10,6 +10,7 @@ import os
 import re
 import subprocess
 import tempfile
+import test_support
 
 root = Path(__file__).resolve().parents[2]
 source = Path(os.environ.get('WINE_NX_VIRTUAL_SOURCE', root / 'dlls/ntdll/unix/virtual.c')).read_text()
@@ -367,7 +368,7 @@ with tempfile.TemporaryDirectory() as tmp:
     c = Path(tmp) / 'guest_reserve.c'
     exe = Path(tmp) / 'guest_reserve'
     c.write_text(fixture)
-    subprocess.run([os.environ.get('CC', 'cc'), '-std=gnu11', '-O1', '-Wall', '-Wextra', '-Werror',
+    subprocess.run([test_support.compiler(), '-std=gnu11', '-O1', '-Wall', '-Wextra', '-Werror',
                     '-Wno-sign-compare', '-Wno-tautological-compare',
                     '-fsanitize=address,undefined', '-fno-omit-frame-pointer',
                     '-I' + str(root / 'include'), str(c), '-o', str(exe)], check=True)

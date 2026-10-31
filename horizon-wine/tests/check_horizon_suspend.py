@@ -5,8 +5,10 @@ import re
 import subprocess
 import tempfile
 from horizon_sync_fixture import legacy_sync_support
+import test_support
 
 root = Path(__file__).resolve().parents[2]
+test_support.need_arm64('the fixture reads CONTEXT.Pc and CONTEXT.Sp of ARM64')
 source = (root / 'dlls/ntdll/unix/horizon.c').read_text()
 
 
@@ -283,7 +285,7 @@ int main(void) {
 with tempfile.TemporaryDirectory(prefix='wine-nx-suspend-') as directory:
     path = Path(directory)
     (path / 'test.c').write_text(fixture + functions + tests)
-    subprocess.run([os.environ.get('WINE_NX_HOST_CC', '/usr/bin/clang'), '-std=gnu11', '-g', '-O1',
+    subprocess.run([test_support.host_cc(), '-std=gnu11', '-g', '-O1',
                     '-fms-extensions', '-Wall', '-Wextra', '-Werror', '-Wno-missing-field-initializers',
                     '-fsanitize=address,undefined', '-fno-sanitize-recover=all', '-pthread', '-D__WINESRC__', '-D_WIN64',
                     '-I' + str(root / 'include'), '-I' + str(root / 'dlls/ntdll/unix'),
@@ -291,7 +293,7 @@ with tempfile.TemporaryDirectory(prefix='wine-nx-suspend-') as directory:
     subprocess.run([str(path / 'test')], check=True, timeout=30)
     for name, text in (('continue', resume_test), ('report', report_test)):
         (path / f'{name}.c').write_text(text)
-        subprocess.run([os.environ.get('WINE_NX_HOST_CC', '/usr/bin/clang'), '-std=gnu11', '-g', '-O1',
+        subprocess.run([test_support.host_cc(), '-std=gnu11', '-g', '-O1',
                         '-fms-extensions', '-Wall', '-Wextra', '-Werror',
                         '-fsanitize=address,undefined', '-fno-sanitize-recover=all', '-pthread',
                         '-D__WINESRC__', '-D_WIN64', '-I' + str(root / 'include'),

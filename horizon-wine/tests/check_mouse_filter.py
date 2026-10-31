@@ -4,6 +4,7 @@ from pathlib import Path
 import re
 import subprocess
 import tempfile
+import test_support
 
 root = Path(__file__).resolve().parents[2]
 horizon = (root / 'dlls/ntdll/unix/horizon.c').read_text()
@@ -55,6 +56,6 @@ with tempfile.TemporaryDirectory(prefix='wine-nx-mouse-filter-') as temp:
     src.write_text(fixture + defines + '\n' +
                    function(horizon, 'static int horizon_server_msg_in_filter(') + '\n' +
                    function(horizon, 'static int horizon_server_mouse_message_matches(') + tests)
-    subprocess.run(['cc', '-g', '-Wall', '-Werror', '-fsanitize=address,undefined', str(src), '-o', str(exe)],
+    subprocess.run([test_support.compiler(), '-g', '-Wall', '-Werror', '-fsanitize=address,undefined', str(src), '-o', str(exe)],
                    check=True)
     subprocess.run([str(exe)], check=True)

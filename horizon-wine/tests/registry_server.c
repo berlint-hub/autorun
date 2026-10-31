@@ -55,7 +55,9 @@ static int horizon_server_write_reply(int fd, const void *r, unsigned int size, 
 {
     (void)fd; assert(size <= sizeof(last_reply) && len <= sizeof(payload));
     memset(last_reply,0,sizeof(last_reply)); memcpy(last_reply,r,size);
-    if(len) memcpy(payload,data,len); payload_size = len; return 0;
+    if (len) memcpy(payload,data,len);
+    payload_size = len;
+    return 0;
 }
 static int horizon_server_write_status(int fd, unsigned int status)
 { struct horizon_server_reply_header r = {status,0}; return horizon_server_write_reply(fd,&r,sizeof(r),NULL,0); }

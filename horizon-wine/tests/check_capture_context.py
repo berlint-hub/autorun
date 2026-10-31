@@ -12,8 +12,10 @@ from pathlib import Path
 import platform
 import subprocess
 import tempfile
+import test_support
 
 root = Path(__file__).resolve().parents[2]
+test_support.need_arm64('the fixture is AArch64 assembly from horizon.c')
 horizon = (root / 'dlls/ntdll/unix/horizon.c').read_text()
 
 def function(source, name):
@@ -198,7 +200,7 @@ if platform.machine().lower() in ('arm64', 'aarch64'):
         path = Path(tmp) / 'capture.c'
         path.write_text(source)
         binary = Path(tmp) / 'capture'
-        subprocess.run(['cc', '-O1', '-o', str(binary), str(path)], check=True)
+        subprocess.run([test_support.compiler(), '-O1', '-o', str(binary), str(path)], check=True)
         print(subprocess.run([str(binary)], check=True, capture_output=True, text=True).stdout.strip())
 else:
     print('PASS: the capture takes every register the restore puts back, reports CONTEXT_ARM64_FULL '

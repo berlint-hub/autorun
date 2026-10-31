@@ -3,6 +3,7 @@
 from pathlib import Path
 import subprocess
 import tempfile
+import test_support
 
 root = Path(__file__).resolve().parents[2]
 source = (root / 'dlls/ntdll/unix/horizon.c').read_text()
@@ -58,5 +59,5 @@ int main(void) {
 with tempfile.TemporaryDirectory(prefix='wine-nx-native-stack-') as temp:
     src, exe = Path(temp) / 'test.c', Path(temp) / 'test'
     src.write_text(fixture + source[start:end] + tests)
-    subprocess.run(['cc', '-fsanitize=address,undefined', str(src), '-o', str(exe)], check=True)
+    subprocess.run([test_support.compiler(), '-fsanitize=address,undefined', str(src), '-o', str(exe)], check=True)
     subprocess.run([str(exe)], check=True)

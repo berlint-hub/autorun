@@ -4,6 +4,7 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+import test_support
 
 root = Path(__file__).resolve().parents[2]
 source = (root / 'dlls/ntdll/unix/signal_arm64.c').read_text()
@@ -102,7 +103,7 @@ with tempfile.TemporaryDirectory(prefix='wine-nx-callback-') as tmp:
     c = Path(tmp) / 'test.c'
     exe = Path(tmp) / 'test'
     c.write_text(fixture + frames + calls + tests)
-    subprocess.run(['clang', '-Wall', '-Wextra', '-Werror', '-fsanitize=address,undefined', '-pthread', str(c), '-o', str(exe)], check=True)
+    subprocess.run([test_support.compiler(), '-Wall', '-Wextra', '-Werror', '-fsanitize=address,undefined', '-pthread', str(c), '-o', str(exe)], check=True)
     result = subprocess.run([str(exe)], capture_output=baseline, text=True)
     if baseline:
         assert result.returncode != 0, 'Old callback bridge unexpectedly passed'

@@ -5,6 +5,7 @@ from pathlib import Path
 import re
 import subprocess
 import tempfile
+import test_support
 
 root = Path(__file__).resolve().parents[1]
 forwarder = (root / 'source/forwarder.c').read_text()
@@ -63,6 +64,6 @@ int main(void)
 with tempfile.TemporaryDirectory(prefix='autorun-low-window-routing-') as directory:
     directory = Path(directory)
     (directory / 'routing.c').write_text(fixture)
-    subprocess.run([os.environ.get('CC', 'cc'), '-Wall', '-Wextra', '-Werror',
+    subprocess.run([test_support.compiler(), '-Wall', '-Wextra', '-Werror',
                     str(directory / 'routing.c'), '-o', str(directory / 'routing')], check=True)
     subprocess.run([str(directory / 'routing')], check=True)

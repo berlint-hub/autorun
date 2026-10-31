@@ -16,6 +16,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import test_support
 
 root = Path(__file__).resolve().parents[2]
 sync = (root / 'dlls/ntdll/unix/sync.c').read_text()
@@ -60,7 +61,7 @@ int main(void)
 with tempfile.TemporaryDirectory() as tmp:
     source, binary = Path(tmp) / 'qpc.c', Path(tmp) / 'qpc'
     source.write_text(fixture)
-    subprocess.run(['cc', '-std=gnu11', '-Wall', '-Werror', '-Wno-unused-function', '-Wno-unused-variable',
+    subprocess.run([test_support.compiler(), '-std=gnu11', '-Wall', '-Werror', '-Wno-unused-function', '-Wno-unused-variable',
                     '-fsanitize=address,undefined', str(source), '-o', str(binary)], check=True)
     result = subprocess.run([str(binary)], capture_output=True, text=True)
     print(result.stdout, end='')

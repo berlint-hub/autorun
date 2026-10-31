@@ -13,6 +13,7 @@ the allocator can hand out, and that is what the function asks for now."""
 from pathlib import Path
 import subprocess
 import tempfile
+import test_support
 
 root = Path(__file__).resolve().parents[2]
 source = (root / 'dlls/ntdll/unix/horizon.c').read_text()
@@ -92,7 +93,7 @@ def run(binary, total, kernel_used, free_bytes, rc=0):
 with tempfile.TemporaryDirectory(prefix='wine-nx-memory-status-') as tmp:
     tmp = Path(tmp)
     (tmp / 'test.c').write_text(fixture)
-    subprocess.run(['cc', '-g', '-Wall', '-Werror', '-Wno-unused-function', '-fsanitize=address,undefined',
+    subprocess.run([test_support.compiler(), '-g', '-Wall', '-Werror', '-Wno-unused-function', '-fsanitize=address,undefined',
                     str(tmp / 'test.c'), '-o', str(tmp / 'test')], check=True)
     test = tmp / 'test'
 

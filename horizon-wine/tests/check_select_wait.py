@@ -4,6 +4,7 @@ from pathlib import Path
 import subprocess
 import tempfile
 from horizon_sync_fixture import legacy_sync_support
+import test_support
 source = (Path(__file__).resolve().parents[2] / 'dlls/ntdll/unix/horizon.c').read_text()
 def extract(start, end):
     return source[source.index(start):source.index(end, source.index(start))]
@@ -166,5 +167,5 @@ int main(void) {
 with tempfile.TemporaryDirectory(prefix='wine-nx-wait-test-') as tmp:
     c = Path(tmp) / 'test.c'; exe = Path(tmp) / 'test'
     c.write_text(fixture + extract('static unsigned int horizon_server_select_wait(', 'static unsigned int horizon_server_select_status(') + extract('static int horizon_server_handle_select(', 'int horizon_server_sync_call(') + tests)
-    subprocess.run(['clang', '-Wall', '-Wextra', '-Werror', '-fsanitize=address,undefined', str(c), '-o', str(exe)], check=True)
+    subprocess.run([test_support.compiler(), '-Wall', '-Wextra', '-Werror', '-fsanitize=address,undefined', str(c), '-o', str(exe)], check=True)
     subprocess.run([str(exe)], check=True)

@@ -9,7 +9,7 @@ set -eu
 root="$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)"
 horizon_wine="$root/horizon-wine"
 repo="$root/game-fixes/switch/wine/game-fixes"
-[ -f "$repo/index.json" ] || { echo "no game fixes repository in $root/game-fixes" >&2; exit 1; }
+[ -f "$repo/index.json" ] || { echo "SKIP: needs $repo/index.json (the game fixes repository, game-fixes)" >&2; exit 0; }
 build="$(mktemp -d "${TMPDIR:-/tmp}/game-fixes.XXXXXX")"
 trap 'rm -rf "$build"' EXIT HUP INT TERM
 

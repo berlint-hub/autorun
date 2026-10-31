@@ -3,6 +3,7 @@ from pathlib import Path
 import os
 import subprocess
 import tempfile
+import test_support
 
 root = Path(__file__).resolve().parents[2]
 source = (root / 'horizon-wine/source/runtime.c').read_text(encoding='utf-8')
@@ -145,7 +146,7 @@ with tempfile.TemporaryDirectory(prefix='prince-resolution-') as directory:
     build = Path(directory)
     path = build / 'test.c'
     path.write_text(fixture)
-    subprocess.run([os.environ.get('CC', 'clang'), '-std=gnu11', '-Wall', '-Wextra', '-Werror',
+    subprocess.run([test_support.compiler(), '-std=gnu11', '-Wall', '-Wextra', '-Werror',
                     '-fsanitize=address,undefined', '-D__WINESRC__', '-D_WIN64',
                     '-I' + str(root / 'include'), '-I' + str(root / 'dlls/ntdll/unix'),
                     str(path), '-o', str(build / 'test')], check=True)

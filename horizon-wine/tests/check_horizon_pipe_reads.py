@@ -3,6 +3,7 @@ import os
 from pathlib import Path
 import subprocess
 import tempfile
+import test_support
 
 root = Path(__file__).resolve().parents[2]
 source = (root / 'dlls/ntdll/unix/file.c').read_text()
@@ -113,7 +114,7 @@ fixture = (fixture.replace('@HEADER@', (root / 'dlls/ntdll/unix/horizon_byte_pip
 with tempfile.TemporaryDirectory(prefix='wine-nx-pipe-reads-') as tmp:
     tmp = Path(tmp)
     (tmp / 'test.c').write_text(fixture)
-    subprocess.run([os.environ.get('CC', 'cc'), '-g', '-Wall', '-Wextra', '-Werror',
+    subprocess.run([test_support.compiler(), '-g', '-Wall', '-Wextra', '-Werror',
                     '-Wno-unused-function', '-fsanitize=address,undefined', '-pthread',
                     str(tmp / 'test.c'), '-o', str(tmp / 'test')], check=True)
     print(subprocess.run([str(tmp / 'test')], check=True, capture_output=True, text=True).stdout.strip())

@@ -4,6 +4,7 @@ from pathlib import Path
 import re
 import subprocess
 import tempfile
+import test_support
 
 root = Path(__file__).resolve().parents[2]
 source = (root / 'dlls/ntdll/unix/horizon.c').read_text()
@@ -110,6 +111,6 @@ body = '\n'.join(function(name) for name in (
 with tempfile.TemporaryDirectory(prefix='horizon-queue-wakes-') as tmp:
     code, exe = Path(tmp) / 'test.c', Path(tmp) / 'test'
     code.write_text(fixture + body + tests)
-    subprocess.run(['clang', '-Wall', '-Wextra', '-Werror', '-fsanitize=address,undefined',
+    subprocess.run([test_support.compiler(), '-Wall', '-Wextra', '-Werror', '-fsanitize=address,undefined',
                     '-I' + str(root / 'dlls/ntdll/unix'), str(code), '-o', str(exe)], check=True)
     subprocess.run([str(exe)], check=True, timeout=10)

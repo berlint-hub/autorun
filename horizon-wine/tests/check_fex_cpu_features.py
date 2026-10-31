@@ -6,7 +6,10 @@ import re
 import subprocess
 import tempfile
 
+import test_support
+
 root = Path(__file__).resolve().parents[2]
+test_support.need_tool('cmake', 'the check builds FEXCore first')
 horizon_wine = root / "horizon-wine"
 source = Path(os.environ.get("WINE_NX_FEX_DIR", horizon_wine / "toolchains/fex-2609"))
 build = Path(os.environ.get("WINE_NX_FEX_CORE_BUILD_DIR", horizon_wine / "toolchains/build-fex-2609-core-check"))
@@ -16,7 +19,7 @@ definitions = re.findall(r"^#define (CPU_FEATURE_\w+) (0x[0-9a-fA-F]+)",
 assert definitions
 with tempfile.TemporaryDirectory(prefix="fex-cpu-") as directory:
     output = Path(directory) / "cpu-features"
-    args = [os.environ.get("WINE_NX_HOST_CXX", "clang++"), "-std=c++20", "-O2", "-g", "-Wall", "-Wextra",
+    args = [test_support.host_cxx(), "-std=c++20", "-O2", "-g", "-Wall", "-Wextra",
             "-DARCHITECTURE_arm64=1", "-DFEX_DISABLE_TELEMETRY=1", "-DFEX_HORIZON_CACHE_TEST", "-DFEX_HORIZON",
             "-D__WINESRC__", "-DWINE_UNIX_LIB", "-D_WIN64", "-DWIN32_LEAN_AND_MEAN", "-fshort-wchar"]
     args += ["-D" + name + "=" + value for name, value in definitions]

@@ -4,8 +4,11 @@ import struct
 import subprocess
 import tempfile
 from zipfile import ZipFile, ZIP_DEFLATED
+import test_support
 
 horizon_wine = Path(__file__).resolve().parents[1]
+test_support.need_header('minizip/unzip.h', 'the installer reads the archive with minizip')
+test_support.need_library('minizip')
 deps = Path(os.environ.get('AUTORUN_HOST_DEPS', '/tmp/autorun-host-deps/root/usr'))
 managed = ['wine-nx-runtime.nro', 'drive_c/windows/system32/ntdll.dll',
            'drive_c/windows/system32/kernel32.dll', 'drive_c/windows/system32/kernelbase.dll',
@@ -29,7 +32,7 @@ def data(name, marker):
 with tempfile.TemporaryDirectory(prefix='autorun-runtime-update-') as temporary:
     temporary = Path(temporary)
     executable = temporary / 'test'
-    command = [os.environ.get('CC', 'cc'), '-std=gnu11', '-D_GNU_SOURCE', '-Wall', '-Wextra', '-Werror',
+    command = [test_support.compiler(), '-std=gnu11', '-D_GNU_SOURCE', '-Wall', '-Wextra', '-Werror',
                '-O1', '-g', '-fsanitize=address,undefined', '-fno-omit-frame-pointer']
     if deps.is_dir():
         command += ['-I' + str(deps / 'include'), '-L' + str(deps / 'lib/aarch64-linux-gnu'),

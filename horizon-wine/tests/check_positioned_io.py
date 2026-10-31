@@ -4,6 +4,7 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+import test_support
 
 root = Path(__file__).resolve().parents[2]
 path = 'horizon-wine/source/runtime_platform.c'
@@ -56,5 +57,5 @@ int main(void) {
 with tempfile.TemporaryDirectory(prefix='wine-nx-io-') as temp:
     src, exe = Path(temp) / 'test.c', Path(temp) / 'test'
     src.write_text(prefix + code + test)
-    subprocess.run(['cc', '-fsanitize=address,undefined', '-pthread', str(src), '-o', str(exe)], check=True)
+    subprocess.run([test_support.compiler(), '-fsanitize=address,undefined', '-pthread', str(src), '-o', str(exe)], check=True)
     subprocess.run([str(exe)], check=True)

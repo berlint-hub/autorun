@@ -7,10 +7,10 @@ from pathlib import Path
 import re
 import subprocess
 import tempfile
+import test_support
 root = Path(__file__).resolve().parents[2]
 source = (root / 'dlls/ntdll/unix/horizon.c').read_text()
-a = source.index('static unsigned int horizon_server_close_object_handle(')
-b = source.index('static unsigned int horizon_server_duplicate_object_handle', a)
+close_handler = 'static unsigned int horizon_server_close_object_handle('
 
 def function(name):
     start = source.index(name)
@@ -24,6 +24,10 @@ def function(name):
 
 hash_table = '\n'.join(re.findall(r'^(?:#define HORIZON_SERVER_HANDLE_HASH_SIZE .*|static struct horizon_server_handle_entry \*horizon_server_handle_hash\[.*;)$',
                                   source, re.M))
+# The object types and the access masks are the runtime's, not a copy of them:
+# the hand-kept copy these replaced drifted the last time the enum grew.
+object_types = re.search(r'enum horizon_server_object_type\n\{.*?\};', source, re.S).group(0)
+process_access = '\n'.join(re.findall(r'^#define HORIZON_PROCESS_\w+ .*$', source, re.M))
 fixture = r'''
 #include <assert.h>
 #include <errno.h>
@@ -35,9 +39,7 @@ fixture = r'''
 #include <unistd.h>
 #define HORIZON_STATUS_SUCCESS 0
 #define HORIZON_STATUS_INVALID_HANDLE 0xc0000008u
-#define HORIZON_SERVER_OBJECT_FILE 1
-#define HORIZON_SERVER_OBJECT_COMPLETION 2
-#define HORIZON_SERVER_OBJECT_SOCK 3
+''' + object_types + '\n' + process_access + r'''
 /* Closing a socket ends what waits on it (check_horizon_async_sockets.py); no socket here. */
 static struct { void *head; } horizon_asyncs;
 static unsigned long long horizon_async_now(void) { return 0; }
@@ -158,6 +160,6 @@ int main(void)
 with tempfile.TemporaryDirectory(prefix='wine-nx-delete-test-') as tmp:
     c = Path(tmp) / 'test.c'
     exe = Path(tmp) / 'test'
-    c.write_text('#include <sys/stat.h>\n' + fixture + helpers + setup + source[a:b] + tests)
-    subprocess.run(['clang', '-Wall', '-Wextra', '-Werror', '-fsanitize=address,undefined', str(c), '-o', str(exe)], check=True)
+    c.write_text('#include <sys/stat.h>\n' + fixture + helpers + setup + function(close_handler) + '\n' + tests)
+    subprocess.run([test_support.compiler(), '-Wall', '-Wextra', '-Werror', '-fsanitize=address,undefined', str(c), '-o', str(exe)], check=True)
     subprocess.run([str(exe)], check=True)

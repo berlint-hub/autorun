@@ -4,6 +4,7 @@ from pathlib import Path
 import subprocess
 import tempfile
 import os
+import test_support
 
 root = Path(__file__).resolve().parents[2]
 s = (root / 'dlls/ntdll/unix/horizon.c').read_text()
@@ -257,6 +258,6 @@ with tempfile.TemporaryDirectory() as tmp:
     c = Path(tmp) / 'transition.c'
     exe = Path(tmp) / 'transition'
     c.write_text(fixture)
-    subprocess.run([os.environ.get('CC', 'cc'), '-std=gnu11', '-O1', '-Wall', '-Wextra', '-Werror',
+    subprocess.run([test_support.compiler(), '-std=gnu11', '-O1', '-Wall', '-Wextra', '-Werror',
                     '-fsanitize=address,undefined', '-fno-omit-frame-pointer', '-pthread', str(c), '-o', str(exe)], check=True)
     subprocess.run([str(exe)], check=True)

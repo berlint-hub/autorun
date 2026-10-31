@@ -184,9 +184,11 @@ runtime; the full package now ships the Mesa 26 one.
   Only that rectangle is dispatched: the bars are cleared once, when a
   swapchain image is first shown, and a frame after that writes the picture
   alone, with `vkCmdDispatchBase` starting the workgroup grid where the picture
-  starts (`record_compute_cmd`). The earlier runtime on
-  Mesa 20.1's nouveau driver, patched for pinned 32-bit buffers
-  (`horizon-wine/mesa`), can still be built.
+  starts (`record_compute_cmd`). Without mesa-switch the
+  build falls back to devkitPro's Mesa 20.1 (OpenGL through EGL and nouveau over
+  nvservices). The patched Mesa 20.1 checkout the earlier runtime used is no
+  longer in this tree, though the two settings it had stay readable
+  (`gl-pinned-buffers-cached`, `gl-clean-before-submit`).
 - **OpenGL, tuned per program.** Two of Mesa's switches are the program's own:
   `mesa_glthread=true` (a DRI option, so lower case, and set before the first
   context) marshals GL commands on a worker thread, which is what the Android

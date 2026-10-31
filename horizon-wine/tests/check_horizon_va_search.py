@@ -10,6 +10,7 @@ import os
 import re
 import subprocess
 import tempfile
+import test_support
 
 root = Path(__file__).resolve().parents[2]
 source = (root / 'dlls/ntdll/unix/virtual.c').read_text()
@@ -110,7 +111,7 @@ with tempfile.TemporaryDirectory() as tmp:
     c = Path(tmp) / 'va_search.c'
     exe = Path(tmp) / 'va_search'
     c.write_text(fixture)
-    subprocess.run([os.environ.get('CC', 'cc'), '-std=gnu11', '-O1', '-Wall', '-Wextra', '-Werror',
+    subprocess.run([test_support.compiler(), '-std=gnu11', '-O1', '-Wall', '-Wextra', '-Werror',
                     '-fsanitize=address,undefined', '-fno-omit-frame-pointer', str(c), '-o', str(exe)], check=True)
     env = os.environ.copy()
     env['ASAN_OPTIONS'] = 'halt_on_error=1'

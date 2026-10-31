@@ -2,6 +2,7 @@ from pathlib import Path
 import os
 import subprocess
 import tempfile
+import test_support
 
 root = Path(__file__).resolve().parents[2]
 source = (root / 'dlls/quartz/filtermapper.c').read_text()
@@ -84,7 +85,7 @@ int main(void) {
 with tempfile.TemporaryDirectory(prefix='quartz-empty-categories-') as directory:
     path = Path(directory)
     (path / 'test.c').write_text(fixture + constructor + wrapper + branch + tail)
-    subprocess.run([os.environ.get('WINE_NX_HOST_CC', '/usr/bin/clang'), '-std=gnu11',
+    subprocess.run([test_support.host_cc(), '-std=gnu11',
                     '-g', '-O1', '-Wall', '-Wextra', '-Werror',
                     '-fsanitize=address,undefined', '-fno-sanitize-recover=all',
                     str(path / 'test.c'), '-o', str(path / 'test')], check=True)

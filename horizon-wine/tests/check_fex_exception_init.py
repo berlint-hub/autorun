@@ -3,9 +3,11 @@ from pathlib import Path
 import os
 import subprocess
 import tempfile
+import test_support
 
 horizon_wine = Path(__file__).resolve().parents[1]
-source_dir = Path(os.environ.get('WINE_NX_FEX_DIR', horizon_wine / 'toolchains/fex-2609'))
+source_dir = test_support.path(Path(os.environ.get('WINE_NX_FEX_DIR', horizon_wine / 'toolchains/fex-2609')),
+                               'FEX is fetched into horizon-wine/toolchains, or set WINE_NX_FEX_DIR')
 source = (source_dir / 'Source/Windows/WOW64/Module.cpp').read_text()
 start = source.index('bool BTCpuResetToConsistentStateImpl(')
 end = source.index('    if (Context::HandleSuspendInterrupt', start)
@@ -70,7 +72,7 @@ int main() {
 with tempfile.TemporaryDirectory(prefix='fex-exception-init-') as directory:
     path = Path(directory)
     (path / 'entry.cpp').write_text(fixture + entry + tests)
-    cxx = os.environ.get('WINE_NX_HOST_CXX', '/usr/bin/clang++')
+    cxx = test_support.host_cxx()
     subprocess.run([cxx, '-std=c++20', '-DARCHITECTURE_arm64=1', '-Wall', '-Wextra', '-Werror',
                     '-fsanitize=address,undefined', '-I', str(source_dir / 'FEXCore/include'),
                     str(path / 'entry.cpp'), '-o', str(path / 'entry')], check=True)

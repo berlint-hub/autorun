@@ -4,6 +4,7 @@ from pathlib import Path
 import os
 import subprocess
 import tempfile
+import test_support
 
 
 root = Path(__file__).resolve().parents[2]
@@ -60,6 +61,6 @@ int main(void)
 with tempfile.TemporaryDirectory(prefix='wine-nx-arm64ec-fpcsr-') as temp:
     source, binary = Path(temp) / 'fpcsr.c', Path(temp) / 'fpcsr'
     source.write_text(fixture)
-    subprocess.run([os.environ.get('CC', 'cc'), '-std=c11', '-Wall', '-Wextra', '-Werror',
+    subprocess.run([test_support.compiler(), '-std=c11', '-Wall', '-Wextra', '-Werror',
                     '-fsanitize=address,undefined', str(source), '-o', str(binary)], check=True)
     subprocess.run([str(binary)], check=True)

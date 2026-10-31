@@ -1,5 +1,6 @@
 from pathlib import Path
 import os
+import test_support
 import re
 import subprocess
 import tempfile
@@ -473,7 +474,7 @@ with tempfile.TemporaryDirectory(prefix="autorun-gl-surfaces-") as directory:
     source = path / "gl_surfaces.c"
     source.write_text(fixture + implementation + checks)
     executable = path / "gl_surfaces"
-    subprocess.run([os.environ.get("WINE_NX_HOST_CC", "cc"), "-std=gnu11", "-Wall", "-Wextra", "-Werror",
+    subprocess.run([test_support.compiler(), "-std=gnu11", "-Wall", "-Wextra", "-Werror",
                     "-Wno-unused-parameter", "-Wno-unused-variable",
                     # The runtime's weak hooks are stubs here, so "&hook && hook()" is a constant.
                     "-Wno-address", "-fsanitize=address,undefined", "-pthread",

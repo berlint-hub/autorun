@@ -2,12 +2,12 @@
 """Keep the native capability probe aligned with the pinned DXVK source."""
 from pathlib import Path
 import re
+import test_support
 
 horizon_wine = Path(__file__).resolve().parents[1]
 header = (horizon_wine / 'source/dxvk_requirements.h').read_text().replace('\\\n', '')
-source = horizon_wine / 'vendor/dxvk/src/dxvk/dxvk_device_info.cpp'
-if not source.is_file():
-    raise SystemExit('Fetch the pinned source with horizon-dlls/tools/build-dxvk.py before this check')
+source = test_support.path(horizon_wine / 'vendor/dxvk/src/dxvk/dxvk_device_info.cpp',
+                           'fetch the pinned source with horizon-dlls/tools/build-dxvk.py')
 features = source.read_text()
 for version, prefix in (('10', 'core.features'), ('11', 'vk11'), ('12', 'vk12'), ('13', 'vk13')):
     required = set(re.findall(r'ENABLE_FEATURE\(' + re.escape(prefix) + r', (\w+), true\)', features))

@@ -7,7 +7,7 @@ set -eu
 root="$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)"
 horizon_wine="$root/horizon-wine"
 repo="$root/horizon-dlls"
-[ -f "$repo/switch/wine/horizon-dlls/manifest.json" ] || { echo "no DLL repository in $repo" >&2; exit 1; }
+[ -f "$repo/switch/wine/horizon-dlls/manifest.json" ] || { echo "SKIP: needs $repo/switch/wine/horizon-dlls/manifest.json (the DLL repository, horizon-dlls)" >&2; exit 0; }
 build="$(mktemp -d "${TMPDIR:-/tmp}/horizon-dlls.XXXXXX")"
 trap 'rm -rf "$build"' EXIT HUP INT TERM
 

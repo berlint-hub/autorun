@@ -8,6 +8,7 @@ from pathlib import Path
 import re
 import subprocess
 import tempfile
+import test_support
 
 root = Path(__file__).resolve().parents[2]
 source = (root / 'dlls/ntdll/unix/virtual.c').read_text()
@@ -156,7 +157,7 @@ with tempfile.TemporaryDirectory() as tmp:
     path = Path(tmp) / 'unixlib.c'
     binary = Path(tmp) / 'unixlib'
     path.write_text(fixture)
-    subprocess.run(['cc', '-std=c11', '-Wall', '-Wextra', '-Werror', '-Wno-missing-field-initializers',
+    subprocess.run([test_support.compiler(), '-std=c11', '-Wall', '-Wextra', '-Werror', '-Wno-missing-field-initializers',
                     '-fsanitize=address,undefined', '-g', str(path), '-o', str(binary)], check=True)
     subprocess.run([str(binary)], check=True)
 print('Static native/WoW64 Unix-library loading passed')

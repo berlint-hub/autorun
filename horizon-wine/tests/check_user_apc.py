@@ -10,6 +10,7 @@ queue is what QueueUserAPC and WriteFileEx need."""
 from pathlib import Path
 import subprocess
 import tempfile
+import test_support
 
 root = Path(__file__).resolve().parents[2]
 horizon = (root / 'dlls/ntdll/unix/horizon.c').read_text()
@@ -130,5 +131,5 @@ with tempfile.TemporaryDirectory() as tmp:
     source = Path(tmp) / 'apc.c'
     source.write_text(fixture.replace('@STRUCTS@', structs).replace('@BODY@', body))
     binary = Path(tmp) / 'apc'
-    subprocess.run(['cc', '-o', str(binary), str(source)], check=True)
+    subprocess.run([test_support.compiler(), '-o', str(binary), str(source)], check=True)
     print(subprocess.run([str(binary)], check=True, capture_output=True, text=True).stdout.strip())

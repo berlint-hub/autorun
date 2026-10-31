@@ -2,6 +2,7 @@ from pathlib import Path
 import os
 import subprocess
 import tempfile
+import test_support
 
 root = Path(__file__).resolve().parents[1]
 source = (root / 'source/swap_native.c').read_text()
@@ -196,7 +197,7 @@ int main(void)
 with tempfile.TemporaryDirectory(prefix='autorun-native-swap-') as tmp:
     unit, binary = Path(tmp) / 'native.c', Path(tmp) / 'native'
     unit.write_text(fixture.replace('/* IMPLEMENTATION */', source).replace('/* RECLAIM_IMPLEMENTATION */', reclaim))
-    subprocess.run([os.environ.get('CC', 'clang'), '-std=gnu11', '-O1', '-Wall', '-Wextra', '-Werror',
+    subprocess.run([test_support.compiler(), '-std=gnu11', '-O1', '-Wall', '-Wextra', '-Werror',
                     '-fsanitize=address,undefined', '-I', str(root / 'source'),
                     '-I', str(root.parent / 'dlls/ntdll/unix'), str(unit), '-o', str(binary)], check=True)
     subprocess.run([str(binary)], check=True)

@@ -13,6 +13,7 @@ import re
 import struct
 import subprocess
 import tempfile
+import test_support
 
 root = Path(__file__).resolve().parents[2]
 source = (root / 'dlls/ntdll/unix/horizon.c').read_text()
@@ -330,10 +331,10 @@ def pe64(path, machine, hybrid=False, truncate_cfg=False, builtin=False):
 with tempfile.TemporaryDirectory(prefix='wine-nx-image-info-') as tmp:
     tmp = Path(tmp)
     (tmp / 'test.c').write_text(fixture)
-    subprocess.run(['cc', '-g', '-Wall', '-Werror', '-Wno-unused-function', '-fsanitize=address,undefined',
+    subprocess.run([test_support.compiler(), '-g', '-Wall', '-Werror', '-Wno-unused-function', '-fsanitize=address,undefined',
                     str(tmp / 'test.c'), '-o', str(tmp / 'test')], check=True)
     (tmp / 'client.c').write_text(client_fixture)
-    subprocess.run(['cc', '-g', '-Wall', '-Werror', '-D__WINESRC__', '-DWINE_UNIX_LIB', '-D_WIN64',
+    subprocess.run([test_support.compiler(), '-g', '-Wall', '-Werror', '-D__WINESRC__', '-DWINE_UNIX_LIB', '-D_WIN64',
                     '-fsanitize=address,undefined', '-I' + str(root / 'include'),
                     str(tmp / 'client.c'), '-o', str(tmp / 'client')], check=True)
 

@@ -1,12 +1,16 @@
 #!/usr/bin/env python3
 """Exercise runtime thread placement with mocked kernel permissions."""
 from pathlib import Path
+import test_support
 import re
 import subprocess
 import tempfile
 
 root = Path(__file__).resolve().parents[2]
 source = (root / "horizon-wine/source/thread_profile.c").read_text()
+# The placement kinds the functions under test set, taken from the source so a
+# new one cannot leave the fixture without it.
+affinity = re.search(r'enum nx_shader_affinity\n\{.*?\};', source, re.S).group(0)
 
 
 def definition(name, structure=False):
@@ -203,7 +207,7 @@ functions = "".join(definition(name) for name in (
     "wine_nx_thread_register", "wine_nx_thread_affinity_fixed", "wine_nx_thread_balance"))
 with tempfile.TemporaryDirectory(prefix="wine-nx-cores-") as tmp:
     c, exe = Path(tmp) / "test.c", Path(tmp) / "test"
-    c.write_text(fixture + definition("nx_prof_thread", True) + globals_ + functions + test)
-    subprocess.run(["clang", "-Wall", "-Wextra", "-Werror", "-pthread", "-fsanitize=address,undefined",
+    c.write_text(fixture + affinity + definition("nx_prof_thread", True) + globals_ + functions + test)
+    subprocess.run([test_support.compiler(), "-Wall", "-Wextra", "-Werror", "-Wno-address", "-pthread", "-fsanitize=address,undefined",
                     "-I" + str(root / "horizon-wine/source"), str(c), "-o", str(exe)], check=True)
     subprocess.run([str(exe)], check=True, timeout=15)

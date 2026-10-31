@@ -4,6 +4,7 @@ from pathlib import Path
 import os
 import subprocess
 import tempfile
+import test_support
 
 root = Path(__file__).resolve().parents[2]
 signal = (root / 'dlls/ntdll/unix/signal_arm64.c').read_text()
@@ -159,7 +160,7 @@ with tempfile.TemporaryDirectory(prefix='wow64-context-') as directory:
     build = Path(directory)
     file = build / 'context.c'
     file.write_text(fixture + functions + init_fixture + init + tests)
-    subprocess.run([os.environ.get('WINE_NX_HOST_CC', '/usr/bin/clang'), '-std=gnu11',
+    subprocess.run([test_support.host_cc(), '-std=gnu11',
                     '-fms-extensions', '-Wall', '-Wextra', '-Werror', '-Wno-missing-field-initializers',
                     '-fsanitize=address,undefined', '-D__WINESRC__', '-D_WIN64',
                     '-I' + str(root / 'include'), '-I' + str(root / 'dlls/ntdll/unix'),

@@ -8,6 +8,8 @@ import re
 import subprocess
 import tempfile
 
+import test_support
+
 root = Path(__file__).resolve().parents[2]
 
 def function(source, name):
@@ -24,7 +26,7 @@ def run(name, source):
     with tempfile.TemporaryDirectory(prefix='wine-nx-render-') as tmp:
         src, exe = Path(tmp) / 'test.c', Path(tmp) / 'test'
         src.write_text(source)
-        subprocess.run(['cc', '-std=c11', '-fsanitize=address,undefined', '-g', str(src), '-o', str(exe)], check=True)
+        subprocess.run([test_support.compiler(), '-std=c11', '-fsanitize=address,undefined', '-g', str(src), '-o', str(exe)], check=True)
         subprocess.run([str(exe)], check=True)
     print('PASS:', name)
 

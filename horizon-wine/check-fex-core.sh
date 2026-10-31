@@ -3,9 +3,13 @@ set -eu
 horizon_wine="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 source_dir="${WINE_NX_FEX_DIR:-$horizon_wine/toolchains/fex-2609}"
 build="${WINE_NX_FEX_CORE_BUILD_DIR:-$horizon_wine/toolchains/build-fex-2609-core-check}"
-host_cc="${WINE_NX_HOST_CC:-/usr/bin/clang}"
-host_cxx="${WINE_NX_HOST_CXX:-/usr/bin/clang++}"
-test "$(uname -s)" = Linux && test "$(uname -m)" = aarch64
+host_cc="${WINE_NX_HOST_CC:-$(command -v clang || command -v cc)}"
+host_cxx="${WINE_NX_HOST_CXX:-$(command -v clang++ || command -v c++)}"
+# FEX's core only builds and runs on an ARM64 Linux host.
+if [ "$(uname -s)" != Linux ] || [ "$(uname -m)" != aarch64 ]; then
+    echo "SKIP: needs an ARM64 Linux host, this is $(uname -s) $(uname -m) (FEX emulates x86-64 on ARM64)" >&2
+    exit 0
+fi
 if git -C "$source_dir" apply --reverse --check "$horizon_wine/fex/horizon.patch" 2>/dev/null; then
     :
 elif [ -z "$(git -C "$source_dir" status --porcelain)" ]; then

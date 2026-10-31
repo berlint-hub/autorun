@@ -17,6 +17,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import test_support
 
 if platform.system() != 'Darwin' or platform.machine() != 'arm64':
     print('exception restore: skipped (needs an AArch64 Mac)')
@@ -140,5 +141,5 @@ with tempfile.TemporaryDirectory(prefix='wine-nx-restore-') as tmp:
     defines = [f'-DRESTORE_X17="{restore_asm("horizon_restore_exception_context")}"',
                f'-DRESTORE_X9="{restore_asm("horizon_restore_exception_context_x9")}"',
                '-DCAPTURE="' + ''.join(line + '\\n' for line in capture) + '"']
-    subprocess.run(['clang', '-std=gnu11', '-Wall', '-Wextra', '-Werror', *defines, str(c), '-o', str(exe)], check=True)
+    subprocess.run([test_support.compiler(), '-std=gnu11', '-Wall', '-Wextra', '-Werror', *defines, str(c), '-o', str(exe)], check=True)
     subprocess.run([str(exe)], check=True)

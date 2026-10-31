@@ -4,9 +4,9 @@ from pathlib import Path
 import platform
 import subprocess
 import tempfile
+import test_support
 
-if platform.system() != 'Linux' or platform.machine() not in ('aarch64', 'arm64'):
-    raise SystemExit('FEX context: requires AArch64 Linux')
+test_support.need_arm64('FEX context: requires AArch64 Linux')
 
 horizon_wine = Path(__file__).resolve().parents[1]
 source = (horizon_wine / 'source/fex_context.S').read_text()
@@ -121,6 +121,6 @@ with tempfile.TemporaryDirectory(prefix='wine-nx-fex-context-') as directory:
     (directory / 'driver.S').write_text('\n'.join(assembly) + '\n')
     (directory / 'test.c').write_text(test)
     output = directory / 'test'
-    subprocess.run(['cc', '-Wall', '-Wextra', '-Werror', '-O2', '-o', str(output),
+    subprocess.run([test_support.compiler(), '-Wall', '-Wextra', '-Werror', '-O2', '-o', str(output),
                     str(directory / 'test.c'), str(directory / 'entry.S'), str(directory / 'driver.S')], check=True)
     subprocess.run([str(output)], check=True)

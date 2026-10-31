@@ -3,6 +3,7 @@ import os
 import re
 import subprocess
 import tempfile
+import test_support
 
 root = Path(__file__).resolve().parents[2]
 source = (root / 'dlls/ntdll/unix/horizon.c').read_text()
@@ -44,7 +45,7 @@ with tempfile.TemporaryDirectory(prefix='autorun-game-swap-') as directory:
     unit_path = Path(directory) / 'game.c'
     binary = Path(directory) / 'game'
     unit_path.write_text(unit)
-    subprocess.run([os.environ.get('CC', 'clang'), '-std=gnu11', '-O1', '-g', '-pthread',
+    subprocess.run([test_support.compiler(), '-std=gnu11', '-O1', '-g', '-pthread',
                     '-Wall', '-Wextra', '-Werror', '-Wno-unused-function', '-fsanitize=address,undefined',
                     '-fno-sanitize-recover=undefined',
                     '-I' + str(root / 'include'), '-I' + str(root / 'dlls/ntdll/unix'),

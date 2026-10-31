@@ -4,6 +4,7 @@ from pathlib import Path
 import shlex
 import subprocess
 import tempfile
+import test_support
 
 root = Path(__file__).resolve().parents[2]
 source = (root / 'horizon-wine/source/thread_profile.c').read_text()
@@ -215,7 +216,7 @@ with tempfile.TemporaryDirectory(prefix='autorun-shader-affinity-') as tmp:
     test = path / 'affinity.c'
     test.write_text(fixture)
     for profile in (False, True):
-        command = [os.environ.get('CC', 'cc'), '-O2', '-Wall', '-Wextra', '-Werror', '-Wno-address', '-pthread',
+        command = [test_support.compiler(), '-O2', '-Wall', '-Wextra', '-Werror', '-Wno-address', '-pthread',
                    '-I', str(root / 'horizon-wine/source'), str(test), '-o', str(path / 'affinity')]
         command += shlex.split(os.environ.get('CFLAGS', ''))
         if profile:

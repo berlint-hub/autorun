@@ -6,8 +6,10 @@ import struct
 import sys
 import tempfile
 
+import test_support
+
 # DXVK is built by the DLL repository, horizon-dlls.
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'horizon-dlls/tools'))
+test_support.add_path(Path(__file__).resolve().parents[2] / 'horizon-dlls/tools')
 from dxvk_payload import DLLS, REVISION, VERSION, digest, validate_payload
 
 

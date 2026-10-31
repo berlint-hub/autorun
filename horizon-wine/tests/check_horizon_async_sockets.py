@@ -14,6 +14,7 @@ import re
 import subprocess
 import tempfile
 import os
+import test_support
 
 root = Path(__file__).resolve().parents[2]
 source = (root / 'dlls/ntdll/unix/horizon.c').read_text(errors='surrogateescape')
@@ -806,6 +807,6 @@ if __name__ == '__main__':
     with tempfile.TemporaryDirectory(prefix='wine-nx-async-sockets-') as tmp:
         tmp = Path(tmp)
         (tmp / 'test.c').write_text(fixture, errors='surrogateescape')
-        subprocess.run([os.environ.get('CC', 'cc'), '-g', '-Wall', '-Werror', '-Wno-unused-function',
+        subprocess.run([test_support.compiler(), '-g', '-Wall', '-Werror', '-Wno-unused-function',
                         '-fsanitize=address,undefined', str(tmp / 'test.c'), '-o', str(tmp / 'test')], check=True)
         print(subprocess.run([str(tmp / 'test')], check=True, capture_output=True, text=True).stdout.strip())

@@ -11,6 +11,8 @@ import re
 import subprocess
 import tempfile
 
+import test_support
+
 root = Path(__file__).resolve().parents[2]
 stubs = (root / 'horizon-wine/source/ws2_32_unix_stub.c').read_text()
 crypt32 = (root / 'horizon-wine/source/crypt32_roots.c').read_text()
@@ -184,7 +186,7 @@ int main(void)
 with tempfile.TemporaryDirectory() as tmp:
     source, binary = Path(tmp) / 'gate.c', Path(tmp) / 'gate'
     source.write_text(fixture)
-    subprocess.run(['cc', '-std=gnu11', '-Wall', '-Werror', '-Wno-unused-parameter', '-fsanitize=address,undefined',
+    subprocess.run([test_support.compiler(), '-std=gnu11', '-Wall', '-Werror', '-Wno-unused-parameter', '-fsanitize=address,undefined',
                     str(source), '-o', str(binary)], check=True)
     subprocess.run([str(binary)], check=True)
 print('PASS: the ws2_32 (%d) and crypt32 (%d) stub tables match their DLL enums, audio and XInput '

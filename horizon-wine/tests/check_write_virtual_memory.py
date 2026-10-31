@@ -2,6 +2,7 @@
 from pathlib import Path
 import subprocess
 import tempfile
+import test_support
 
 root = Path(__file__).resolve().parents[2]
 source = (root / 'dlls/ntdll/unix/virtual.c').read_text()
@@ -101,6 +102,6 @@ with tempfile.TemporaryDirectory(prefix='wine-nx-write-memory-') as tmp:
     c = Path(tmp) / 'test.c'
     exe = Path(tmp) / 'test'
     c.write_text(fixture + function + tests)
-    subprocess.run(['clang', '-std=c11', '-Wall', '-Wextra', '-Werror',
+    subprocess.run([test_support.compiler(), '-std=c11', '-Wall', '-Wextra', '-Werror',
                     '-fsanitize=address,undefined', str(c), '-o', str(exe)], check=True)
     subprocess.run([str(exe)], check=True)

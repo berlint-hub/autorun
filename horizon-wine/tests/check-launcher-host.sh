@@ -14,7 +14,7 @@ horizon_wine="$root/horizon-wine"
 # Wine's Notepad, the program that stands in for the games under several names,
 # is the DLL repository's.
 notepad="$root/horizon-dlls/switch/wine/drive_c/windows/syswow64/notepad.exe"
-[ -f "$notepad" ] || { echo "no $notepad: check out horizon-dlls" >&2; exit 1; }
+[ -f "$notepad" ] || { echo "SKIP: needs $notepad (the programs staged on the card are the DLL repository's)" >&2; exit 0; }
 build="$(mktemp -d "${TMPDIR:-/tmp}/wine-nx-launcher.XXXXXX")"
 trap 'rm -rf "$build"' EXIT HUP INT TERM
 font="${LAUNCHER_FONT:-/System/Library/Fonts/Supplemental/Arial.ttf}"

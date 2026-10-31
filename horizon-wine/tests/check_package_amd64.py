@@ -13,7 +13,12 @@ import tempfile
 from zipfile import ZipFile
 
 
+import test_support
+
 root = Path(__file__).resolve().parents[2]
+# The packager copies Box64's license out of the pinned checkout.
+test_support.path(root / 'horizon-wine/vendor/box64/LICENSE',
+                  'Box64 is fetched by horizon-wine/tools/bootstrap-box64-core.sh')
 package = (root / 'horizon-wine/tools/package-amd64.py').read_text()
 for gone in ("'drive_c/windows/system32'", "'drive_c/windows/syswow64'", "'make'", 'dxvk64', 'vkd3d64',
              'winenxaudio', 'make-classes-reg'):

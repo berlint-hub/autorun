@@ -4,8 +4,10 @@ from pathlib import Path
 import os
 import subprocess
 import tempfile
+import test_support
 
 root = Path(__file__).resolve().parents[2]
+test_support.need_arm64('the fixture checks ARM64 unwind indexes against CONTEXT, which Wine types for the host')
 loader = (root / 'dlls/ntdll/loader.c').read_text()
 rtl = (root / 'dlls/ntdll/rtl.c').read_text()
 unwind = (root / 'dlls/ntdll/unwind.c').read_text()
@@ -200,7 +202,7 @@ with tempfile.TemporaryDirectory(prefix='loader-indexes-') as temp:
     build = Path(temp)
     path = build / 'indexes.c'
     path.write_text(fixture + code + tests)
-    subprocess.run([os.environ.get('WINE_NX_HOST_CC', '/usr/bin/clang'), '-std=gnu11', '-g', '-O2',
+    subprocess.run([test_support.host_cc(), '-std=gnu11', '-g', '-O2',
                     '-fms-extensions', '-fshort-wchar', '-fsanitize=address,undefined',
                     '-D__WINESRC__', '-D_WIN64', '-I' + str(root / 'include'),
                     '-I' + str(root / 'dlls/ntdll'),

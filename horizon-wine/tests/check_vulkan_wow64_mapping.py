@@ -3,6 +3,7 @@ import os
 from pathlib import Path
 import subprocess
 import tempfile
+import test_support
 
 root = Path(__file__).resolve().parents[2]
 source = (root / 'dlls/win32u/vulkan.c').read_text()
@@ -314,7 +315,7 @@ assert 'allocate_external_host_memory( device, alloc_info, mem_flags, &host_poin
 with tempfile.TemporaryDirectory(prefix='vulkan-wow64-mapping-') as directory:
     directory = Path(directory)
     (directory / 'test.c').write_text(fixture)
-    subprocess.run([os.environ.get('CC', 'cc'), '-std=gnu11', '-Wall', '-Wextra', '-Werror',
+    subprocess.run([test_support.compiler(), '-std=gnu11', '-Wall', '-Wextra', '-Werror',
                     '-fsanitize=address,undefined', '-D__SWITCH__', '-DWINE_NX_SWAP_POC', '-D_WIN64', '-DWINE_UNIX_LIB',
                     '-D__WINESRC__', '-I', str(root / 'include'), str(directory / 'test.c'),
                     '-o', str(directory / 'test')], check=True)

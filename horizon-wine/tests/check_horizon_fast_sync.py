@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Exercise direct synchronization dispatch with the production handlers."""
 from pathlib import Path
+import test_support
 import re
 import subprocess
 import sys
@@ -95,7 +96,7 @@ static int count_cond_signal(pthread_cond_t *cond) {
 #define pthread_cond_signal count_cond_signal
 static int horizon_fast_sync_enabled = 1, pipe_replies;
 typedef uint64_t u64;
-volatile int wine_nx_quit_requested;
+volatile int wine_nx_quit_requested __attribute__((weak));
 static long long clock_ticks(void) {
     struct timespec ts; assert(!clock_gettime(CLOCK_REALTIME, &ts));
     return (long long)ts.tv_sec * 10000000 + ts.tv_nsec / 100;
@@ -632,7 +633,7 @@ with tempfile.TemporaryDirectory(prefix="wine-nx-fast-sync-") as tmp:
     c, exe = Path(tmp) / "test.c", Path(tmp) / "test"
     c.write_text(constants + "\n" + types + fixture + functions + tests)
     for sanitizer in ("address,undefined", "thread"):
-        subprocess.run(["clang", "-Wall", "-Wextra", "-Werror", "-pthread", "-fsanitize=" + sanitizer,
+        subprocess.run([test_support.compiler(), "-Wall", "-Wextra", "-Werror", "-Wno-address", "-pthread", "-fsanitize=" + sanitizer,
                         "-I" + str(root / "dlls/ntdll/unix"), str(c), "-o", str(exe)], check=True)
         subprocess.run([str(exe)], check=True, timeout=60)
 
@@ -712,6 +713,6 @@ int main(void)
 with tempfile.TemporaryDirectory(prefix="wine-nx-sync-client-") as tmp:
     c, exe = Path(tmp) / "test.c", Path(tmp) / "test"
     c.write_text(client + definition("horizon_sync_call") + client_tests)
-    subprocess.run(["clang", "-Wall", "-Wextra", "-Werror", "-fsanitize=address,undefined",
+    subprocess.run([test_support.compiler(), "-Wall", "-Wextra", "-Werror", "-Wno-address", "-fsanitize=address,undefined",
                     str(c), "-o", str(exe)], check=True)
     subprocess.run([str(exe)], check=True, timeout=10)

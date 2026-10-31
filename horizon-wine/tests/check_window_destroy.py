@@ -5,6 +5,7 @@ import os
 import shlex
 import subprocess
 import tempfile
+import test_support
 
 root = Path(__file__).resolve().parents[2]
 source = (root / "dlls/ntdll/unix/horizon.c").read_text()
@@ -138,7 +139,7 @@ with tempfile.TemporaryDirectory(prefix="wine-nx-window-destroy-") as temp:
     path = Path(temp)
     src, exe = path / "test.c", path / ("test.exe" if os.name == "nt" else "test")
     src.write_text(fixture + handler + tests)
-    compiler = shlex.split(os.environ.get("CC", "cc"))
+    compiler = shlex.split(test_support.compiler())
     flags = shlex.split(os.environ.get("CFLAGS", "-fsanitize=address,undefined"))
     subprocess.run(compiler + ["-std=gnu99", "-g", "-Wall", "-Wextra", "-Werror", "-pthread"] +
                    flags + [str(src), "-o", str(exe)], check=True)

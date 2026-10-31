@@ -3,6 +3,7 @@
 from pathlib import Path
 import subprocess
 import tempfile
+import test_support
 
 root = Path(__file__).resolve().parents[2]
 mixer = (root / 'dlls/dsound/mixer.c').read_text()
@@ -172,7 +173,7 @@ source += filter_fixture + ''.join(function(name) for name in (
 with tempfile.TemporaryDirectory() as tmp:
     c_file, exe = Path(tmp) / 'resample.c', Path(tmp) / 'resample'
     c_file.write_text(source)
-    subprocess.run(['cc', '-std=gnu99', '-O2', '-Wall', '-Wno-unused-parameter', '-Werror',
+    subprocess.run([test_support.compiler(), '-std=gnu99', '-O2', '-Wall', '-Wno-unused-parameter', '-Werror',
                     '-U__SSE__', '-fsanitize=address,undefined', '-I', str(root / 'dlls/dsound'),
                     '-o', str(exe), str(c_file), '-lm'], check=True)
     subprocess.run([str(exe)], check=True)

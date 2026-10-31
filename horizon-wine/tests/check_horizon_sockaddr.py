@@ -12,6 +12,7 @@ import ipaddress
 import struct
 import subprocess
 import tempfile
+import test_support
 
 root = Path(__file__).resolve().parents[2]
 header = (root / 'dlls/ntdll/unix/horizon_sockaddr.h').read_text()
@@ -88,6 +89,6 @@ int main( void )
 with tempfile.TemporaryDirectory(prefix='wine-nx-sockaddr-') as tmp:
     tmp = Path(tmp)
     (tmp / 'test.c').write_text(fixture.replace('@HEADER@', header).replace('@ROWS@', ',\n'.join(rows)))
-    subprocess.run(['cc', '-Wall', '-Werror', '-fsanitize=address,undefined', str(tmp / 'test.c'),
+    subprocess.run([test_support.compiler(), '-Wall', '-Werror', '-fsanitize=address,undefined', str(tmp / 'test.c'),
                     '-o', str(tmp / 'test')], check=True)
     print(subprocess.run([str(tmp / 'test')], check=True, capture_output=True, text=True).stdout.strip())

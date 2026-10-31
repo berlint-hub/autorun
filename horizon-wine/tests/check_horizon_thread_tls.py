@@ -3,6 +3,7 @@ from pathlib import Path
 import os
 import subprocess
 import tempfile
+import test_support
 
 root = Path(__file__).resolve().parents[2]
 source = (root / 'dlls/ntdll/unix/horizon.c').read_text()
@@ -209,7 +210,7 @@ int main(void) {
 with tempfile.TemporaryDirectory(prefix='horizon-thread-tls-') as directory:
     path = Path(directory)
     (path / 'tls.c').write_text(fixture + source[start:end] + tests)
-    subprocess.run([os.environ.get('CC', 'clang'), '-std=gnu11', '-Wall', '-Wextra', '-Werror',
+    subprocess.run([test_support.compiler(), '-std=gnu11', '-Wall', '-Wextra', '-Werror',
                     '-pthread', '-fsanitize=address,undefined', '-I', str(root / 'include'),
                     str(path / 'tls.c'), '-o', str(path / 'tls')], check=True)
     subprocess.run([str(path / 'tls')], check=True)

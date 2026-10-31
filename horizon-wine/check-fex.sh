@@ -2,9 +2,13 @@
 set -eu
 horizon_wine="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 source_dir="${WINE_NX_FEX_DIR:-$horizon_wine/toolchains/fex-2609}"
-host_cc="${WINE_NX_HOST_CC:-/usr/bin/clang}"
-host_cxx="${WINE_NX_HOST_CXX:-/usr/bin/clang++}"
-test "$(uname -s)" = Linux && test "$(uname -m)" = aarch64
+host_cc="${WINE_NX_HOST_CC:-$(command -v clang || command -v cc)}"
+host_cxx="${WINE_NX_HOST_CXX:-$(command -v clang++ || command -v c++)}"
+# FEX's emulation of x86-64 on ARM64 only builds and runs on an ARM64 Linux host.
+if [ "$(uname -s)" != Linux ] || [ "$(uname -m)" != aarch64 ]; then
+    echo "SKIP: needs an ARM64 Linux host, this is $(uname -s) $(uname -m) (FEX emulates x86-64 on ARM64)" >&2
+    exit 0
+fi
 build="$(mktemp -d /tmp/wine-nx-fex-tests.XXXXXX)"
 trap 'rm -rf "$build"' EXIT HUP INT TERM
 CC="$host_cc" python3 "$horizon_wine/tests/check_fex_unixlib.py"

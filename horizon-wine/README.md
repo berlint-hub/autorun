@@ -83,9 +83,11 @@ The build folders (`build-*`, `toolchains/`, `vendor/`) are not tracked.
 ## Launcher updates
 
 Settings > System > Check for update reads the latest stable release of
-`danfromtico/autorun`. A check at boot only shows a notification; installing
+`autorunhq/autorun`. A check at boot only shows a notification; installing
 always asks first, and a development build newer than the release is not
-downgraded.
+downgraded. `autorun_update.c` names that repository once (`RELEASE_REPO`) and
+checks every asset URL against the prefix made from it, so a fork that still
+carries an old owner in the source is not offered its releases.
 
 The launcher checks the release zip's SHA-256, then extracts `switch/wine` over
 the card. Configuration, games, saves, artwork and downloaded graphics versions

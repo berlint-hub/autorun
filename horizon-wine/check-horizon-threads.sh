@@ -2,9 +2,11 @@
 # Host tests for Horizon thread lifecycle and synchronization state.
 set -eu
 root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
+cc="${CC:-$(command -v clang || command -v cc || command -v gcc)}"
+[ -n "$cc" ] || { echo "No C compiler on PATH; set CC." >&2; exit 1; }
 build="$(mktemp -d "${TMPDIR:-/tmp}/wine-nx-threads.XXXXXX")"
 trap 'rm -rf "$build"' EXIT HUP INT TERM
-cc="${CC:-clang}"
+cc="$cc"
 "$cc" -std=gnu11 -Wall -Wextra -Werror -pthread -fsanitize=address,undefined -fno-omit-frame-pointer \
     "$root/horizon-wine/tests/horizon_threads.c" -o "$build/asan"
 "$build/asan"

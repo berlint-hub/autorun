@@ -5,6 +5,7 @@ WarCraft III's movies: the DirectShow video window put in the movie window."""
 from pathlib import Path
 import subprocess
 import tempfile
+import test_support
 
 root = Path(__file__).resolve().parents[2]
 horizon = (root / 'dlls/ntdll/unix/horizon.c').read_text()
@@ -121,5 +122,5 @@ with tempfile.TemporaryDirectory() as tmp:
     c_file = Path(tmp) / 'window_parent.c'
     exe = Path(tmp) / 'window_parent'
     c_file.write_text(source)
-    subprocess.run(['cc', '-std=gnu99', '-Wall', '-Wextra', '-Werror', '-o', str(exe), str(c_file)], check=True)
+    subprocess.run([test_support.compiler(), '-std=gnu99', '-Wall', '-Wextra', '-Werror', '-o', str(exe), str(c_file)], check=True)
     subprocess.run([str(exe)], check=True)

@@ -4,6 +4,7 @@ from pathlib import Path
 import os
 import subprocess
 import tempfile
+import test_support
 
 root = Path(__file__).resolve().parents[2]
 source = root / 'horizon-wine/source/arm64ec_box64_unix.c'
@@ -636,7 +637,7 @@ with tempfile.TemporaryDirectory(prefix='wine-nx-arm64ec-unix-') as tmp:
     c = tmp / 'test.c'
     exe = tmp / 'test'
     c.write_text(fixture)
-    subprocess.run([os.environ.get('CC', 'cc'), '-std=gnu11', '-g', '-O1', '-Wall', '-Wextra', '-Werror',
+    subprocess.run([test_support.compiler(), '-std=gnu11', '-g', '-O1', '-Wall', '-Wextra', '-Werror',
                     '-Wno-unused-parameter',
                     '-fsanitize=address,undefined', '-fno-sanitize-recover=all', '-fno-omit-frame-pointer', '-pthread',
                     '-I' + str(root / 'include'), '-I' + str(root / 'dlls/ntdll/unix'),

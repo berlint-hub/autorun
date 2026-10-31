@@ -3,6 +3,7 @@ from pathlib import Path
 import os
 import subprocess
 import tempfile
+import test_support
 
 horizon_wine = Path(__file__).resolve().parents[1]
 patch = (horizon_wine / 'fex/horizon.patch').read_text()
@@ -129,8 +130,8 @@ int main() {
 with tempfile.TemporaryDirectory(prefix='fex-jit-bridge-') as directory:
     path = Path(directory)
     (path / 'bridge.cpp').write_text(fixture + source + tests)
-    cc = os.environ.get('WINE_NX_HOST_CC', '/usr/bin/clang')
-    cxx = os.environ.get('WINE_NX_HOST_CXX', '/usr/bin/clang++')
+    cc = test_support.host_cc()
+    cxx = test_support.host_cxx()
     flags = ['-g', '-O1', '-pthread', '-Wall', '-Wextra', '-Werror', '-fsanitize=address,undefined']
     subprocess.run([cc, *flags, '-c', str(horizon_wine / 'source/fex_jit.c'), '-o', str(path / 'jit.o')], check=True)
     subprocess.run([cxx, '-std=c++20', *flags, '-I', str(horizon_wine / 'fex'), '-I', str(horizon_wine / 'source'),

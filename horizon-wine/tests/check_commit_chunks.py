@@ -8,6 +8,7 @@ from pathlib import Path
 import re
 import subprocess
 import tempfile
+import test_support
 
 root = Path(__file__).resolve().parents[2]
 s = (root / 'dlls/ntdll/unix/horizon.c').read_text()
@@ -279,7 +280,7 @@ with tempfile.TemporaryDirectory() as tmp:
     c.write_text(fixture)
     exe = Path(tmp) / 'commit_chunks'
     for defines in ([], ['-DWINE_NX_SWAP_POC']):
-        subprocess.run(['cc', '-std=gnu11', '-O1', '-Wall', '-Wextra', '-Werror',
+        subprocess.run([test_support.compiler(), '-std=gnu11', '-O1', '-Wall', '-Wextra', '-Werror',
                         '-fsanitize=address,undefined', '-fno-omit-frame-pointer', *defines,
                         '-I' + str(root / 'dlls/ntdll/unix'), str(c), '-o', str(exe)], check=True)
         subprocess.run([str(exe)], check=True)

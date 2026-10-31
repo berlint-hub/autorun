@@ -1,4 +1,5 @@
 from pathlib import Path
+import test_support
 import subprocess
 import tempfile
 
@@ -161,7 +162,7 @@ with tempfile.TemporaryDirectory(prefix="horizon-topology-") as directory:
     test = Path(directory) / "topology"
     c = test.with_suffix(".c")
     c.write_text(fixture)
-    subprocess.run(["clang", "-std=gnu11", "-g", "-O1", "-fshort-wchar", "-fms-extensions",
+    subprocess.run([test_support.compiler(), "-std=gnu11", "-g", "-O1", "-fshort-wchar", "-fms-extensions",
                     "-fsanitize=address,undefined", "-D__WINESRC__", "-D_WIN64",
                     "-I" + str(root / "include"), str(c), "-o", str(test)], check=True)
     subprocess.run([str(test)], check=True, timeout=30)

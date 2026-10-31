@@ -8,6 +8,11 @@ root="$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)"
 if command -v glslangValidator >/dev/null; then
     python3 "$root/tools/make_fshack_shaders.py" --check
 fi
+# The passes run on Mesa's lavapipe, in a Debian container.
+if ! command -v docker >/dev/null 2>&1; then
+    echo "SKIP: needs docker (the FSR passes run on lavapipe in a container)" >&2
+    exit 0
+fi
 docker image inspect autorun-lavapipe >/dev/null 2>&1 || printf '%s\n' \
     'FROM debian:bookworm' \
     'RUN apt-get update -qq && apt-get install -y -qq mesa-vulkan-drivers libvulkan-dev gcc libpng-dev && rm -rf /var/lib/apt/lists/*' |

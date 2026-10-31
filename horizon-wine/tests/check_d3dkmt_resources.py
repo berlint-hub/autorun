@@ -3,6 +3,7 @@ from pathlib import Path
 import os
 import subprocess
 import tempfile
+import test_support
 
 root = Path(__file__).resolve().parents[2]
 source = (root / 'dlls/win32u/d3dkmt_switch.c').read_text()
@@ -207,7 +208,7 @@ with tempfile.TemporaryDirectory(prefix='wine-nx-d3dkmt-') as directory:
     path = Path(directory)
     (path / 'test.c').write_text(fixture + code + tests)
     for sanitizer in ('address,undefined', 'thread'):
-        subprocess.run([os.environ.get('WINE_NX_HOST_CC', '/usr/bin/clang'), '-std=gnu11', '-g', '-O1',
+        subprocess.run([test_support.host_cc(), '-std=gnu11', '-g', '-O1',
                         '-fms-extensions', '-Wall', '-Wextra', '-Werror', '-Wno-unused-parameter',
                         '-fsanitize=' + sanitizer, '-fno-sanitize-recover=all', '-pthread', '-D__WINESRC__', '-D_WIN64',
                         '-I' + str(root / 'include'), str(path / 'test.c'), '-o', str(path / 'test')], check=True)

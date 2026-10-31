@@ -2,6 +2,7 @@ from pathlib import Path
 import os
 import subprocess
 import tempfile
+import test_support
 
 root = Path(__file__).resolve().parents[1]
 source = (root / 'source/native_heap.c').read_text()
@@ -46,8 +47,13 @@ void *__real__sbrk_r(struct _reent *r, ptrdiff_t increment)
     return (void *)previous;
 }
 void *__real__memalign_r(struct _reent *r, size_t alignment, size_t size)
-{ void *result = NULL; (void)r; if (fail_allocations) { fail_allocations--; return NULL; }
-  if (posix_memalign(&result, alignment, size)) return NULL; return result; }
+{
+    void *result = NULL;
+    (void)r;
+    if (fail_allocations) { fail_allocations--; return NULL; }
+    if (posix_memalign(&result, alignment, size)) return NULL;
+    return result;
+}
 void *__real__malloc_r(struct _reent *r, size_t size)
 { (void)r; if (fail_allocations) { fail_allocations--; return NULL; } return malloc(size); }
 void *__real__calloc_r(struct _reent *r, size_t count, size_t size)
@@ -242,7 +248,7 @@ if os.environ.get('SHADER_ALLOC_CACHE') == '1':
 with tempfile.TemporaryDirectory(prefix='autorun-native-heap-') as tmp:
     unit, binary = Path(tmp) / 'heap.c', Path(tmp) / 'heap'
     unit.write_text(fixture.replace('/* IMPLEMENTATION */', source))
-    subprocess.run([os.environ.get('CC', 'clang'), '-std=gnu11', '-O1', '-Wall', '-Wextra', '-Werror', '-pthread',
+    subprocess.run([test_support.compiler(), '-std=gnu11', '-O1', '-Wall', '-Wextra', '-Werror', '-pthread',
                     '-fsanitize=' + os.environ.get('SANITIZE', 'address,undefined'), *cache_flags,
                     '-I', str(root / 'source'), str(unit), '-o', str(binary)], check=True)
     subprocess.run([str(binary)], check=True)
