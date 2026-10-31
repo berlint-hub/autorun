@@ -22,6 +22,8 @@ import shutil
 import subprocess
 import sys
 
+from mingw_toolchain import bin_dir
+
 horizon_wine = Path(__file__).resolve().parents[1]
 root = horizon_wine.parent
 tools = horizon_wine / 'tools'
@@ -29,28 +31,8 @@ build = horizon_wine / 'build-autorun'
 stage_root = build / 'sd-card'
 stage = stage_root / 'switch/wine'
 marker = re.search(r'nx-wow64-dynarec-(\d+)', (horizon_wine / 'source/runtime.c').read_text()).group(1)
-def mingw_toolchain():
-    """The llvm-mingw the Windows side was made with, on any machine.
+toolchain = bin_dir('i686-w64-mingw32-clang')
 
-    build.sh fetches the one its host needs (llvm-mingw names them by platform)
-    and hands it over in $WINE_NX_LLVM_MINGW; a build that ran some other way
-    leaves it in toolchains/; and a machine with its own llvm-mingw has it on
-    PATH. Only the name of the compiler matters here, and every one of them
-    spells it i686-w64-mingw32-clang."""
-    named = os.environ.get('WINE_NX_LLVM_MINGW')
-    if named:
-        return Path(named) / 'bin'
-    for candidate in sorted(horizon_wine.glob('toolchains/llvm-mingw-*/bin')):
-        if (candidate / 'i686-w64-mingw32-clang').exists():
-            return candidate
-    found = shutil.which('i686-w64-mingw32-clang')
-    if found:
-        return Path(found).parent
-    sys.exit('i686-w64-mingw32-clang is not in an llvm-mingw this tree knows: run build.sh '
-             'once, set WINE_NX_LLVM_MINGW, or put one on PATH')
-
-
-toolchain = mingw_toolchain()
 # The FEX build when there is one, as build-amd64-components.sh names it.
 default_amd64 = next((path for path in (horizon_wine / f'build-switch-amd64/wine-nx-amd64-box64{kind}-mesa-dxvk-vkd3d.zip'
                                         for kind in ('-fex', '')) if path.is_file()),

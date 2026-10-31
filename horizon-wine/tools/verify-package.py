@@ -16,27 +16,15 @@ import platform
 import re
 import subprocess
 
+from mingw_toolchain import bin_dir
+
 root = Path(__file__).resolve().parents[2]
 parser = argparse.ArgumentParser()
 parser.add_argument("stage", type=Path)
 parser.add_argument("--dlls", type=Path, default=root / "horizon-dlls/switch/wine")
 args = parser.parse_args()
 stage, dlls = args.stage.resolve(), args.dlls.resolve()
-# The toolchain build.sh fetches: its release name is per-platform, and the
-# build exports WINE_NX_LLVM_MINGW with the one it chose. Anything already
-# fetched will do as a last resort.
-llvm_version = "20260505"
-machine = "aarch64" if platform.machine() in ("aarch64", "arm64") else "x86_64"
-name = ("llvm-mingw-%s-ucrt-macos-universal" % llvm_version if platform.system() == "Darwin"
-        else "llvm-mingw-%s-ucrt-ubuntu-22.04-%s" % (llvm_version, machine))
-toolchain = (Path(os.environ["WINE_NX_LLVM_MINGW"]) / "bin" if os.environ.get("WINE_NX_LLVM_MINGW")
-             else root / "horizon-wine/toolchains" / name / "bin")
-if not (toolchain / "llvm-readobj").is_file():
-    toolchain = next((p / "bin" for p in sorted((root / "horizon-wine/toolchains").glob("llvm-mingw-*"))
-                      if (p / "bin" / "llvm-readobj").is_file()), toolchain)
-assert (toolchain / "llvm-readobj").is_file(), \
-    f"No llvm-mingw toolchain in {root / 'horizon-wine/toolchains'}; run build.sh, or set WINE_NX_LLVM_MINGW."
-readobj = toolchain / "llvm-readobj"
+readobj = bin_dir("llvm-readobj") / "llvm-readobj"
 
 def inspect(path, option):
     return subprocess.check_output([str(readobj), option, str(path)], text=True)
