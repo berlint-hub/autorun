@@ -54,6 +54,15 @@ CC="$cc" python3 "$root/horizon-wine/tests/check_cursor_mapping.py"
 "$build/sd_stat_cache"
 "$build/sd_write_buffer"
 "$build/sd_read_cache"
+# The device itself, over a fake card: what the cache holds as the runtime
+# opens, writes and reads, and the directories it leaves alone -- FEX's code
+# cache database is read a block at a time and does not take the game's chunks.
+"$cc" $flags -I"$root/horizon-wine/tests/sd-cache-shims" \
+    "$root/horizon-wine/tests/sd_cache_device.c" -o "$build/sd_cache_device"
+"$build/sd_cache_device"
+# And that the runtime still names that directory to it: the translator's cache
+# is where fex_cache.h says the launcher measures it, both halves of it.
+python3 "$root/horizon-wine/tests/check_sd_cache_exclusion.py"
 "$cc" $flags "$root/horizon-wine/tests/box64_code_arena.c" -o "$build/box64_code_arena"
 "$build/box64_code_arena"
 "$cc" $flags "$root/horizon-wine/tests/horizon_registry.c" -o "$build/registry"

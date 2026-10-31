@@ -664,8 +664,34 @@ static void test_replay(void)
     assert( ahead.ms <= whole.ms * 1.05 );
 }
 
+/* Which directory a path is in, for the runtime's own caches it keeps out of
+ * this one: the card's own rules for names, and the boundary at the end of a
+ * directory's name. */
+static void test_path_under(void)
+{
+    /* The card's names: case, either separator, a trailing one, and sdmc:. */
+    assert( sd_cache_path_under( "sdmc:/switch/wine/drive_c/users/appdata/fex-emu/DiskCache/a/db",
+                                 "sdmc:/switch/wine/drive_c/users/appdata/fex-emu" ) );
+    assert( sd_cache_path_under( "/SWITCH/Wine/Drive_C/Users/AppData/FEX-EMU/x",
+                                 "/switch/wine/drive_c/users/appdata/fex-emu" ) );
+    assert( sd_cache_path_under( "/switch/wine/fex-emu/x", "/switch/wine/fex-emu/" ) );
+    assert( sd_cache_path_under( "/switch/wine/fex-emu//x", "/switch/wine/fex-emu" ) );
+    assert( sd_cache_path_under( "/switch/wine/fex-emu/x", "\\switch\\wine\\fex-emu" ) );
+    assert( sd_cache_path_under( "/switch/wine/fex-emu/x", "sdmc:/switch/wine/fex-emu" ) );
+    assert( sd_cache_path_under( "sdmc:/switch/wine/fex-emu", "sdmc:/switch/wine/fex-emu/" ) );
+    /* The boundary is where the name ends. */
+    assert( sd_cache_path_under( "/switch/wine/fex-emu/x", "/switch/wine/fex-emu" ) );
+    assert( !sd_cache_path_under( "/switch/wine/fex-emux/x", "/switch/wine/fex-emu" ) );
+    assert( !sd_cache_path_under( "/switch/wine/fex-emu2", "/switch/wine/fex-emu" ) );
+    assert( !sd_cache_path_under( "/switch/wine", "/switch/wine/fex-emu" ) );
+    assert( !sd_cache_path_under( "/game/data.bin", "/switch/wine/fex-emu" ) );
+    /* A directory that is only separators is the root. */
+    assert( sd_cache_path_under( "/switch/wine/x", "/" ) );
+}
+
 int main(void)
 {
+    test_path_under();
     test_sprite_reads();
     test_end_of_file();
     test_least_recently_used();
@@ -681,8 +707,8 @@ int main(void)
     test_open_files();
     puts( "SD read cache: sprite reads, end of file, least recently used, failures, a full pool taking the "
           "oldest chunk of any file, 300 open files, a pool that grows and shrinks with the free heap and is "
-          "sized by it, a file's share of it, a file read deeper than eight chunks, readahead, and open files a "
-          "program writes to "
+          "sized by it, a file's share of it, a file read deeper than eight chunks, readahead, open files a "
+          "program writes to, and which directory a path is in "
           "passed" );
     return 0;
 }

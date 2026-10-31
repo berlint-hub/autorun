@@ -58,6 +58,20 @@ static u64 sd_cache_settled_at;
  * replay in tests/sd_read_cache.c does. */
 static struct sd_cache_pool sd_cache_pool = { .max = SD_CACHE_POOL_MIN, .cap = SD_CACHE_POOL_MAX };
 static int sd_cache_off;
+
+/* Directories whose files are not the game's data but a cache of the runtime's
+ * own, read the way its writer left it: FEX's translated code is a database its
+ * module looks a block up in, a record or two at a time and by address, so a
+ * whole 128 KB chunk off the card answers one lookup -- and takes a chunk from
+ * the game while doing it. Their reads are the bytes their reader asked for.
+ *
+ * Registered once, before the card is read (wine_nx_sd_cache_exclude, from the
+ * runtime, which knows where the translator keeps its cache), and only read
+ * afterwards, so the list needs no lock of its own. */
+#define SD_CACHE_EXCLUDED_DIRS 4
+#define SD_CACHE_EXCLUDED_PATH 256
+static char sd_cache_excluded[SD_CACHE_EXCLUDED_DIRS][SD_CACHE_EXCLUDED_PATH];
+static unsigned int sd_cache_excluded_count;
 static struct sd_write_buffer *sd_write_buffers;  /* under sd_cache_mutex */
 static int sd_write_hold;  /* every way of seeing a file sends held writes first */
 static struct sd_stat_cache sd_stat_cache;        /* under sd_cache_mutex */
@@ -109,6 +123,14 @@ static ssize_t sd_cache_base_read( struct _reent *r, void *fd, char *ptr, size_t
 
 static unsigned long long sd_cache_free_mb(void)
 {
+#ifdef __GLIBC__
+    /* The host test (tests/sd_cache_device.c) runs this file on a desktop,
+     * where the console's heap symbols are not there and mallinfo is the
+     * deprecated spelling of mallinfo2. */
+    struct mallinfo2 heap = mallinfo2();
+
+    return (unsigned long long)heap.fordblks >> 20;
+#else
     extern char *fake_heap_start, *fake_heap_end;
     struct mallinfo heap = mallinfo();
     unsigned long long heap_size = (unsigned long long)(fake_heap_end - fake_heap_start);
@@ -116,7 +138,9 @@ static unsigned long long sd_cache_free_mb(void)
     /* What malloc holds unused plus what it has not taken from the heap yet;
      * the chunks the cache holds count as used and are added back by the
      * policy, which is why it is told them. */
-    return (heap.fordblks + (heap_size > heap.arena ? heap_size - heap.arena : 0)) >> 20;
+    return (heap.fordblks + (heap.arena > 0 && heap_size > (unsigned long long)heap.arena ?
+                             heap_size - (unsigned long long)heap.arena : 0)) >> 20;
+#endif
 }
 
 /* A move large enough to be worth saying: what the cache is now, and the heap
@@ -411,6 +435,33 @@ void wine_nx_sd_cache_flush(void)
     if (sd_cache_base) sd_cache_flush_all( _REENT );
 }
 
+/* A directory whose files the read cache leaves alone (above). The runtime
+ * names the translator's cache before it starts a program; called again for the
+ * same directory, it changes nothing. */
+void wine_nx_sd_cache_exclude( const char *dir )
+{
+    size_t length;
+
+    if (!dir || !dir[0]) return;
+    for (length = 0; length < sd_cache_excluded_count; length++)
+        if (sd_cache_path_under( dir, sd_cache_excluded[length] ) &&
+            sd_cache_path_under( sd_cache_excluded[length], dir )) return;
+    if (sd_cache_excluded_count >= SD_CACHE_EXCLUDED_DIRS) return;
+    length = strlen( dir );
+    if (length >= SD_CACHE_EXCLUDED_PATH) return;
+    memcpy( sd_cache_excluded[sd_cache_excluded_count], dir, length + 1 );
+    sd_cache_excluded_count++;
+}
+
+static int sd_cache_path_excluded( const char *path )
+{
+    unsigned int i;
+
+    for (i = 0; i < sd_cache_excluded_count; i++)
+        if (sd_cache_path_under( path, sd_cache_excluded[i] )) return 1;
+    return 0;
+}
+
 static int sd_cache_open( struct _reent *r, void *fd, const char *path, int flags, int mode )
 {
     int writable = (flags & O_ACCMODE) != O_RDONLY;
@@ -424,6 +475,10 @@ static int sd_cache_open( struct _reent *r, void *fd, const char *path, int flag
     {
         struct sd_cache_file *other;
 
+        /* A file under a directory the runtime excluded (the translator's own
+         * database, above) is read with the card asked for exactly the bytes
+         * its reader wanted. */
+        if (sd_cache_path_excluded( path )) file->cacheable = 0;
         file->append = !!(flags & O_APPEND);
         /* Held writes stay one file's own business only while nothing else has
          * the path open: another open reads and writes at positions of its own.

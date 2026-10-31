@@ -434,6 +434,34 @@ static inline int sd_cache_same_path( const char *a, const char *b )
     }
 }
 
+/* Whether `path` names `dir` or a file below it, compared the way the card
+ * compares names (case, separators, and a trailing separator that names the
+ * same directory), with the boundary where the directory's name ends: "/a/bc"
+ * is not under "/a/b", while "/a/b/c" and "/a/b" are. A directory that is
+ * nothing but separators is the root, and everything is under it. */
+static inline int sd_cache_path_under( const char *path, const char *dir )
+{
+    size_t length, i;
+
+    if (!path || !dir) return 0;
+    if (!strncmp( path, "sdmc:", 5 )) path += 5;
+    if (!strncmp( dir, "sdmc:", 5 )) dir += 5;
+    length = strlen( dir );
+    while (length && (dir[length - 1] == '/' || dir[length - 1] == '\\')) length--;
+    for (i = 0; i < length; i++)
+    {
+        char a = path[i], b = dir[i];
+
+        if (!a) return 0;
+        if (a == '\\') a = '/';
+        if (b == '\\') b = '/';
+        if (a >= 'A' && a <= 'Z') a += 'a' - 'A';
+        if (b >= 'A' && b <= 'Z') b += 'a' - 'A';
+        if (a != b) return 0;
+    }
+    return !path[i] || path[i] == '/' || path[i] == '\\';
+}
+
 static inline struct sd_cache_file *sd_cache_find( struct sd_cache_file *list, void *key )
 {
     for (; list; list = list->next) if (list->key == key) return list;

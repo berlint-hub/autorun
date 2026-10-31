@@ -1,6 +1,7 @@
 /* Host test for the sdmc device wrapper. */
 #include <assert.h>
 #include <stdlib.h>
+#include <stdio.h>
 #include <string.h>
 
 static int fail_calloc, fail_strdup;
@@ -31,6 +32,7 @@ const devoptab_t *devoptab_list[1];
 static unsigned char data[15 * 1024 * 1024 + 17];
 static size_t data_size;
 static unsigned int card_reads;
+static size_t card_bytes_asked;   /* what the requests asked the card for */
 static int fail_open;
 static void (*during_write)(void);
 struct test_file { off_t pos; int flags; };
@@ -68,6 +70,7 @@ static ssize_t card_read( struct _reent *r, void *fd, char *buf, size_t len )
     struct test_file *file = fd;
 
     card_reads++;
+    card_bytes_asked += len;
     if ((file->flags & O_ACCMODE) == O_WRONLY) { r->_errno = EBADF; return -1; }
     if ((size_t)file->pos >= data_size) return 0;
     if (len > data_size - file->pos) len = data_size - file->pos;
@@ -120,6 +123,7 @@ static void reset(void)
     sd_cache_pool.max = SD_CACHE_POOL_MIN;
     sd_cache_off = fail_open = 0;
     card_reads = wine_nx_sd_reads = wine_nx_sd_hits = 0;
+    card_bytes_asked = 0;
     sd_cache_settled_at = 0;
     during_write = NULL;
     data_size = sizeof(data);
@@ -261,6 +265,55 @@ static void test_tiny_reads(void)
     assert( sd_cache_pool.used <= SD_CACHE_LINES );
 }
 
+/* A directory the runtime keeps its own caches in -- the translator's database,
+ * read a block at a time by address. Its files are read as their reader asks,
+ * with no chunk of the card kept for them, and never take a chunk from a game;
+ * everything else is cached as before. */
+static void test_excluded(void)
+{
+    const char *root = "sdmc:/switch/wine/drive_c/users/steamuser/AppData/Local/fex-emu";
+    char path[512];
+
+    wine_nx_sd_cache_exclude( root );
+    wine_nx_sd_cache_exclude( root );   /* named twice, one directory */
+
+    snprintf( path, sizeof(path), "%s/DiskCache/build/db", root );
+    assert( !sd_cache_open( &test_reent, &reader, path, O_RDWR, 0 ) );
+    assert( read_byte( &reader ) == data[0] );
+    assert( card_reads == 1 && card_bytes_asked == 1 );
+    assert( !sd_cache_pool.used && !wine_nx_sd_hits );
+
+    /* A write to it is still held back and sent with the others: its module
+     * writes a block at a time. */
+    assert( !sd_cache_seek( &test_reent, &reader, 0, SEEK_SET ) );
+    assert( sd_cache_write_file( &test_reent, &reader, "X", 1 ) == 1 );
+    assert( data[0] != 'X' );
+    assert( read_byte( &reader ) == 'X' && data[0] == 'X' );
+    assert( !sd_cache_pool.used );
+    assert( !sd_cache_close( &test_reent, &reader ) );
+
+    /* The card's names: the same directory in another case, and one below it. */
+    memset( path, 0, sizeof(path) );
+    snprintf( path, sizeof(path), "sdmc:/SWITCH/wine/Drive_C/users/steamuser/appdata/LOCAL/FEX-EMU/x" );
+    assert( !sd_cache_open( &test_reent, &reader, path, O_RDONLY, 0 ) );
+    assert( read_byte( &reader ) == 'X' && card_bytes_asked == 3 );
+    assert( !sd_cache_pool.used );
+    assert( !sd_cache_close( &test_reent, &reader ) );
+
+    /* A directory whose name only starts the same way is not that directory. */
+    assert( !sd_cache_open( &test_reent, &reader,
+                            "sdmc:/switch/wine/drive_c/users/steamuser/AppData/Local/fex-emu2/db",
+                            O_RDONLY, 0 ) );
+    assert( read_byte( &reader ) == 'X' );
+    assert( card_bytes_asked == 3 + SD_CACHE_CHUNK && sd_cache_pool.used == 1 );
+    assert( !sd_cache_close( &test_reent, &reader ) );
+
+    /* And the game's own files are not affected. */
+    assert( !sd_cache_open( &test_reent, &reader, "sdmc:/game/data.bin", O_RDONLY, 0 ) );
+    assert( read_byte( &reader ) == data[0] );
+    assert( card_bytes_asked == 3 + 2 * SD_CACHE_CHUNK );
+}
+
 int main( int argc, char **argv )
 {
     static const struct { const char *name; void (*run)(void); } tests[] = {
@@ -268,6 +321,7 @@ int main( int argc, char **argv )
         { "tracking-failure", test_tracking_failure }, { "truncate", test_truncate },
         { "held-write", test_held_write }, { "shared-write", test_shared_write },
         { "append", test_append }, { "tiny-reads", test_tiny_reads },
+        { "excluded", test_excluded },
     };
     unsigned int i;
 

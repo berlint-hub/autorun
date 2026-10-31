@@ -428,7 +428,12 @@ runtime; the full package now ships the Mesa 26 one.
   game's menu; `fex_cache_root()` names the directories both sides use, so the
   runtime and the launcher cannot drift apart. The database is read and written
   plainly (`FEX_DISKCACHEFILEMAPPING=0`): the release maps a fixed, very large
-  window onto the file, which on a card is a copy of it page by page. A marker
+  window onto the file, which on a card is a copy of it page by page. It does
+  not go through the card read cache below either: its module looks a block up
+  by address, a record or two at a time, so a 128 KB chunk would answer one
+  lookup and take a chunk from the game's own data as it went. The runtime
+  names the directory with `wine_nx_sd_cache_exclude()`, and files under it are
+  read with the card asked for exactly the bytes their reader wanted. A marker
   in `program-settings/` names the start that is under way, so one that never
   comes back — a program that could not start with the cache, a crash — removes
   `fex-cache=1` from that program's settings as it falls back. This keeps the

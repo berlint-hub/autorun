@@ -158,6 +158,7 @@ extern const char *wine_nx_loader_last_open_path(void);
 extern NTSTATUS wine_nx_loader_last_open_status(void);
 extern const char *wine_nx_loader_last_export_diag(void);
 extern int wine_nx_sd_cache_install(void);
+extern void wine_nx_sd_cache_exclude( const char *dir );
 extern int wine_nx_lazy_file_views;  /* dlls/ntdll/unix/horizon.c */
 extern void wine_nx_sd_cache_flush(void);
 #ifdef WINE_NX_USB_STORAGE
@@ -5791,6 +5792,20 @@ int main( int argc, char **argv )
     int low_window_available;
     USHORT target_machine;
     int sd_cache = wine_nx_sd_cache_install();  /* before any file on the card is opened */
+
+    /* The translator's code cache is a database its module reads a block at a
+     * time and by address: through the card cache a 128 KB chunk would answer
+     * one lookup and take a chunk from the game (sd_cache.c). It is read as it
+     * is instead, from wherever the module keeps it. */
+    if (sd_cache)
+    {
+        char cache_root[520];
+        int roaming;
+
+        for (roaming = 0; roaming < 2; roaming++)
+            if (fex_cache_root( cache_root, sizeof(cache_root), RUNTIME_DIR, roaming ))
+                wine_nx_sd_cache_exclude( cache_root );
+    }
 
 #ifdef WINE_NX_SWAP_POC
     if (wine_nx_fex_exception_attach()) return 1;
