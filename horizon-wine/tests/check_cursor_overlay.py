@@ -27,6 +27,7 @@ fixture = r'''
 #include <assert.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdarg.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -94,6 +95,9 @@ extern int wine_nx_cursor_panel( int *x, int *y ) __attribute__((weak));
 extern void wine_nx_runtime_trace( const char *msg ) __attribute__((weak));
 extern int wine_nx_surface_picture( int surface_w, int surface_h, int *x, int *y, int *w, int *h )
     __attribute__((weak));
+/* Static in winnx_opengl.c, which this fixture takes only a slice of, so it is
+ * declared here the way the runtime's own hooks are. */
+extern void nx_log( const char *format, ... ) __attribute__((weak));
 
 typedef void (*PFN_glGenFramebuffers)(GLint, GLuint *);
 typedef void (*PFN_glBindFramebuffer)(GLenum, GLuint);
@@ -272,6 +276,22 @@ void wine_nx_runtime_trace( const char *message )
     snprintf( trace_line, sizeof(trace_line), "%s", message );
 }
 
+static char overlay_log_line[256];
+static unsigned int overlay_logged;
+
+/* The overlay says what it did into the runtime's log, and in the sandbox there
+ * is no runtime to write one: those lines are what a program frozen on its first
+ * swap is read out of, so they are kept and the checks ask for them. */
+void nx_log( const char *format, ... )
+{
+    va_list args;
+
+    overlay_logged++;
+    va_start( args, format );
+    vsnprintf( overlay_log_line, sizeof(overlay_log_line), format, args );
+    va_end( args );
+}
+
 int wine_nx_cursor_panel( int *x, int *y )
 {
     if (!cursor_visible) return 0;
@@ -413,6 +433,11 @@ int main(void)
     surface_width = 1280; surface_height = 720;
     nx_cursor_draw( &drawable );
     check_runs( cursor_panel_x, cursor_panel_y, 1280, 720 );
+
+    /* The arrow's own words for the draw it made: a run that froze on its first
+     * swap is read out of these lines, so they are part of what is checked. */
+    assert( overlay_logged > 0 );
+    assert( !strcmp( overlay_log_line, "[NXGL] the mouse arrow: the GL state is put back" ) );
 
     printf( "cursor overlay: the arrow's runs blitted into the picture, once per context\n" );
     return 0;
