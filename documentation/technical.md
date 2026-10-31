@@ -828,6 +828,16 @@ sh horizon-wine/tests/check-game-fixes.sh     # game fixes against the game-fixe
 for t in horizon-wine/tests/check_*.py; do python3 "$t"; done  # server pieces run against real host sockets and files
 ```
 
+A test whose tool, host, header or checkout is missing prints
+`SKIP: needs ...` and exits 0, so a whole sweep runs to the end anywhere.
+`.github/workflows/checks.yml` does three things on every push to `main` and
+`arena/**`: it compiles every tracked `*.py`, parses every `*.sh` and loads
+every `*.json`; it runs the tests that need neither a Switch nor an ARM64 host
+(qemu's binfmt handler is registered for the one that needs an ARM64
+container); and it builds the lot with `build.sh` in the switch-dev image,
+uploading the SD card archive and the log. The GitLab pipeline keeps the jobs
+that need a runner with devkitA64.
+
 Box64 is pinned in `horizon-wine/vendor/box64` (fetched by
 `tools/bootstrap-box64-core.sh`) and never edited:
 `horizon-wine/cmake/Box64Core.cmake` builds patched copies of the files it
