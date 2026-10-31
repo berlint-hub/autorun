@@ -17,7 +17,9 @@ case "$(uname -m)" in
         ;;
 esac
 sh "$root/horizon-wine/tools/bootstrap-box64-core.sh"
+# The Box64 checkout is the host's: git in the container must trust it.
 docker run --rm --platform linux/arm64 -v "$root:/work" -w /work \
+    -e GIT_CONFIG_COUNT=1 -e GIT_CONFIG_KEY_0=safe.directory -e GIT_CONFIG_VALUE_0='*' \
     "$(cat "$root/horizon-wine/switch-dev.txt")" sh -ec '
     # Built in the container, and gone with it.
     cmake -S horizon-wine/tests/box64-core -B /tmp/box64-core -G Ninja

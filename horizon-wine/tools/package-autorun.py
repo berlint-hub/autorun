@@ -29,20 +29,28 @@ build = horizon_wine / 'build-autorun'
 stage_root = build / 'sd-card'
 stage = stage_root / 'switch/wine'
 marker = re.search(r'nx-wow64-dynarec-(\d+)', (horizon_wine / 'source/runtime.c').read_text()).group(1)
-# The toolchain build.sh fetches: its release name is per-platform, and the
-# build exports WINE_NX_LLVM_MINGW with the one it chose. Anything already
-# fetched will do as a last resort.
-llvm_version = '20260505'
-machine = 'aarch64' if platform.machine() in ('aarch64', 'arm64') else 'x86_64'
-name = ('llvm-mingw-%s-ucrt-macos-universal' % llvm_version if platform.system() == 'Darwin'
-        else 'llvm-mingw-%s-ucrt-ubuntu-22.04-%s' % (llvm_version, machine))
-toolchain = (Path(os.environ['WINE_NX_LLVM_MINGW']) / 'bin' if os.environ.get('WINE_NX_LLVM_MINGW')
-             else horizon_wine / 'toolchains' / name / 'bin')
-if not (toolchain / 'i686-w64-mingw32-clang').is_file():
-    toolchain = next((p / 'bin' for p in sorted((horizon_wine / 'toolchains').glob('llvm-mingw-*'))
-                      if (p / 'bin' / 'i686-w64-mingw32-clang').is_file()), toolchain)
-assert (toolchain / 'i686-w64-mingw32-clang').is_file(), \
-    f'No llvm-mingw toolchain in {horizon_wine / "toolchains"}; run build.sh, or set WINE_NX_LLVM_MINGW.'
+def mingw_toolchain():
+    """The llvm-mingw the Windows side was made with, on any machine.
+
+    build.sh fetches the one its host needs (llvm-mingw names them by platform)
+    and hands it over in $WINE_NX_LLVM_MINGW; a build that ran some other way
+    leaves it in toolchains/; and a machine with its own llvm-mingw has it on
+    PATH. Only the name of the compiler matters here, and every one of them
+    spells it i686-w64-mingw32-clang."""
+    named = os.environ.get('WINE_NX_LLVM_MINGW')
+    if named:
+        return Path(named) / 'bin'
+    for candidate in sorted(horizon_wine.glob('toolchains/llvm-mingw-*/bin')):
+        if (candidate / 'i686-w64-mingw32-clang').exists():
+            return candidate
+    found = shutil.which('i686-w64-mingw32-clang')
+    if found:
+        return Path(found).parent
+    sys.exit('i686-w64-mingw32-clang is not in an llvm-mingw this tree knows: run build.sh '
+             'once, set WINE_NX_LLVM_MINGW, or put one on PATH')
+
+
+toolchain = mingw_toolchain()
 # The FEX build when there is one, as build-amd64-components.sh names it.
 default_amd64 = next((path for path in (horizon_wine / f'build-switch-amd64/wine-nx-amd64-box64{kind}-mesa-dxvk-vkd3d.zip'
                                         for kind in ('-fex', '')) if path.is_file()),
