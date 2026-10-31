@@ -249,7 +249,10 @@ with tempfile.TemporaryDirectory(prefix='wine-nx-fex-unixlib-') as temporary:
     for fex in (False, True):
         for extras in (False, True):
             binary = temporary / f'test-{int(fex)}-{int(extras)}'
-            flags = ['-std=gnu99', '-Wall', '-Wextra', '-Werror', '-Wno-missing-field-initializers',
+            # Wine's windef.h declares the handle and callback types that minwindef.h
+            # already declared, which C11 allows and C99 does not; gcc takes it either
+            # way, clang makes it an error under -Werror. gnu11 is how Wine is built.
+            flags = ['-std=gnu11', '-Wall', '-Wextra', '-Werror', '-Wno-missing-field-initializers',
                      '-fsanitize=address,undefined', '-fno-omit-frame-pointer', '-fno-pie', '-no-pie',
                      '-D__WINESRC__', '-DWINE_UNIX_LIB', '-D_WIN64',
                      '-I' + str(root / 'include'), '-I' + str(root / 'dlls/ntdll/unix')]
