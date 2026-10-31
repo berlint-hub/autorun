@@ -356,19 +356,24 @@ static void nx_note_context_request( int format, const EGLint *attribs, const EG
  * which the caller logs next. */
 static void nx_note_egl_state( const char *why )
 {
-    const char *vendor, *version;
+    const char *vendor, *version, *apis;
     static int noted;
 
     if (InterlockedExchange( &noted, 1 )) return;
     vendor = funcs->p_eglQueryString( egl->display, EGL_VENDOR );
     version = funcs->p_eglQueryString( egl->display, EGL_VERSION );
+    /* Which APIs this display was built with, which is the one string that says
+     * why a renderer asked for one way answered another: a display that names
+     * no OpenGL in it has no config for one, whatever the setting asked for. */
+    apis = funcs->p_eglQueryString( egl->display, EGL_CLIENT_APIS );
     if (!egl->config_count)
-        nx_log( "[NXGL] %s: EGL %s %s describes no config for OpenGL, so no pixel format can carry "
-                "a context (a driver without desktop GL, or one whose client API is ES only)",
-                why, vendor ? vendor : "?", version ? version : "?" );
+        nx_log( "[NXGL] %s: EGL %s %s (%s) describes no config for OpenGL, so no pixel format can "
+                "carry a context (a driver without desktop GL, or one whose client API is ES only)",
+                why, vendor ? vendor : "?", version ? version : "?",
+                apis ? apis : "client APIs not given" );
     else
-        nx_log( "[NXGL] %s: EGL %s %s, %u config(s) for OpenGL", why, vendor ? vendor : "?",
-                version ? version : "?", egl->config_count );
+        nx_log( "[NXGL] %s: EGL %s %s (%s), %u config(s) for OpenGL", why, vendor ? vendor : "?",
+                version ? version : "?", apis ? apis : "client APIs not given", egl->config_count );
 }
 
 /* Drops one attribute from a context attribute list, the terminator included.
@@ -1453,6 +1458,7 @@ static struct opengl_context *nx_context_create( int format, struct opengl_conte
  * happened: a refusal here is what a program sees as "no rendering at all",
  * and eglMakeCurrent's answer is the only place it is visible. */
 static BOOL (*nx_base_context_activate)( struct opengl_context *, struct opengl_drawable *, struct opengl_drawable * );
+static UINT (*nx_base_init_pixel_formats)( UINT *onscreen_count );
 
 static BOOL nx_context_activate( struct opengl_context *context, struct opengl_drawable *draw,
                                  struct opengl_drawable *read )
@@ -1484,6 +1490,20 @@ static void nx_init_egl_platform( struct egl_platform *platform )
     egl = platform;
 }
 
+/* How many pixel formats this display can carry a context on. Wine's wgl asks
+ * once, before anything of the program's own has run, and a display with no GL
+ * config in it answers none -- which is the whole of what a renderer that does
+ * not work looks like from outside: no context, no picture, and a program that
+ * waits for one for ever. Wine says it into the driver's own file; this puts it
+ * in the run log, which is the one that gets read when nothing was drawn. */
+static UINT nx_init_pixel_formats( UINT *onscreen_count )
+{
+    UINT count = nx_base_init_pixel_formats( onscreen_count );
+
+    if (!count) nx_note_egl_state( "no pixel format can carry a context" );
+    return count;
+}
+
 static struct opengl_driver_funcs nx_driver_funcs =
 {
     .p_init_egl_platform = nx_init_egl_platform,
@@ -1504,7 +1524,8 @@ UINT wine_nx_drv_OpenGLInit( UINT version, const struct opengl_funcs *opengl_fun
     funcs = opengl_funcs;
 
     nx_driver_funcs.p_get_proc_address = (*driver_funcs)->p_get_proc_address;
-    nx_driver_funcs.p_init_pixel_formats = (*driver_funcs)->p_init_pixel_formats;
+    nx_base_init_pixel_formats = (*driver_funcs)->p_init_pixel_formats;
+    nx_driver_funcs.p_init_pixel_formats = nx_init_pixel_formats;
     nx_driver_funcs.p_describe_pixel_format = (*driver_funcs)->p_describe_pixel_format;
     nx_driver_funcs.p_init_extensions = (*driver_funcs)->p_init_extensions;
     nx_driver_funcs.p_context_destroy = (*driver_funcs)->p_context_destroy;
