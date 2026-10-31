@@ -894,21 +894,31 @@ static void nx_cursor_draw( struct opengl_drawable *base )
     EGLContext context;
     int px, py, count, i, created;
     int picture_x = 0, picture_y = 0, picture_w, picture_h;
+    /* The arrow is drawn into every present, so only the first one says what it
+     * is doing: a program frozen on its first swap used to leave the log between
+     * two lines four calls apart, and the arrow was one of them. */
+    static int traced;
 
     if (!&wine_nx_cursor_panel || !wine_nx_cursor_panel( &px, &py )) return;
+    if (!traced) nx_log( "[NXGL] the mouse arrow: the panel cursor is at %d,%d", px, py );
     if (!funcs->p_eglQuerySurface( egl->display, base->surface, EGL_WIDTH, &width ) ||
         !funcs->p_eglQuerySurface( egl->display, base->surface, EGL_HEIGHT, &height ) ||
         width < 1 || height < 1)
         return;
+    if (!traced) nx_log( "[NXGL] the mouse arrow: the surface is %dx%d", (int)width, (int)height );
     /* The panel shows this rectangle of the surface: the whole of it, or the
      * central 4:3 the display is cropping to when the widescreen hack is on. */
     picture_w = width;
     picture_h = height;
     if (&wine_nx_surface_picture)
         wine_nx_surface_picture( width, height, &picture_x, &picture_y, &picture_w, &picture_h );
+    if (!traced) nx_log( "[NXGL] the mouse arrow: the picture it goes into is %dx%d at %d,%d",
+                         picture_w, picture_h, picture_x, picture_y );
     if (!(count = pointer_overlay_runs( px, py, 1280, 720, picture_x, picture_y, picture_w, picture_h, runs )))
         return;
+    if (!traced) nx_log( "[NXGL] the mouse arrow: %d piece(s) to put into the picture", count );
     if (!(context = funcs->p_eglGetCurrentContext())) return;
+    if (!traced) nx_log( "[NXGL] the mouse arrow: the current context is %p", context );
     if (!p_glBlitFramebuffer)
     {
         p_glGenFramebuffers = (void *)funcs->p_eglGetProcAddress( "glGenFramebuffers" );
@@ -922,6 +932,7 @@ static void nx_cursor_draw( struct opengl_drawable *base )
         p_glBlitFramebuffer = (void *)funcs->p_eglGetProcAddress( "glBlitFramebuffer" );
         if (!p_glBlitFramebuffer) return;
     }
+    if (!traced) nx_log( "[NXGL] the mouse arrow: the blit entry points are loaded" );
 
     slot = nx_cursor_slot( context );
     created = 0;
@@ -932,6 +943,7 @@ static void nx_cursor_draw( struct opengl_drawable *base )
         slot->uploaded = 0;
         created = 1;
     }
+    if (!traced) nx_log( "[NXGL] the mouse arrow: the slot's names are ready (made %d)", created );
 
     funcs->p_glGetIntegerv( GL_READ_FRAMEBUFFER_BINDING, &read_fb );
     funcs->p_glGetIntegerv( GL_DRAW_FRAMEBUFFER_BINDING, &draw_fb );
@@ -944,6 +956,7 @@ static void nx_cursor_draw( struct opengl_drawable *base )
     scissor = funcs->p_glIsEnabled( GL_SCISSOR_TEST );
     srgb = funcs->p_glIsEnabled( GL_FRAMEBUFFER_SRGB );
 
+    if (!traced) nx_log( "[NXGL] the mouse arrow: the GL state is saved" );
     funcs->p_glBindTexture( GL_TEXTURE_2D, slot->texture );
     p_glBindBuffer( GL_PIXEL_UNPACK_BUFFER, 0 );
     funcs->p_glPixelStorei( GL_UNPACK_ROW_LENGTH, 0 );
@@ -962,6 +975,7 @@ static void nx_cursor_draw( struct opengl_drawable *base )
         slot->uploaded = 1;
     }
 
+    if (!traced) nx_log( "[NXGL] the mouse arrow: the sprite is in the slot" );
     if (scissor) funcs->p_glDisable( GL_SCISSOR_TEST );
     if (srgb) funcs->p_glDisable( GL_FRAMEBUFFER_SRGB );
     p_glBindFramebuffer( GL_READ_FRAMEBUFFER, slot->framebuffer );
@@ -970,6 +984,7 @@ static void nx_cursor_draw( struct opengl_drawable *base )
     p_glBindFramebuffer( GL_DRAW_FRAMEBUFFER, 0 );
     /* The sprite's first row is its top, the framebuffer's first row is its
      * bottom; the runs are in the picture's own, top-down pixels. */
+    if (!traced) nx_log( "[NXGL] the mouse arrow: blitting %d piece(s)", count );
     for (i = 0; i < count; i++)
     {
         const struct pointer_overlay_run *run = &runs[i];
@@ -979,6 +994,7 @@ static void nx_cursor_draw( struct opengl_drawable *base )
                              run->x0, height - run->y1, run->x1, height - run->y0,
                              GL_COLOR_BUFFER_BIT, GL_NEAREST );
     }
+    if (!traced) nx_log( "[NXGL] the mouse arrow: the pieces are in the picture" );
     if (scissor) funcs->p_glEnable( GL_SCISSOR_TEST );
     if (srgb) funcs->p_glEnable( GL_FRAMEBUFFER_SRGB );
     /* The first frame says the arrow is being drawn at all: a log where the
@@ -1002,6 +1018,8 @@ static void nx_cursor_draw( struct opengl_drawable *base )
     funcs->p_glPixelStorei( GL_UNPACK_SKIP_PIXELS, skip_pixels );
     funcs->p_glPixelStorei( GL_UNPACK_SKIP_ROWS, skip_rows );
     funcs->p_glPixelStorei( GL_UNPACK_ALIGNMENT, alignment );
+    if (!traced) nx_log( "[NXGL] the mouse arrow: the GL state is put back" );
+    traced = 1;
 }
 
 /* The frame about to be shown, kept when the player asked for it (Minus+R;
