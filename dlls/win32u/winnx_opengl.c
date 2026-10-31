@@ -1067,11 +1067,21 @@ static BOOL nx_drawable_swap( struct opengl_drawable *base )
             wine_nx_present_fit_stretched( width, height, base->client->virtual_rect.left,
                                            base->client->virtual_rect.top );
     }
+    /* The first swap is where a program that shows nothing stops, and its log
+     * used to run straight from "about to call" to "began" with nothing in
+     * between -- so a run that froze somewhere in these four steps named none
+     * of them and left the reader to guess. Say each one as it happens, for the
+     * first few swaps only: they run on every present after that. */
+    index = __atomic_add_fetch( &nx_swap_named, 1, __ATOMIC_RELAXED );
+    if (index <= 3) nx_log( "[NXGL] swap #%u: the present fit is set", index );
     nx_osk_draw( base );
+    if (index <= 3) nx_log( "[NXGL] swap #%u: the keyboard overlay is drawn", index );
+    nx_cursor_draw( base );
+    if (index <= 3) nx_log( "[NXGL] swap #%u: the cursor overlay is drawn", index );
+    nx_drawable_screenshot( base );
+    if (index <= 3) nx_log( "[NXGL] swap #%u: a screenshot is taken if one was asked for", index );
     /* Over the keyboard, as the compositor draws it: the arrow is the last
      * thing on the picture, the way it is the last thing drawn on the panel. */
-    nx_cursor_draw( base );
-    nx_drawable_screenshot( base );
     /* The first three swaps say what they are, because the first one is where
      * a program that shows nothing stops: a swap the driver never returns used
      * to leave the log with no line between the context and the stall report,
@@ -1088,7 +1098,6 @@ static BOOL nx_drawable_swap( struct opengl_drawable *base )
         width = size.cx;
         height = size.cy;
     }
-    index = __atomic_add_fetch( &nx_swap_named, 1, __ATOMIC_RELAXED );
     if (index <= 3)
     {
         nx_log( "[NXGL] swap #%u began on the program's %dx%d surface", index, width, height );
