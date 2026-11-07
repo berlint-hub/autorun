@@ -19,6 +19,9 @@ sh "$root/horizon-wine/tools/bootstrap-box64-core.sh"
 sh "$root/horizon-wine/tools/bootstrap-wma.sh"
 docker run --rm -v "$root:/work" -w /work -e NX_MESA="${WINE_NX_MESA_SWITCH_DIR:-}" \
     "${WINE_NX_DEVKIT_IMAGE:-$(cat "$root/horizon-wine/switch-dev.txt")}" sh -ec '
+    # The bind-mounted checkout belongs to the host user, not container root.
+    # Trust only this pinned vendor checkout; keep CMake revision/clean checks.
+    git config --global --add safe.directory /work/horizon-wine/vendor/box64
     cmake -S horizon-wine -B horizon-wine/build-switch-wow64-mesa-switch -G Ninja \
         -DCMAKE_TOOLCHAIN_FILE=/work/horizon-wine/cmake/switch-devkitA64.cmake \
         -DWINE_NX_PE_BUILD_DIR=/work/horizon-wine/build-wine-amd64-pe \
