@@ -1,0 +1,59 @@
+name: Build Autorun
+
+on:
+  push:
+    branches: [arena/4c4aac17-autorun]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          persist-credentials: false
+
+      - name: Install host build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bison flex build-essential python3 curl git xz-utils pkg-config
+
+      - name: Configure LLVM-MinGW path
+        run: echo "WINE_NX_LLVM_MINGW=$GITHUB_WORKSPACE/horizon-wine/toolchains/llvm-mingw-20260505-ucrt-ubuntu-22.04-x86_64" >> "$GITHUB_ENV"
+
+      - name: Cache LLVM-MinGW
+        uses: actions/cache@v4
+        with:
+          path: horizon-wine/toolchains/llvm-mingw-20260505-ucrt-ubuntu-22.04-x86_64
+          key: llvm-mingw-20260505-ucrt-ubuntu-22.04-x86_64
+
+      - name: Build AMD64 runtime and SD card package
+        run: |
+          set -o pipefail
+          sh build.sh --jobs 2 2>&1 | tee build.log
+
+      - name: Upload SD card archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: autorun-amd64
+          path: horizon-wine/build-autorun/autorun-*.zip
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: build.log
+          if-no-files-found: ignore
+          retention-days: 14
