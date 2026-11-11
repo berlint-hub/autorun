@@ -9284,7 +9284,7 @@ static int horizon_server_handle_set_window_pos( struct horizon_server_connectio
     struct horizon_set_window_pos_reply reply;
     struct horizon_user_window *window, *previous;
     struct horizon_rectangle old_window, old_client;
-    int geometry_changed;
+    int geometry_changed, was_visible;
 
     memset( &reply, 0, sizeof(reply) );
     pthread_mutex_lock( &horizon_server_objects_mutex );
@@ -9316,6 +9316,7 @@ static int horizon_server_handle_set_window_pos( struct horizon_server_connectio
         window->visible_rect = data_size >= sizeof(*extra) ? extra[0] : request->window;
         window->surface_rect = data_size >= 2 * sizeof(*extra) ? extra[1] : window->visible_rect;
         window->paint_flags = request->paint_flags;
+        was_visible = !!(window->style & HORIZON_WS_VISIBLE);
         if (request->swp_flags & HORIZON_SWP_SHOWWINDOW) window->style |= HORIZON_WS_VISIBLE;
         if (request->swp_flags & HORIZON_SWP_HIDEWINDOW) window->style &= ~HORIZON_WS_VISIBLE;
         reply.new_style = window->style;
@@ -9350,6 +9351,18 @@ static int horizon_server_handle_set_window_pos( struct horizon_server_connectio
                                window->paint_flags, window->style );
             }
             reply.surface_win = window->handle;
+        }
+        if ((geometry_changed || !was_visible) && (window->style & HORIZON_WS_VISIBLE) &&
+            !(request->swp_flags & HORIZON_SWP_NOREDRAW))
+        {
+            struct horizon_rectangle win_screen, client_screen;
+
+            horizon_server_window_screen_rects_locked( window, &win_screen, &client_screen );
+            if (!was_visible) horizon_server_mark_window_update_locked( window, client_screen, 1 );
+            horizon_server_redraw_children_locked( window, win_screen, HORIZON_RDW_ALLCHILDREN );
+            horizon_trace( "[HZPAINT] setpos expose hwnd=%08x rect=%d,%d-%d,%d shown=%d\n",
+                           window->handle, win_screen.left, win_screen.top,
+                           win_screen.right, win_screen.bottom, !was_visible );
         }
     }
     pthread_mutex_unlock( &horizon_server_objects_mutex );
