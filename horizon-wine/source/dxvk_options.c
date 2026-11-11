@@ -428,6 +428,9 @@ const struct dxvk_option dxvk_options[] =
     OPTION( "dxvk.gplAsyncCache",
             "GPLAsync's legacy state-cache integration. Available here for 2.3 through 2.6; removed in 2.7 and newer.",
             boolean, 20300, 20700, 0, 0, 1, 1, "False" ),
+    OPTION( "d3d9.unchangedStateFastPath",
+            "Carafe's DXVK build: a state set to the value it already has returns before the device lock.",
+            boolean, 30101, 0, 0, 0, 1, 0, "True" ),
 };
 #undef OPTION
 
