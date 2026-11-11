@@ -3858,6 +3858,10 @@ static NTSTATUS post_dde_message_call( HWND hwnd, UINT msg, WPARAM wparam, LPARA
 }
 
 
+#ifdef __SWITCH__
+__thread int wine_nx_reply_waits;
+#endif
+
 /***********************************************************************
  *           wait_message_reply
  *
@@ -3892,7 +3896,13 @@ static void wait_message_reply( UINT flags )
             continue;
         }
 
+#ifdef __SWITCH__
+        wine_nx_reply_waits++;
+#endif
         wait_message( 1, &server_queue, INFINITE, wake_mask, wake_mask, 0 );
+#ifdef __SWITCH__
+        wine_nx_reply_waits--;
+#endif
     }
 }
 
