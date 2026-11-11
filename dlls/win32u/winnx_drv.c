@@ -785,6 +785,8 @@ static void wine_nx_update_cursor( void )
 extern LONG wine_nx_fit_screen( UINT width, UINT height );
 
 static LONG wine_nx_fit_pending;
+static DWORD wine_nx_fit_thread;
+extern __thread int wine_nx_reply_waits;
 
 static BOOL wine_nx_game_window( HWND hwnd, RECT *client )
 {
@@ -855,8 +857,16 @@ static void wine_nx_fit_screen_to_game( void )
     LONG ret;
     char line[160];
 
+    if (wine_nx_fit_thread != GetCurrentThreadId()) return;
+    if (wine_nx_reply_waits) return;
     if (!InterlockedExchange( &wine_nx_fit_pending, 0 )) return;
     if (!(game = wine_nx_find_game_window( &client ))) return;
+    if (NtUserGetWindowThread( game, NULL ) != GetCurrentThreadId())
+    {
+        wine_nx_fit_thread = NtUserGetWindowThread( game, NULL );
+        InterlockedExchange( &wine_nx_fit_pending, 1 );
+        return;
+    }
     width = client.right - client.left;
     height = client.bottom - client.top;
     screen_width = get_system_metrics( SM_CXSCREEN );
@@ -1065,7 +1075,10 @@ void wine_nx_drv_WindowPosChanged( HWND hwnd, HWND insert_after, HWND owner_hint
 
     nxdrv_trace( "[NXDRV] WindowPosChanged surface=%d swp=%x", surface ? 1 : 0, swp_flags, 0, 0 );
     if (NtUserGetAncestor( hwnd, GA_PARENT ) == NtUserGetDesktopWindow())
+    {
+        wine_nx_fit_thread = NtUserGetWindowThread( hwnd, NULL );
         InterlockedExchange( &wine_nx_fit_pending, 1 );
+    }
     if (swp_flags & SWP_HIDEWINDOW)
     {
         wine_nx_note_surface_hidden( hwnd );
