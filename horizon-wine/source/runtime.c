@@ -1734,6 +1734,7 @@ static size_t runtime_fex_environment( const char *target, char *buffer, size_t 
 
         if (launcher_kv_get( &kv, option->name, configured, sizeof(configured) ) &&
             nx_fex_option_choice( option, configured ) >= 0) value = configured;
+        if (option->id == NX_FEX_GDB_SYMBOLS && runtime_profile) value = "1";
         length = snprintf( buffer + used, size - used, "%s=%s", option->name, value );
         if (length < 0 || (size_t)length + 1 > size - used) return 0;
         used += length + 1;
