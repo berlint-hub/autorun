@@ -3663,6 +3663,45 @@ static void carafe_thread_waited( unsigned long long ns, int placed )
     wine_nx_runtime_trace( line );
 }
 
+static void carafe_thread_waiter_report( void )
+{
+    extern void wine_nx_runtime_trace( const char *msg ) __attribute__((weak));
+    extern void wine_nx_stall_report_soon( void ) __attribute__((weak));
+    Thread *self = threadGetSelf();
+    uintptr_t low = self ? (uintptr_t)self->stack_mirror : 0;
+    uintptr_t high = self ? low + self->stack_sz : 0;
+    uintptr_t *frame = __builtin_frame_address( 0 );
+    char line[256];
+    int len, depth;
+
+    len = snprintf( line, sizeof(line), "[THREAD] the thread waiting for a place: h=%#x, called from",
+                    threadGetCurHandle() );
+    for (depth = 0; depth < 12 && len > 0 && len < (int)sizeof(line) - 20; depth++)
+    {
+        uintptr_t *next;
+
+        if ((uintptr_t)frame < low || (uintptr_t)frame + 16 > high || ((uintptr_t)frame & 15)) break;
+        len += snprintf( line + len, sizeof(line) - len, " %#lx", (unsigned long)frame[1] );
+        next = (uintptr_t *)frame[0];
+        if (next <= frame) break;
+        frame = next;
+    }
+    if (&wine_nx_runtime_trace) wine_nx_runtime_trace( line );
+    if (&wine_nx_stall_report_soon) wine_nx_stall_report_soon();
+}
+
+static void carafe_thread_still_waiting( unsigned long long ns, int first )
+{
+    extern void wine_nx_runtime_trace( const char *msg ) __attribute__((weak));
+    char line[96];
+
+    if (!&wine_nx_runtime_trace) return;
+    snprintf( line, sizeof(line), "[THREAD] limit reached; still waiting for a place after %llu s",
+              ns / 1000000000ull );
+    wine_nx_runtime_trace( line );
+    if (first) carafe_thread_waiter_report();
+}
+
 static void carafe_server_client_ended( unsigned int requests )
 {
     unsigned int bucket = requests <= 4 ? 0 : requests <= 50 ? 1 : requests <= 500 ? 2 : 3;
@@ -3681,6 +3720,7 @@ static void carafe_server_client_ended( unsigned int requests )
 #define CARAFE_THREAD_MAY_WAIT() carafe_thread_may_wait()
 #define CARAFE_TLS_GIVE_PLACE() carafe_tls_give_place()
 #define CARAFE_THREAD_WAITED( ns, placed ) carafe_thread_waited( ns, placed )
+#define CARAFE_THREAD_STILL_WAITING( ns, first ) carafe_thread_still_waiting( ns, first )
 #else
 #define CARAFE_DIAG_EVENT( kind, actor, target, value ) do { } while (0)
 #define CARAFE_SERVER_NOW() 0ull
@@ -3693,9 +3733,13 @@ static void carafe_server_client_ended( unsigned int requests )
 #define CARAFE_THREAD_MAY_WAIT() 0
 #define CARAFE_TLS_GIVE_PLACE() 0
 #define CARAFE_THREAD_WAITED( ns, placed ) do { (void)(ns); (void)(placed); } while (0)
+#define CARAFE_THREAD_STILL_WAITING( ns, first ) do { (void)(ns); (void)(first); } while (0)
 #endif
-#define CARAFE_THREAD_WAIT_NS 5000000000ull
+#define CARAFE_THREAD_WAIT_NS 20000000000ull
 #define CARAFE_THREAD_WAIT_STEP_NS 2000000ll
+#define CARAFE_THREAD_WAIT_SLOW_AFTER_NS 100000000ull
+#define CARAFE_THREAD_WAIT_SLOW_STEP_NS 20000000ll
+#define CARAFE_THREAD_WAIT_NOTE_NS 5000000000ull
 static void horizon_sync_notify_object_locked( struct horizon_server_object *object, int satisfy );
 static void horizon_sync_notify_async_locked(void);
 
@@ -20458,7 +20502,7 @@ static Result horizon_create_thread_once( Handle *handle, ThreadFunc entry, void
 
 Result __wrap_svcCreateThread( Handle *handle, ThreadFunc entry, void *arg, void *stack, s32 priority, s32 core )
 {
-    unsigned long long waited_from = 0, now = 0;
+    unsigned long long waited_from = 0, noted = 0, now = 0;
     unsigned int retries = 0;
     Result rc;
 
@@ -20471,9 +20515,15 @@ Result __wrap_svcCreateThread( Handle *handle, ThreadFunc entry, void *arg, void
         if (horizon_reap_ended_threads()) continue;
         if (CARAFE_TLS_GIVE_PLACE()) continue;
         now = armTicksToNs( armGetSystemTick() );
-        if (!waited_from) waited_from = now;
+        if (!waited_from) waited_from = noted = now;
         else if (now - waited_from >= CARAFE_THREAD_WAIT_NS) break;
-        svcSleepThread( CARAFE_THREAD_WAIT_STEP_NS );
+        if (now - noted >= CARAFE_THREAD_WAIT_NOTE_NS)
+        {
+            CARAFE_THREAD_STILL_WAITING( now - waited_from, noted == waited_from );
+            noted = now;
+        }
+        svcSleepThread( now - waited_from < CARAFE_THREAD_WAIT_SLOW_AFTER_NS ? CARAFE_THREAD_WAIT_STEP_NS
+                                                                             : CARAFE_THREAD_WAIT_SLOW_STEP_NS );
     }
     if (waited_from) CARAFE_THREAD_WAITED( armTicksToNs( armGetSystemTick() ) - waited_from, R_SUCCEEDED(rc) );
     if (R_FAILED(rc))
