@@ -48,6 +48,10 @@ extern int   wine_nx_runtime_verbose __attribute__((weak));
  * framebuffer (starting it on the first call); each window surface then feeds
  * a layer of it (horizon-wine/source/compositor.h). */
 extern int   wine_nx_compositor_enabled( void );
+extern int   wine_nx_screen_wants_pictures( void );
+extern void  wine_nx_screen_picture_drawn( DWORD thread, int redrawn );
+extern int   wine_nx_layer_redrawn( struct wine_nx_layer *layer, const uint32_t *pixels, int stride,
+                                    int left, int top, int right, int bottom );
 
 /* Buttons reported by wine_nx_pointer_poll(). */
 #define WINE_NX_POINTER_LEFT  0x1
@@ -62,6 +66,8 @@ struct wine_nx_surface
     RECT clip_rect;
     BOOL has_clip;
     struct wine_nx_layer *layer;  /* the compositor's copy of the pixels, when it presents */
+    RECT client_rect;
+    LONG drawn;
 };
 
 struct wine_nx_surface_entry
@@ -194,6 +200,12 @@ static BOOL wine_nx_surface_flush( struct window_surface *surface, const RECT *r
                                    const BITMAPINFO *color_info, const void *color_bits, BOOL shape_changed,
                                    const BITMAPINFO *shape_info, const void *shape_bits );
 static const struct window_surface_funcs wine_nx_surface_funcs;
+
+void wine_nx_driver_surface_drawn( struct window_surface *surface )
+{
+    if (surface->funcs == &wine_nx_surface_funcs)
+        InterlockedExchange( &wine_nx_surface_from_base( surface )->drawn, 1 );
+}
 
 static void wine_nx_surface_mark_full_dirty( struct window_surface *surface )
 {
@@ -448,6 +460,22 @@ static void wine_nx_surface_set_clip( struct window_surface *surface, const RECT
     nx_surface->clip_rect = clip;
 }
 
+static BOOL wine_nx_client_lit( struct wine_nx_surface *nx_surface, const RECT *dirty,
+                                const void *color_bits, int stride )
+{
+    const DWORD *bits = color_bits;
+    RECT area;
+    int x, y;
+
+    if (!intersect_rect( &area, dirty, &nx_surface->client_rect )) return FALSE;
+    if (!intersect_rect( &area, &area, &nx_surface->present_rect )) return FALSE;
+
+    for (y = area.top; y < area.bottom; y++)
+        for (x = area.left; x < area.right; x++)
+            if (bits[(size_t)y * stride + x] & 0xffffff) return TRUE;
+    return FALSE;
+}
+
 /* Blit the dirty region of the (BGRX, top-down) DIB to the linear RGBA8888
  * framebuffer at the surface's screen position, clipped to the screen. */
 static BOOL wine_nx_surface_flush( struct window_surface *surface, const RECT *rect, const RECT *dirty,
@@ -456,6 +484,7 @@ static BOOL wine_nx_surface_flush( struct window_surface *surface, const RECT *r
 {
     struct wine_nx_surface *nx_surface = wine_nx_surface_from_base( surface );
     struct wine_nx_surface_entry *entry = wine_nx_find_surface_entry( surface->hwnd, FALSE );
+    BOOL drawn = InterlockedExchange( &nx_surface->drawn, 0 );
     RECT blit = *dirty;
     int sw = color_info->bmiHeader.biWidth;
     int sh = abs( color_info->bmiHeader.biHeight );
@@ -464,6 +493,12 @@ static BOOL wine_nx_surface_flush( struct window_surface *surface, const RECT *r
     int sy, sx;
 
     (void)rect;
+
+    if (drawn && entry && entry->visible && wine_nx_screen_wants_pictures() &&
+        wine_nx_client_lit( nx_surface, dirty, color_bits, sw ))
+        wine_nx_screen_picture_drawn( NtUserGetWindowThread( surface->hwnd, NULL ),
+                                      wine_nx_layer_redrawn( nx_surface->layer, color_bits, sw, dirty->left, dirty->top,
+                                                             dirty->right, dirty->bottom ) );
 
     /* The compositor keeps every pixel; where the window shows is its placement. */
     if (nx_surface->layer)
@@ -1114,6 +1149,8 @@ void wine_nx_drv_WindowPosChanged( HWND hwnd, HWND insert_after, HWND owner_hint
             nx_surface->present_rect.right = new_width;
             nx_surface->present_rect.bottom = new_height;
             intersect_rect( &nx_surface->present_rect, &nx_surface->present_rect, &allocation );
+            nx_surface->client_rect = new_rects->client;
+            OffsetRect( &nx_surface->client_rect, -new_rects->visible.left, -new_rects->visible.top );
             wine_nx_note_surface_present( hwnd, &nx_surface->screen_origin, &nx_surface->present_rect );
             if (nx_surface->layer)
             {
