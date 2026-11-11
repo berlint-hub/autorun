@@ -3117,16 +3117,57 @@ static unsigned long long tls_page[TLS_PLACEHOLDERS_MAX];
 static unsigned char tls_keep[TLS_PLACEHOLDERS_MAX];
 static unsigned int tls_count;
 static UEvent tls_trimmed, tls_released;
+static UEvent tls_give[TLS_PLACEHOLDERS_MAX];
+static unsigned char tls_given[TLS_PLACEHOLDERS_MAX];
+static unsigned char tls_closed[TLS_PLACEHOLDERS_MAX];
+static Mutex tls_give_mutex;
+
+#define TLS_GIVE_WAIT_NS 50000000LL
 
 static void tls_placeholder( void *arg )
 {
     unsigned int index = (unsigned int)(uintptr_t)arg;
+    s32 which;
 
     __atomic_store_n( &tls_page[index], (unsigned long long)(uintptr_t)armGetTls() & ~0xfffull,
                       __ATOMIC_RELEASE );
     waitSingle( waiterForUEvent( &tls_trimmed ), UINT64_MAX );
     if (!__atomic_load_n( &tls_keep[index], __ATOMIC_ACQUIRE )) return;
-    waitSingle( waiterForUEvent( &tls_released ), UINT64_MAX );
+    waitMulti( &which, UINT64_MAX, waiterForUEvent( &tls_released ), waiterForUEvent( &tls_give[index] ) );
+}
+
+static int tls_close_if_ended( unsigned int index, s64 timeout )
+{
+    if (R_FAILED( waitSingleHandle( tls_threads[index].handle, timeout ) )) return 0;
+    threadClose( &tls_threads[index] );
+    tls_closed[index] = 1;
+    return 1;
+}
+
+unsigned int wine_nx_tls_give_place( void )
+{
+    unsigned int i, j, left = 0, freed = 0;
+
+    mutexLock( &tls_give_mutex );
+    for (i = 0; i < tls_count && !freed; i++)
+        if (tls_keep[i] && tls_given[i] && !tls_closed[i]) freed = tls_close_if_ended( i, 0 );
+    for (i = 0; i < tls_count && !freed; i++)
+    {
+        if (!tls_keep[i] || tls_given[i]) continue;
+        __atomic_store_n( &tls_given[i], 1, __ATOMIC_RELEASE );
+        ueventSignal( &tls_give[i] );
+        freed = tls_close_if_ended( i, TLS_GIVE_WAIT_NS );
+        if (!freed) log_line( "[TLS] page holder %u has not ended yet; its place comes later", i );
+        break;
+    }
+    if (freed)
+    {
+        for (j = 0; j < tls_count; j++)
+            if (tls_keep[j] && !tls_closed[j]) left++;
+        log_line( "[TLS] a page holder gave its place to a new thread; %u holders left", left );
+    }
+    mutexUnlock( &tls_give_mutex );
+    return freed;
 }
 
 static void hold_thread_local_pages( void )
@@ -3137,6 +3178,7 @@ static void hold_thread_local_pages( void )
 
     ueventCreate( &tls_trimmed, false );
     ueventCreate( &tls_released, false );
+    for (i = 0; i < TLS_PLACEHOLDERS_MAX; i++) ueventCreate( &tls_give[i], false );
     for (i = 0; i < TLS_PLACEHOLDERS_MAX; i++)
     {
         /* 0x3b, the lowest priority an application may give a thread on cores
@@ -3184,13 +3226,16 @@ static void release_thread_local_pages( void )
 
     if (!tls_count) return;
     ueventSignal( &tls_released );
+    mutexLock( &tls_give_mutex );
     for (i = 0; i < tls_count; i++)
     {
-        if (!tls_keep[i]) continue;
+        if (!tls_keep[i] || tls_closed[i]) continue;
+        tls_closed[i] = 1;
         threadWaitForExit( &tls_threads[i] );
         threadClose( &tls_threads[i] );
     }
     tls_count = 0;
+    mutexUnlock( &tls_give_mutex );
 }
 
 /* Autorun's components setup (tools/autorun_setup.c): what wineboot registers
