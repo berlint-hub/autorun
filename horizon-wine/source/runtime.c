@@ -1743,11 +1743,14 @@ static size_t runtime_fex_environment( const char *target, char *buffer, size_t 
     }
     if (runtime_profile)
     {
-        static const char stats[] = "CARAFE_D3D9_STATS=1";
+        static const char stats[] = "CARAFE_D3D9_STATS=1", counters[] = "FEX_PROFILESTATS=1";
 
         if (sizeof(stats) > size - used) return 0;
         memcpy( buffer + used, stats, sizeof(stats) );
         used += sizeof(stats);
+        if (sizeof(counters) > size - used) return 0;
+        memcpy( buffer + used, counters, sizeof(counters) );
+        used += sizeof(counters);
     }
     log_line( "[FEX] TSO=%s multiblock=%s maxinst=%s", tso, multiblock, maxinst );
     return used;
