@@ -1163,9 +1163,16 @@ void horizon_wait_suspend_arm64ec(void)
 /***********************************************************************
  *           pthread_exit_wrapper
  */
+#ifdef __SWITCH__
+extern void carafe_futex_exit_take_out( void );
+#endif
+
 static DECLSPEC_NORETURN void pthread_exit_wrapper( int status )
 {
     struct thread_data *data = get_thread_data();
+#ifdef __SWITCH__
+    carafe_futex_exit_take_out();
+#endif
     close( data->alert_fd );
     close( data->wait_fd[0] );
     close( data->wait_fd[1] );
