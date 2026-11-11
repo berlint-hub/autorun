@@ -967,6 +967,16 @@ static int compare_versions( const char *a, const char *b )
     return 0;
 }
 
+static int backend_system_version( const struct release_backend *backend, const char *runtime_dir,
+                                   char *version, size_t size )
+{
+    char path[920];
+
+    return backend == &dxvk_backend &&
+           (size_t)snprintf( path, sizeof(path), "%s/build-manifest.json", runtime_dir ) < sizeof(path) &&
+           manifest_version( path, "system-dxvk", version, size );
+}
+
 static void backend_resolve_version( const struct release_backend *backend, const char *runtime_dir,
                                     unsigned short machine, const char *requested, struct dxvk_version *selected )
 {
@@ -975,6 +985,14 @@ static void backend_resolve_version( const struct release_backend *backend, cons
     DIR *directory;
 
     memset( selected, 0, sizeof(*selected) );
+    if (backend_system_version( backend, runtime_dir, bundled, sizeof(bundled) ) &&
+        (!requested || !requested[0] || !strcmp( requested, bundled )))
+    {
+        strcpy( selected->version, bundled );
+        selected->installed = selected->bundled = 1;
+        return;
+    }
+    bundled[0] = 0;
     if (!payload_path( backend, runtime_dir, machine, "", root, sizeof(root) )) return;
     if (requested && requested[0])
     {
