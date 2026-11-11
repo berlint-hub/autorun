@@ -170,6 +170,23 @@ static const struct dxvk_option_choice pacing[] =
     { "\"min-latency\"", "min-latency" },
 };
 
+static const struct dxvk_option_choice frame_rate_method[] =
+{
+    { NULL, "Default" },
+    { "\"timeline\"", "timeline" },
+    { "\"deviation\"", "deviation" },
+    { "\"reactive\"", "reactive" },
+};
+
+static const struct dxvk_option_choice frame_rate_pacing[] =
+{
+    { NULL, "Default" },
+    { "\"precise\"", "precise" },
+    { "\"sleep\"", "sleep" },
+    { "\"sliced\"", "sliced" },
+    { "\"spin\"", "spin" },
+};
+
 static const struct dxvk_option_choice feature_level[] =
 {
     { NULL, "Default" },
@@ -211,7 +228,7 @@ const struct dxvk_option dxvk_options[] =
             threads, 10000, 0, 11003, 0, 0, 0, "0 / Auto" ),
     OPTION( "dxvk.shaderCompilationMethod",
             "Sarek compilation mode. Deferred compilation reduces stalls but can temporarily omit effects; none compiles synchronously.",
-            compilation, 0, 0, 11300, 0, 0, 0, "dyasync" ),
+            compilation, 30101, 0, 11300, 0, 0, 0, "async" ),
     OPTION( "dxvk.numShaderCompilerThreads",
             "Sarek workers for deferred shader compilation, separate from state-cache compilation.",
             threads, 0, 0, 11300, 0, 0, 0, "0 / Auto" ),
@@ -443,6 +460,18 @@ const struct dxvk_option dxvk_options[] =
     OPTION( "d3d9.managedBufferCopies",
             "Carafe's DXVK build: locks of managed buffers use a copy instead of waiting for the front end thread.",
             boolean, 30101, 0, 0, 0, 1, 0, "False" ),
+    OPTION( "dxvk.skipRedundantPipelineBinds",
+            "Carafe's DXVK build: a graphics pipeline already bound is not bound again, as DXVK-Sarek does.",
+            boolean, 30101, 0, 0, 0, 1, 0, "False" ),
+    OPTION( "dxvk.frameRateMethod",
+            "Carafe's DXVK build: how the frame rate limiter keeps time, DXVK-Sarek's choices.",
+            frame_rate_method, 30101, 0, 0, 0, 1, 0, "timeline" ),
+    OPTION( "dxvk.frameRatePacing",
+            "Carafe's DXVK build: how the frame rate limiter waits, DXVK-Sarek's choices.",
+            frame_rate_pacing, 30101, 0, 0, 0, 1, 0, "precise" ),
+    OPTION( "dxvk.allCompilerWorkers",
+            "Carafe's DXVK build: every shader compiler worker takes every job, as DXVK-Sarek's DXVK_ALL_CORES does.",
+            boolean, 30101, 0, 0, 0, 1, 0, "True" ),
 };
 #undef OPTION
 
