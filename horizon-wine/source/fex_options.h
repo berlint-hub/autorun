@@ -34,6 +34,8 @@ enum nx_fex_option_id
     NX_FEX_X87_SINGLE_PRECISION,
     NX_FEX_GDB_SYMBOLS,
     NX_FEX_FLAGS_WITHOUT_FLAGM,
+    NX_FEX_INDIRECT_CALL_CACHE,
+    NX_FEX_BRIDGE_RETURN,
     NX_FEX_OPTION_COUNT
 };
 
@@ -129,6 +131,12 @@ static const struct nx_fex_option nx_fex_options[NX_FEX_OPTION_COUNT] =
       1, 0, 2, { "0", "1" }, { "0 - Off", "1 - On" } },
     { NX_FEX_FLAGS_WITHOUT_FLAGM, "FEX_FLAGSWITHOUTFLAGM",
       "On CPUs without FlagM, spends fewer instructions on x86 flags.",
+      1, 1, 2, { "0", "1" }, { "0 - Off", "1 - On" } },
+    { NX_FEX_INDIRECT_CALL_CACHE, "FEX_INDIRECTCALLCACHE",
+      "Each indirect call keeps the first target it reaches, so calls to it skip the lookup table.",
+      1, 0, 2, { "0", "1" }, { "0 - Off", "1 - On" } },
+    { NX_FEX_BRIDGE_RETURN, "FEX_BRIDGERETURN",
+      "The system-call and unix-call bridge leaves as a return, so the call-return stack stays in step.",
       1, 1, 2, { "0", "1" }, { "0 - Off", "1 - On" } },
 };
 
