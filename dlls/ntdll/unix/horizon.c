@@ -11588,7 +11588,7 @@ static int horizon_server_handle_get_handle_fd( struct horizon_server_connection
     struct horizon_server_handle_entry *entry;
 
     memset( &reply, 0, sizeof(reply) );
-    pthread_mutex_lock( &horizon_server_objects_mutex );
+    horizon_server_sync_lock( connection );
     entry = horizon_server_find_handle_locked( request->handle );
     if (!entry) reply.header.error = HORIZON_STATUS_INVALID_HANDLE;
     else if ((entry->object->type != HORIZON_SERVER_OBJECT_FILE &&
@@ -11627,7 +11627,7 @@ static int horizon_server_handle_get_handle_fd( struct horizon_server_connection
         horizon_server_queue_fd( entry->object->file_fd, request->handle );
     }
     pthread_mutex_unlock( &horizon_server_objects_mutex );
-    return horizon_server_write_reply( connection->reply_fd, &reply, sizeof(reply), NULL, 0 );
+    return horizon_server_sync_reply( connection, &reply, sizeof(reply), NULL, 0 );
 }
 
 static char horizon_server_ascii_lower( char ch )
@@ -16304,6 +16304,7 @@ int horizon_server_sync_call( unsigned int tid, const void *message, const void 
     case HORIZON_REQ_QUERY_MUTEX: handler = horizon_server_handle_query_mutex; break;
     case HORIZON_REQ_RELEASE_SEMAPHORE: handler = horizon_server_handle_release_semaphore; break;
     case HORIZON_REQ_QUERY_SEMAPHORE: handler = horizon_server_handle_query_semaphore; break;
+    case HORIZON_REQ_GET_HANDLE_FD: handler = horizon_server_handle_get_handle_fd; break;
     default: return 0;
     }
     if (!horizon_sync_thread)
@@ -16324,6 +16325,7 @@ int horizon_server_sync_call( unsigned int tid, const void *message, const void 
     connection.direct_reply = reply;
     connection.direct_data = reply_data;
     connection.direct_size = request->reply_size;
+    connection.request_pipe = (struct horizon_pipe *)horizon_fd_client_owner();
     previous = horizon_server_current;
     horizon_server_current = &connection;
     if (handler) status = handler( &connection, message );
