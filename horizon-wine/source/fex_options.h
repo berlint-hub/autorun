@@ -27,6 +27,8 @@ enum nx_fex_option_id
     NX_FEX_HIDE_HYBRID,
     NX_FEX_L1_INCREASE,
     NX_FEX_L1_DECREASE,
+    NX_FEX_DISK_CACHE,
+    NX_FEX_DISK_CACHE_MAPPING,
     NX_FEX_OPTION_COUNT
 };
 
@@ -102,6 +104,12 @@ static const struct nx_fex_option nx_fex_options[NX_FEX_OPTION_COUNT] =
     { NX_FEX_L1_DECREASE, "FEX_DYNAMICL1CACHEDECREASECOUNTHEURISTIC",
       "Lookup-rate threshold for shrinking the dynamic L1 cache. Higher values reclaim memory more aggressively.",
       1, 2, 5, { "10", "25", "50", "100", "200" }, { "10", "25", "50", "100", "200" } },
+    { NX_FEX_DISK_CACHE, "FEX_DISKCACHE",
+      "Keeps translated code on disk and reuses it on the next start instead of translating it again.",
+      1, 0, 2, { "0", "1" }, { "0 - Off", "1 - On" } },
+    { NX_FEX_DISK_CACHE_MAPPING, "FEX_DISKCACHEFILEMAPPING",
+      "Maps disk cache files into memory instead of reading them. Horizon's unix side has no file mapping.",
+      1, 0, 2, { "0", "1" }, { "0 - Off", "1 - On" } },
 };
 
 static inline int nx_fex_option_choice( const struct nx_fex_option *option, const char *value )
