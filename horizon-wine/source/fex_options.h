@@ -38,6 +38,7 @@ enum nx_fex_option_id
     NX_FEX_BRIDGE_RETURN,
     NX_FEX_JUMP_TABLES,
     NX_FEX_COMPACT_RETURNS,
+    NX_FEX_SLIM_RETURN_POINTS,
     NX_FEX_OPTION_COUNT
 };
 
@@ -145,6 +146,9 @@ static const struct nx_fex_option nx_fex_options[NX_FEX_OPTION_COUNT] =
       1, 0, 2, { "0", "1" }, { "0 - Off", "1 - On" } },
     { NX_FEX_COMPACT_RETURNS, "FEX_COMPACTRETURNS",
       "Returns keep their rarely used lookup outside the hot code, so more of it fits the instruction cache.",
+      1, 0, 2, { "0", "1" }, { "0 - Off", "1 - On" } },
+    { NX_FEX_SLIM_RETURN_POINTS, "FEX_SLIMRETURNPOINTS",
+      "The code after a call skips storing its block's header; faults and the profiler find the block themselves.",
       1, 0, 2, { "0", "1" }, { "0 - Off", "1 - On" } },
 };
 
