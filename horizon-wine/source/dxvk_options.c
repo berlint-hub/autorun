@@ -434,6 +434,9 @@ const struct dxvk_option dxvk_options[] =
     OPTION( "d3d9.frontEndThread",
             "Carafe's DXVK build: the Direct3D 9 front end runs on a thread of its own.",
             boolean, 30101, 0, 0, 0, 1, 0, "False" ),
+    OPTION( "d3d9.effectThread",
+            "Carafe's DXVK build: the game's linked effect library runs on a thread of its own.",
+            boolean, 30101, 0, 0, 0, 1, 0, "False" ),
 };
 #undef OPTION
 
