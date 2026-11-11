@@ -440,6 +440,9 @@ const struct dxvk_option dxvk_options[] =
     OPTION( "d3d9.effectPassMerge",
             "Carafe's DXVK build: the effect thread keeps a pass open when the game begins the same pass again.",
             boolean, 30101, 0, 0, 0, 1, 0, "False" ),
+    OPTION( "d3d9.managedBufferCopies",
+            "Carafe's DXVK build: locks of managed buffers use a copy instead of waiting for the front end thread.",
+            boolean, 30101, 0, 0, 0, 1, 0, "False" ),
 };
 #undef OPTION
 
