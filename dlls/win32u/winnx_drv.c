@@ -1096,6 +1096,14 @@ BOOL wine_nx_drv_CreateWindowSurface( HWND hwnd, BOOL layered, const RECT *surfa
     return TRUE;
 }
 
+static RECT wine_nx_shown_rect( const struct window_rects *rects )
+{
+    RECT shown;
+
+    if (!intersect_rect( &shown, &rects->visible, &rects->window )) shown = rects->visible;
+    return shown;
+}
+
 /**********************************************************************
  *           wine_nx_drv_WindowPosChanged
  *
@@ -1130,12 +1138,13 @@ void wine_nx_drv_WindowPosChanged( HWND hwnd, HWND insert_after, HWND owner_hint
             struct wine_nx_surface *nx_surface = wine_nx_surface_from_base( surface );
             RECT allocation = { 0, 0, surface->rect.right - surface->rect.left,
                                 surface->rect.bottom - surface->rect.top };
-            int new_width = new_rects->visible.right - new_rects->visible.left;
-            int new_height = new_rects->visible.bottom - new_rects->visible.top;
+            RECT shown = wine_nx_shown_rect( new_rects );
+            int new_width = shown.right - shown.left;
+            int new_height = shown.bottom - shown.top;
 
             if (!nx_surface->layer && nx_surface->initial_redraw_done &&
-                (nx_surface->screen_origin.x != new_rects->visible.left ||
-                 nx_surface->screen_origin.y != new_rects->visible.top ||
+                (nx_surface->screen_origin.x != shown.left ||
+                 nx_surface->screen_origin.y != shown.top ||
                  nx_surface->present_rect.right != new_width ||
                  nx_surface->present_rect.bottom != new_height))
                 wine_nx_restore_popup_owner( hwnd, owner_hint,
@@ -1143,14 +1152,14 @@ void wine_nx_drv_WindowPosChanged( HWND hwnd, HWND insert_after, HWND owner_hint
 
             initial_redraw = !nx_surface->initial_redraw_done;
             nx_surface->initial_redraw_done = TRUE;
-            nx_surface->screen_origin.x = new_rects->visible.left;
-            nx_surface->screen_origin.y = new_rects->visible.top;
+            nx_surface->screen_origin.x = shown.left;
+            nx_surface->screen_origin.y = shown.top;
             nx_surface->present_rect.left = nx_surface->present_rect.top = 0;
             nx_surface->present_rect.right = new_width;
             nx_surface->present_rect.bottom = new_height;
             intersect_rect( &nx_surface->present_rect, &nx_surface->present_rect, &allocation );
             nx_surface->client_rect = new_rects->client;
-            OffsetRect( &nx_surface->client_rect, -new_rects->visible.left, -new_rects->visible.top );
+            OffsetRect( &nx_surface->client_rect, -shown.left, -shown.top );
             wine_nx_note_surface_present( hwnd, &nx_surface->screen_origin, &nx_surface->present_rect );
             if (nx_surface->layer)
             {
