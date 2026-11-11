@@ -30,6 +30,8 @@ enum nx_fex_option_id
     NX_FEX_DISK_CACHE,
     NX_FEX_DISK_CACHE_MAPPING,
     NX_FEX_X87_CONVERSION_ROUNDING,
+    NX_FEX_X87_FAST_STACK,
+    NX_FEX_X87_SINGLE_PRECISION,
     NX_FEX_OPTION_COUNT
 };
 
@@ -114,6 +116,12 @@ static const struct nx_fex_option nx_fex_options[NX_FEX_OPTION_COUNT] =
     { NX_FEX_X87_CONVERSION_ROUNDING, "FEX_X87CONVERSIONROUNDING",
       "With reduced x87 precision, rounding mode changes apply only to float to integer conversions, without touching the host rounding mode.",
       1, 1, 2, { "0", "1" }, { "0 - Off", "1 - On" } },
+    { NX_FEX_X87_FAST_STACK, "FEX_X87FASTSTACK",
+      "Keeps x87 registers of earlier blocks out of the slow path and writes back only what a block changed.",
+      1, 1, 2, { "0", "1" }, { "0 - Off", "1 - On" } },
+    { NX_FEX_X87_SINGLE_PRECISION, "FEX_X87SINGLEPRECISION",
+      "With reduced x87 precision, computes x87 math in 32-bit floats, as Direct3D 9 games set the precision to.",
+      1, 0, 2, { "0", "1" }, { "0 - Off", "1 - On" } },
 };
 
 static inline int nx_fex_option_choice( const struct nx_fex_option *option, const char *value )
