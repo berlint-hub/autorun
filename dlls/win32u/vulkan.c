@@ -3167,6 +3167,12 @@ static VkResult win32u_vkCreateSwapchainKHR( VkDevice client_device, const VkSwa
         present_modes->pPresentModes = &create_info_host.presentMode;
     }
 #endif
+#if defined(__SWITCH__) && defined(WINE_NX_MESA_SWITCH)
+    {
+        extern void wine_nx_vk_take_window(void);
+        wine_nx_vk_take_window();
+    }
+#endif
     if ((res = device->p_vkCreateSwapchainKHR( device->host.device, &create_info_host, NULL, &host_swapchain )))
     {
         free( swapchain );
