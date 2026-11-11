@@ -1794,8 +1794,9 @@ static RTL_USER_PROCESS_PARAMETERS *runtime_create_process_params( const char *t
     size_t chars, size, i, fex_environment_size;
     WCHAR *cursor;
     const char *cmdline_str, *dxvk_hud = launcher_hud_values[runtime_dxvk_hud];
-    char dxvk_dir[96], vkd3d_dir[96], vkd3d_path[104] = "", graphics_path[208] = "";
+    char dxvk_dir[96], vkd3d_dir[96], vkd3d_path[104] = "", graphics_path[208] = "", dxvk_folder[256];
     struct dxvk_version dxvk = {0}, vkd3d = {0};
+    struct stat dxvk_folder_stat;
 
     if (runtime_d3d != LAUNCHER_D3D_WINE)
     {
@@ -1819,7 +1820,10 @@ static RTL_USER_PROCESS_PARAMETERS *runtime_create_process_params( const char *t
     if (dxvk.installed &&
         launcher_dxvk_version_directory( main_image_info.Machine, runtime_dxvk_source,
                                          dxvk.bundled ? "" : dxvk.version,
-                                         dxvk_dir, sizeof(dxvk_dir) ))
+                                         dxvk_dir, sizeof(dxvk_dir) ) &&
+        (size_t)snprintf( dxvk_folder, sizeof(dxvk_folder), "%s/drive_c/%s", RUNTIME_DIR, dxvk_dir ) <
+            sizeof(dxvk_folder) &&
+        !stat( dxvk_folder, &dxvk_folder_stat ) && S_ISDIR( dxvk_folder_stat.st_mode ))
     {
         snprintf( graphics_path, sizeof(graphics_path), "%sC:\\%s;", vkd3d_path, dxvk_dir );
         if (dxvk.version[0])
@@ -1828,6 +1832,12 @@ static RTL_USER_PROCESS_PARAMETERS *runtime_create_process_params( const char *t
         else
             log_line( "[DXVK] %s bundled payload C:\\%s; application-local DLLs take priority",
                       main_image_info.Machine == IMAGE_FILE_MACHINE_AMD64 ? "AMD64" : "x86", dxvk_dir );
+    }
+    else if (dxvk.installed)
+    {
+        snprintf( graphics_path, sizeof(graphics_path), "%s", vkd3d_path );
+        log_line( "[DXVK] %s DXVK %s in the system folder; application-local DLLs take priority",
+                  main_image_info.Machine == IMAGE_FILE_MACHINE_AMD64 ? "AMD64" : "x86", dxvk.version );
     }
     else if (runtime_d3d != LAUNCHER_D3D_WINE)
         log_line( "[DXVK] selected payload is not installed; using Wine Direct3D" );
