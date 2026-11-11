@@ -877,6 +877,7 @@ static void wine_nx_fit_screen_to_game( void )
     if ((flags & SWP_NOMOVE) && !(flags & SWP_FRAMECHANGED)) return;
     if (!get_window_rect( game, &window, dpi )) return;
     NtUserSetWindowPos( game, 0, window.left - client.left, window.top - client.top, 0, 0, flags );
+    NtUserRedrawWindow( game, NULL, 0, RDW_INVALIDATE | RDW_ERASE | RDW_FRAME | RDW_ALLCHILDREN );
     if (!(flags & SWP_NOMOVE) && &wine_nx_runtime_trace)
     {
         snprintf( line, sizeof(line), "[NXSCREEN] the game's window moved by %d,%d to the screen's corner",
