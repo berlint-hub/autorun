@@ -536,6 +536,7 @@ static struct pointer_cursor wine_nx_cursor =
 static int wine_nx_cursor_moved;
 static int wine_nx_cursor_visible = 1;  /* 0 while the program hides the mouse cursor */
 static int wine_nx_gl_window;  /* an OpenGL window surface owns the screen's NWindow */
+static int wine_nx_screen_reserved;
 /* Controller and touchscreen state, guarded by wine_nx_pointer_mutex. */
 static pthread_mutex_t wine_nx_pointer_mutex = PTHREAD_MUTEX_INITIALIZER;
 static struct pointer_cursor wine_nx_pointer =
@@ -692,8 +693,42 @@ void *wine_nx_gl_acquire_window(void)
     pthread_mutex_unlock( &wine_nx_fb_mutex );
     if (window && compositor) wine_nx_compositor_suspend();
     if (window) nwindowSetDimensions( window, WINE_NX_FB_W, WINE_NX_FB_H );
+    if (window) appletNotifyRunning( NULL );
     log_line( "[NXGL] %s", window ? "screen handed to an OpenGL surface" : "screen busy; OpenGL surface refused" );
     return window;
+}
+
+void *wine_nx_vk_reserve_window(void)
+{
+    NWindow *window = NULL;
+
+    if (!wine_nx_compositor_enabled()) return wine_nx_gl_acquire_window();
+    pthread_mutex_lock( &wine_nx_fb_mutex );
+    if (!wine_nx_gl_window && !wine_nx_fb_lock_depth)
+    {
+        window = nwindowGetDefault();
+        wine_nx_gl_window = 1;
+        wine_nx_screen_reserved = 1;
+    }
+    pthread_mutex_unlock( &wine_nx_fb_mutex );
+    log_line( "[NXVK] %s", window ? "screen reserved for a Vulkan surface; the compositor keeps it until a swapchain"
+                                  : "screen busy; Vulkan surface refused" );
+    return window;
+}
+
+void wine_nx_vk_take_window(void)
+{
+    int take;
+
+    pthread_mutex_lock( &wine_nx_fb_mutex );
+    take = wine_nx_screen_reserved;
+    wine_nx_screen_reserved = 0;
+    pthread_mutex_unlock( &wine_nx_fb_mutex );
+    if (!take) return;
+    wine_nx_compositor_suspend();
+    nwindowSetDimensions( nwindowGetDefault(), WINE_NX_FB_W, WINE_NX_FB_H );
+    appletNotifyRunning( NULL );
+    log_line( "[NXVK] screen handed to the Vulkan swapchain" );
 }
 
 /* The OpenGL surface is destroyed; the framebuffer or the compositor may take
@@ -704,6 +739,7 @@ void wine_nx_gl_release_window(void)
 
     pthread_mutex_lock( &wine_nx_fb_mutex );
     wine_nx_gl_window = 0;
+    wine_nx_screen_reserved = 0;
     pthread_mutex_unlock( &wine_nx_fb_mutex );
     log_line( "[NXGL] screen returned to the %s", compositor ? "compositor" : "framebuffer" );
     if (compositor) wine_nx_compositor_resume();
@@ -1028,6 +1064,7 @@ static int call_pe_entry_point( void *entry )
 static void park_forever(void)
 {
     log_line( "[EXIT] parked after runtime handoff; close from HOME" );
+    appletNotifyRunning( NULL );
     for (;;) svcSleepThread( 1000000000LL );
 }
 
@@ -3570,6 +3607,7 @@ int main( int argc, char **argv )
         if (recovered < 0)
         {
             wine_nx_console_quiet = 0;
+            appletNotifyRunning( NULL );
             PadState pad;
             log_line( "[UPDATE] Recovery failed. Restore switch/wine/updates/previous.nro before starting a game. Press + to close." );
             padConfigureInput( 1, HidNpadStyleSet_NpadStandard );
@@ -3749,6 +3787,7 @@ int main( int argc, char **argv )
         log_lent_memory( "the settings" );
         log_line( "[LAUNCHER] bringing the screen up: the launcher" );
         wine_nx_runtime_network_fast( 1 );
+        appletNotifyRunning( NULL );
         chosen = wine_nx_launcher_run( &options, target, sizeof(target) );
         wine_nx_runtime_network_fast( 0 );
         log_lent_memory( "the launcher" );
@@ -4076,6 +4115,7 @@ int main( int argc, char **argv )
      * to go, and before the program runs or makes a thread of its own. */
     if (!low_window_available) hold_thread_local_pages();
     else log_line( "[TLS] kernel TLS stays above 4 GiB; placeholder threads not needed" );
+    if (!wine_nx_compositor_enabled()) appletNotifyRunning( NULL );
     {
         params = runtime_create_process_params( target, &main_nt_name, dos_path, sizeof(dos_path) );
         if (!params)
