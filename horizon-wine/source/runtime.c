@@ -1966,7 +1966,7 @@ static RTL_USER_PROCESS_PARAMETERS *runtime_create_process_params( const char *t
      * the standard Win32 startup hint so applications maximize their own
      * top-level window while dialogs and child windows keep normal sizing. */
     params->dwFlags = STARTF_USESHOWWINDOW;
-    params->wShowWindow = SW_SHOWMAXIMIZED;
+    params->wShowWindow = SW_SHOWNORMAL;
     params->ProcessGroupId = GetCurrentProcessId();
 
     cursor = (WCHAR *)(params + 1);
