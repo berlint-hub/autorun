@@ -499,6 +499,15 @@ void wine_nx_runtime_trace( const char *msg )
     log_line( "%s", msg );
 }
 
+void wine_nx_runtime_log_flush( void )
+{
+    pthread_mutex_lock( &log_mutex );
+    if (log_file) fflush( log_file );
+    if (game_log_file) fflush( game_log_file );
+    pthread_mutex_unlock( &log_mutex );
+    wine_nx_sd_cache_flush();
+}
+
 /* Per-operation traces (system calls, server requests, fonts, window painting)
  * are formatted and written to the SD card as they happen, which slows the
  * whole program down. Their call sites check this first; it is set from
