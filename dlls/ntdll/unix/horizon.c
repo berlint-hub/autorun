@@ -17038,7 +17038,7 @@ static int horizon_server_handle_select( struct horizon_server_connection *conne
         }
     }
 #endif
-    for (int initial = 1;; initial = 0)
+    for (;;)
     {
         LARGE_INTEGER now;
         long long timeout = 0x7fffffffffffffffLL;
@@ -17104,6 +17104,7 @@ static int horizon_server_handle_select( struct horizon_server_connection *conne
                 reply.header.error = HORIZON_STATUS_ACCESS_DENIED;
                 break;
             }
+            continue;
         }
 #endif
 
@@ -17113,11 +17114,12 @@ static int horizon_server_handle_select( struct horizon_server_connection *conne
             break;
         }
 
-        if (initial && signals)
+        if (signals)
         {
             const unsigned char *select_data = data;
             const struct horizon_select_signal_and_wait_op *op;
 
+            signals = 0;
             if (data_size >= HORIZON_APC_RESULT_SIZE + request->size) select_data += HORIZON_APC_RESULT_SIZE;
             op = (const void *)select_data;
             reply.header.error = horizon_server_wait_object_locked( op->wait, FALSE );
