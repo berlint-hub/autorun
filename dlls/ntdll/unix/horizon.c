@@ -522,6 +522,8 @@ struct horizon_fd_queue
 #define HORIZON_REQ_SET_NAMED_PIPE_INFO 141
 #define HORIZON_REQ_CREATE_MAPPING 63
 #define HORIZON_REQ_OPEN_MAPPING 64
+#define HORIZON_REQ_LOCK_FILE 53
+#define HORIZON_REQ_UNLOCK_FILE 54
 #define HORIZON_REQ_GET_MAPPING_INFO 65
 #define HORIZON_REQ_GET_IMAGE_MAP_ADDRESS 66
 #define HORIZON_REQ_MAP_VIEW 67
@@ -1937,6 +1939,13 @@ struct horizon_set_timer_request
 };
 
 /* Wine's luid_t after the reply header: AllocateLocallyUniqueId's answer. */
+struct horizon_lock_file_reply
+{
+    struct horizon_server_reply_header header;
+    unsigned int handle;
+    int overlapped;
+};
+
 struct horizon_allocate_locally_unique_id_reply
 {
     struct horizon_server_reply_header header;
@@ -15735,6 +15744,15 @@ static int horizon_server_handle_create_timer( struct horizon_server_connection 
 /* Identifiers that are unique for as long as this process runs, which is what
  * the name promises. wined3d asks for one before it will create an adapter, so
  * Direct3D does not start without this; the wineserver counts up the same way. */
+static int horizon_server_handle_lock_file( struct horizon_server_connection *connection )
+{
+    struct horizon_lock_file_reply reply;
+
+    memset( &reply, 0, sizeof(reply) );
+    reply.header.error = HORIZON_STATUS_SUCCESS;
+    return horizon_server_write_reply( connection->reply_fd, &reply, sizeof(reply), NULL, 0 );
+}
+
 static int horizon_server_handle_allocate_locally_unique_id( struct horizon_server_connection *connection )
 {
     static LONG last_luid;
@@ -16644,6 +16662,12 @@ static int horizon_server_serve_one( struct horizon_server_connection *connectio
             break;
         case HORIZON_REQ_ALLOCATE_LOCALLY_UNIQUE_ID:
             status = horizon_server_handle_allocate_locally_unique_id( connection );
+            break;
+        case HORIZON_REQ_LOCK_FILE:
+            status = horizon_server_handle_lock_file( connection );
+            break;
+        case HORIZON_REQ_UNLOCK_FILE:
+            status = horizon_server_write_status( connection->reply_fd, HORIZON_STATUS_SUCCESS );
             break;
         case HORIZON_REQ_CREATE_KEY:
         case HORIZON_REQ_OPEN_KEY:
