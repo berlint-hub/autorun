@@ -3300,6 +3300,9 @@ static void run_components_first( char *target, size_t size )
     runtime_components_run = 1;
 }
 
+extern _Bool carafeErrorRelaunch( const char *own_nro, unsigned int exit_code ) __attribute__((weak));
+extern _Bool carafeErrorRestart( unsigned int exit_code ) __attribute__((weak));
+
 static int return_to_launcher( void )
 {
     int i, still_lent = 0;
@@ -3460,6 +3463,9 @@ static int return_to_launcher( void )
         log_line( wine_nx_program_exit_code ? "[SETUP] Windows components set up, but a step failed (%s)"
                                             : "[SETUP] Windows components set up (%s)", done );
     }
+    if (!still_lent && !runtime_components_run && own_nro[0] && carafeErrorRelaunch &&
+        carafeErrorRelaunch( own_nro, wine_nx_program_exit_code ))
+        return 0;
     /* A program waiting in run-next.txt (after the components setup) is started
      * by the runtime started again, whether or not the launcher would be. */
     if (!still_lent && (runtime_reopen_launcher || !access( WINE_NX_RUNTIME_ROOT "/run-next.txt", F_OK )) &&
@@ -3469,7 +3475,10 @@ static int return_to_launcher( void )
         return 0;
     }
     __nx_applet_exit_mode = 1;
-    log_step( "closing this program; the console goes back to the menu" );
+    if (still_lent && !runtime_components_run && carafeErrorRestart && carafeErrorRestart( wine_nx_program_exit_code ))
+        log_step( "closing this program; the application starts again with the error screen" );
+    else
+        log_step( "closing this program; the console goes back to the menu" );
     return 0;
 }
 
