@@ -884,6 +884,7 @@ static int runtime_wheel[2];
 
 void wine_nx_leave_process( const char *why );
 void wine_nx_request_quit( const char *why );
+extern void wine_nx_menu_poll( u64 held ) __attribute__((weak));
 
 
 int wine_nx_pointer_poll( int *x, int *y, unsigned int *buttons )
@@ -918,6 +919,7 @@ int wine_nx_pointer_poll( int *x, int *y, unsigned int *buttons )
         HidAnalogStickState left = padGetStickPos( &wine_nx_pad, 0 ), right = padGetStickPos( &wine_nx_pad, 1 );
         raw = (struct input_pad){ held, { left.x, left.y, right.x, right.y } };
     }
+    if (wine_nx_menu_poll) wine_nx_menu_poll( all_held );
     {
         const u64 osk = HidNpadButton_Minus | HidNpadButton_StickR;
         unsigned int bits = osk_buttons( held );
@@ -983,7 +985,7 @@ int wine_nx_pointer_poll( int *x, int *y, unsigned int *buttons )
     wine_nx_pointer_moved |= moved;
     {
         const u64 chord = HidNpadButton_Plus | HidNpadButton_Minus;
-        if ((all_held & chord) != chord) quit_since = 0;
+        if ((all_held & (chord | HidNpadButton_L | HidNpadButton_R)) != chord) quit_since = 0;
         else if (!quit_since) quit_since = now;
         else if (armTicksToNs( now - quit_since ) >= 1000000000ull) leave = 1;
     }
