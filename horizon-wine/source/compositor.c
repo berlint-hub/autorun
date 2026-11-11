@@ -174,6 +174,35 @@ void wine_nx_layer_update( struct wine_nx_layer *layer, const uint32_t *pixels, 
     pthread_mutex_unlock( &comp.lock );
 }
 
+int wine_nx_layer_redrawn( struct wine_nx_layer *layer, const uint32_t *pixels, int stride,
+                           int left, int top, int right, int bottom )
+{
+    int redrawn = 0, x, y;
+
+    if (!layer) return 0;
+    if (left < 0) left = 0;
+    if (top < 0) top = 0;
+    if (right > layer->width) right = layer->width;
+    if (bottom > layer->height) bottom = layer->height;
+    if (left >= right || top >= bottom) return 0;
+
+    pthread_mutex_lock( &layer->pixels_lock );
+    for (y = top; y < bottom && !redrawn && layer->pixels; y++)
+    {
+        const uint32_t *old = layer->pixels + (size_t)y * layer->width;
+        const uint32_t *new = pixels + (size_t)y * stride;
+
+        for (x = left; x < right; x++)
+            if ((old[x] & 0xffffff) && (old[x] & 0xffffff) != (new[x] & 0xffffff))
+            {
+                redrawn = 1;
+                break;
+            }
+    }
+    pthread_mutex_unlock( &layer->pixels_lock );
+    return redrawn;
+}
+
 void wine_nx_layer_place( struct wine_nx_layer *layer, int x, int y, int width, int height )
 {
     if (!layer) return;
