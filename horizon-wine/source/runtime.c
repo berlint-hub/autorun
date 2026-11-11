@@ -549,6 +549,7 @@ static int wine_nx_cursor_moved;
 static int wine_nx_cursor_visible = 1;  /* 0 while the program hides the mouse cursor */
 static int wine_nx_gl_window;  /* an OpenGL window surface owns the screen's NWindow */
 static int wine_nx_screen_reserved;
+static int wine_nx_vk_surfaces;
 /* Controller and touchscreen state, guarded by wine_nx_pointer_mutex. */
 static pthread_mutex_t wine_nx_pointer_mutex = PTHREAD_MUTEX_INITIALIZER;
 static struct pointer_cursor wine_nx_pointer =
@@ -713,6 +714,7 @@ void *wine_nx_gl_acquire_window(void)
 void *wine_nx_vk_reserve_window(void)
 {
     NWindow *window = NULL;
+    int surfaces = 0;
 
     if (!wine_nx_compositor_enabled()) return wine_nx_gl_acquire_window();
     pthread_mutex_lock( &wine_nx_fb_mutex );
@@ -721,10 +723,19 @@ void *wine_nx_vk_reserve_window(void)
         window = nwindowGetDefault();
         wine_nx_gl_window = 1;
         wine_nx_screen_reserved = 1;
+        surfaces = wine_nx_vk_surfaces = 1;
+    }
+    else if (wine_nx_vk_surfaces && !wine_nx_fb_lock_depth)
+    {
+        window = nwindowGetDefault();
+        surfaces = ++wine_nx_vk_surfaces;
     }
     pthread_mutex_unlock( &wine_nx_fb_mutex );
-    log_line( "[NXVK] %s", window ? "screen reserved for a Vulkan surface; the compositor keeps it until a swapchain"
-                                  : "screen busy; Vulkan surface refused" );
+    if (surfaces > 1)
+        log_line( "[NXVK] screen shared with the Vulkan surface before it; %d surfaces hold it", surfaces );
+    else
+        log_line( "[NXVK] %s", window ? "screen reserved for a Vulkan surface; the compositor keeps it until a swapchain"
+                                      : "screen busy; Vulkan surface refused" );
     return window;
 }
 
@@ -748,11 +759,22 @@ void wine_nx_vk_take_window(void)
 void wine_nx_gl_release_window(void)
 {
     int compositor = wine_nx_compositor_running();
+    int surfaces;
 
     pthread_mutex_lock( &wine_nx_fb_mutex );
-    wine_nx_gl_window = 0;
-    wine_nx_screen_reserved = 0;
+    surfaces = wine_nx_vk_surfaces > 1 ? --wine_nx_vk_surfaces : 0;
+    if (!surfaces)
+    {
+        wine_nx_vk_surfaces = 0;
+        wine_nx_gl_window = 0;
+        wine_nx_screen_reserved = 0;
+    }
     pthread_mutex_unlock( &wine_nx_fb_mutex );
+    if (surfaces)
+    {
+        log_line( "[NXVK] a Vulkan surface let go of the screen; %d still hold it", surfaces );
+        return;
+    }
     log_line( "[NXGL] screen returned to the %s", compositor ? "compositor" : "framebuffer" );
     if (compositor) wine_nx_compositor_resume();
 }
