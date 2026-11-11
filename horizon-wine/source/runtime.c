@@ -3128,24 +3128,35 @@ static Thread tls_threads[TLS_PLACEHOLDERS_MAX];
 static unsigned long long tls_page[TLS_PLACEHOLDERS_MAX];
 static unsigned char tls_keep[TLS_PLACEHOLDERS_MAX];
 static unsigned int tls_count;
-static UEvent tls_trimmed, tls_released;
-static UEvent tls_give[TLS_PLACEHOLDERS_MAX];
+static s32 tls_trimmed;
+static s32 tls_wake[TLS_PLACEHOLDERS_MAX];
 static unsigned char tls_given[TLS_PLACEHOLDERS_MAX];
 static unsigned char tls_closed[TLS_PLACEHOLDERS_MAX];
 static Mutex tls_give_mutex;
 
 #define TLS_GIVE_WAIT_NS 50000000LL
 
+static void tls_wait_word( s32 *word )
+{
+    while (!__atomic_load_n( word, __ATOMIC_ACQUIRE ))
+        svcWaitForAddress( word, ArbitrationType_WaitIfEqual, 0, -1 );
+}
+
+static void tls_wake_word( s32 *word )
+{
+    __atomic_store_n( word, 1, __ATOMIC_RELEASE );
+    svcSignalToAddress( word, SignalType_Signal, 0, -1 );
+}
+
 static void tls_placeholder( void *arg )
 {
     unsigned int index = (unsigned int)(uintptr_t)arg;
-    s32 which;
 
     __atomic_store_n( &tls_page[index], (unsigned long long)(uintptr_t)armGetTls() & ~0xfffull,
                       __ATOMIC_RELEASE );
-    waitSingle( waiterForUEvent( &tls_trimmed ), UINT64_MAX );
+    tls_wait_word( &tls_trimmed );
     if (!__atomic_load_n( &tls_keep[index], __ATOMIC_ACQUIRE )) return;
-    waitMulti( &which, UINT64_MAX, waiterForUEvent( &tls_released ), waiterForUEvent( &tls_give[index] ) );
+    tls_wait_word( &tls_wake[index] );
 }
 
 static int tls_close_if_ended( unsigned int index, s64 timeout )
@@ -3167,7 +3178,7 @@ unsigned int wine_nx_tls_give_place( void )
     {
         if (!tls_keep[i] || tls_given[i]) continue;
         __atomic_store_n( &tls_given[i], 1, __ATOMIC_RELEASE );
-        ueventSignal( &tls_give[i] );
+        tls_wake_word( &tls_wake[i] );
         freed = tls_close_if_ended( i, TLS_GIVE_WAIT_NS );
         if (!freed) log_line( "[TLS] page holder %u has not ended yet; its place comes later", i );
         break;
@@ -3188,9 +3199,6 @@ static void hold_thread_local_pages( void )
     unsigned int i, j, kept = 0, found = 0, dropped;
     Result rc = 0;
 
-    ueventCreate( &tls_trimmed, false );
-    ueventCreate( &tls_released, false );
-    for (i = 0; i < TLS_PLACEHOLDERS_MAX; i++) ueventCreate( &tls_give[i], false );
     for (i = 0; i < TLS_PLACEHOLDERS_MAX; i++)
     {
         /* 0x3b, the lowest priority an application may give a thread on cores
@@ -3217,7 +3225,7 @@ static void hold_thread_local_pages( void )
             kept++;
         }
     }
-    ueventSignal( &tls_trimmed );
+    tls_wake_word( &tls_trimmed );
     for (i = 0; i < tls_count; i++)
     {
         if (tls_keep[i]) continue;
@@ -3237,7 +3245,8 @@ static void release_thread_local_pages( void )
     unsigned int i;
 
     if (!tls_count) return;
-    ueventSignal( &tls_released );
+    for (i = 0; i < tls_count; i++)
+        if (tls_keep[i]) tls_wake_word( &tls_wake[i] );
     mutexLock( &tls_give_mutex );
     for (i = 0; i < tls_count; i++)
     {
