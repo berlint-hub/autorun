@@ -559,6 +559,9 @@ static int wine_nx_cursor_visible = 1;  /* 0 while the program hides the mouse c
 static int wine_nx_gl_window;  /* an OpenGL window surface owns the screen's NWindow */
 static int wine_nx_screen_reserved;
 static int wine_nx_vk_surfaces;
+static int wine_nx_vk_swapchains;
+int wine_nx_window_picture_shown;
+static unsigned int wine_nx_picture_thread;
 /* Controller and touchscreen state, guarded by wine_nx_pointer_mutex. */
 static pthread_mutex_t wine_nx_pointer_mutex = PTHREAD_MUTEX_INITIALIZER;
 static struct pointer_cursor wine_nx_pointer =
@@ -761,6 +764,60 @@ void wine_nx_vk_take_window(void)
     nwindowSetDimensions( nwindowGetDefault(), WINE_NX_FB_W, WINE_NX_FB_H );
     appletNotifyRunning( NULL );
     log_line( "[NXVK] screen handed to the Vulkan swapchain" );
+}
+
+void wine_nx_vk_swapchain_made(void)
+{
+    __atomic_add_fetch( &wine_nx_vk_swapchains, 1, __ATOMIC_ACQ_REL );
+}
+
+void wine_nx_vk_swapchain_gone(void)
+{
+    __atomic_sub_fetch( &wine_nx_vk_swapchains, 1, __ATOMIC_ACQ_REL );
+}
+
+int wine_nx_screen_wants_pictures(void)
+{
+    extern int wine_nx_watch_window_pictures(void) __attribute__((weak));
+
+    if (wine_nx_watch_window_pictures && !__atomic_load_n( &wine_nx_window_picture_shown, __ATOMIC_ACQUIRE ) &&
+        wine_nx_watch_window_pictures())
+        return 1;
+    return __atomic_load_n( &wine_nx_vk_surfaces, __ATOMIC_ACQUIRE ) &&
+           !__atomic_load_n( &wine_nx_screen_reserved, __ATOMIC_ACQUIRE );
+}
+
+void wine_nx_screen_input_waits(unsigned int thread)
+{
+    if (thread && __atomic_load_n( &wine_nx_picture_thread, __ATOMIC_ACQUIRE ) == thread)
+        __atomic_store_n( &wine_nx_window_picture_shown, 1, __ATOMIC_RELEASE );
+}
+
+void wine_nx_screen_picture_drawn(unsigned int thread, int redrawn)
+{
+    extern void wine_nx_vk_displace_screen(void) __attribute__((weak));
+    int give, shown;
+
+    pthread_mutex_lock( &wine_nx_fb_mutex );
+    give = wine_nx_vk_surfaces && wine_nx_gl_window && !wine_nx_screen_reserved;
+    pthread_mutex_unlock( &wine_nx_fb_mutex );
+    if (give && wine_nx_vk_displace_screen) wine_nx_vk_displace_screen();
+
+    pthread_mutex_lock( &wine_nx_fb_mutex );
+    give = wine_nx_vk_surfaces && wine_nx_gl_window && !wine_nx_screen_reserved &&
+           !__atomic_load_n( &wine_nx_vk_swapchains, __ATOMIC_ACQUIRE );
+    if (give) wine_nx_screen_reserved = 1;
+    shown = !wine_nx_gl_window || wine_nx_screen_reserved;
+    pthread_mutex_unlock( &wine_nx_fb_mutex );
+    if (give)
+    {
+        wine_nx_compositor_resume();
+        log_line( "[NXVK] a window was drawn with GDI and no swapchain shows the screen; the compositor shows the "
+                  "windows until the next swapchain" );
+    }
+    if (!shown) return;
+    if (redrawn) __atomic_store_n( &wine_nx_window_picture_shown, 1, __ATOMIC_RELEASE );
+    else __atomic_store_n( &wine_nx_picture_thread, thread, __ATOMIC_RELEASE );
 }
 
 /* The OpenGL surface is destroyed; the framebuffer or the compositor may take
