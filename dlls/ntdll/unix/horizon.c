@@ -3642,6 +3642,13 @@ static int carafe_thread_may_wait( void )
     return __atomic_load_n( &horizon_lifecycle.tebs, __ATOMIC_RELAXED ) > 0;
 }
 
+static int carafe_tls_give_place( void )
+{
+    extern unsigned int wine_nx_tls_give_place( void ) __attribute__((weak));
+
+    return &wine_nx_tls_give_place && wine_nx_tls_give_place();
+}
+
 static void carafe_thread_waited( unsigned long long ns, int placed )
 {
     extern void wine_nx_runtime_trace( const char *msg ) __attribute__((weak));
@@ -3672,6 +3679,7 @@ static void carafe_server_client_ended( unsigned int requests )
 #define CARAFE_SERVER_STOPPED() __atomic_sub_fetch( &carafe_server_live, 1, __ATOMIC_RELAXED )
 #define CARAFE_THREAD_REFUSED() carafe_threads_refusal()
 #define CARAFE_THREAD_MAY_WAIT() carafe_thread_may_wait()
+#define CARAFE_TLS_GIVE_PLACE() carafe_tls_give_place()
 #define CARAFE_THREAD_WAITED( ns, placed ) carafe_thread_waited( ns, placed )
 #else
 #define CARAFE_DIAG_EVENT( kind, actor, target, value ) do { } while (0)
@@ -3683,6 +3691,7 @@ static void carafe_server_client_ended( unsigned int requests )
 #define CARAFE_SERVER_STOPPED() do { } while (0)
 #define CARAFE_THREAD_REFUSED() do { } while (0)
 #define CARAFE_THREAD_MAY_WAIT() 0
+#define CARAFE_TLS_GIVE_PLACE() 0
 #define CARAFE_THREAD_WAITED( ns, placed ) do { (void)(ns); (void)(placed); } while (0)
 #endif
 #define CARAFE_THREAD_WAIT_NS 5000000000ull
@@ -20393,6 +20402,7 @@ Result __wrap_svcCreateThread( Handle *handle, ThreadFunc entry, void *arg, void
     {
         rc = horizon_create_thread_once( handle, entry, arg, stack, priority, core, &retries );
         if (rc != MAKERESULT( Module_Kernel, KernelError_OutOfResource ) || !CARAFE_THREAD_MAY_WAIT()) break;
+        if (CARAFE_TLS_GIVE_PLACE()) continue;
         now = armTicksToNs( armGetSystemTick() );
         if (!waited_from) waited_from = now;
         else if (now - waited_from >= CARAFE_THREAD_WAIT_NS) break;
