@@ -3665,6 +3665,83 @@ static void carafe_alert_wait_end( struct carafe_alert_slot *slot )
 {
     __atomic_store_n( &slot->waiting, 0, __ATOMIC_RELAXED );
 }
+
+#define CARAFE_FUTEX_EXIT_MAGIC 0x46555458
+#define CARAFE_FUTEX_LOCK_HELD  -1
+#define CARAFE_ALERT_STOP_END   2
+
+struct carafe_futex_exit
+{
+    ULONG magic;
+    ULONG pointer_size;
+    ULONG64 entry;
+    ULONG64 lock;
+};
+
+extern __thread volatile int *wine_nx_stop_word;
+
+static __thread const struct carafe_futex_exit *carafe_futex_exit;
+
+static const struct carafe_futex_exit *carafe_futex_exit_of( const void *address )
+{
+    const struct carafe_futex_exit *ending = address;
+
+    if (!ending || !virtual_check_buffer_for_read( ending, sizeof(*ending) )) return NULL;
+    if (ending->magic != CARAFE_FUTEX_EXIT_MAGIC) return NULL;
+    if (ending->pointer_size != sizeof(UINT) && ending->pointer_size != sizeof(ULONG64)) return NULL;
+    return ending;
+}
+
+static BOOL carafe_thread_ending(void)
+{
+    volatile int *word = wine_nx_stop_word;
+
+    return word && (__atomic_load_n( word, __ATOMIC_ACQUIRE ) & CARAFE_ALERT_STOP_END);
+}
+
+static ULONG64 carafe_futex_load( ULONG64 address, ULONG size )
+{
+    if (size == sizeof(UINT)) return *(volatile UINT *)(ULONG_PTR)address;
+    return *(volatile ULONG64 *)(ULONG_PTR)address;
+}
+
+static void carafe_futex_store( ULONG64 address, ULONG size, ULONG64 value )
+{
+    if (size == sizeof(UINT)) *(volatile UINT *)(ULONG_PTR)address = (UINT)value;
+    else *(volatile ULONG64 *)(ULONG_PTR)address = value;
+}
+
+static void carafe_futex_wait_left( void )
+{
+    if (!carafe_thread_ending()) carafe_futex_exit = NULL;
+}
+
+void carafe_futex_exit_take_out( void )
+{
+    const struct carafe_futex_exit *ending = carafe_futex_exit;
+    LONG *lock, free_lock = 0;
+    ULONG64 next, prev;
+    ULONG size;
+
+    if (!ending) return;
+    carafe_futex_exit = NULL;
+    lock = (LONG *)(ULONG_PTR)ending->lock;
+    size = ending->pointer_size;
+    while (!__atomic_compare_exchange_n( lock, &free_lock, CARAFE_FUTEX_LOCK_HELD, FALSE,
+                                         __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST ))
+    {
+        free_lock = 0;
+        NtYieldExecution();
+    }
+    if (carafe_futex_load( ending->entry + 2 * size, size ))
+    {
+        next = carafe_futex_load( ending->entry, size );
+        prev = carafe_futex_load( ending->entry + size, size );
+        carafe_futex_store( next + size, size, prev );
+        carafe_futex_store( prev, size, next );
+    }
+    __atomic_store_n( lock, 0, __ATOMIC_SEQ_CST );
+}
 #endif
 
 /***********************************************************************
@@ -3756,6 +3833,7 @@ NTSTATUS WINAPI NtWaitForAlertByThreadId( const void *address, const LARGE_INTEG
         slot->since = horizon_interrupt_time();
         __atomic_add_fetch( &slot->waits, 1, __ATOMIC_RELAXED );
         __atomic_store_n( &slot->waiting, 1, __ATOMIC_RELAXED );
+        carafe_futex_exit = carafe_futex_exit_of( address );
 #endif
 
         if (timeout)
@@ -3784,12 +3862,14 @@ NTSTATUS WINAPI NtWaitForAlertByThreadId( const void *address, const LARGE_INTEG
             {
 #ifdef __SWITCH__
                 carafe_alert_wait_end( slot );
+                carafe_futex_wait_left();
 #endif
                 return STATUS_TIMEOUT;
             }
         }
 #ifdef __SWITCH__
         carafe_alert_wait_end( slot );
+        carafe_futex_wait_left();
 #endif
         return STATUS_ALERTED;
     }
