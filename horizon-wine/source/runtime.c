@@ -977,6 +977,7 @@ static int runtime_wheel[2];
 void wine_nx_leave_process( const char *why );
 void wine_nx_request_quit( const char *why );
 extern void wine_nx_menu_poll( u64 held ) __attribute__((weak));
+extern void carafeHidPoll( void ) __attribute__((weak));
 
 
 int wine_nx_pointer_poll( int *x, int *y, unsigned int *buttons )
@@ -1082,6 +1083,7 @@ int wine_nx_pointer_poll( int *x, int *y, unsigned int *buttons )
         else if (armTicksToNs( now - quit_since ) >= 1000000000ull) leave = 1;
     }
     pthread_mutex_unlock( &wine_nx_pointer_mutex );
+    if (carafeHidPoll) carafeHidPoll();
     if (leave) wine_nx_request_quit( "+ and - held" );
     wine_nx_cursor_move( *x, *y );
     return moved;
