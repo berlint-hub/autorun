@@ -20254,6 +20254,44 @@ failed:
     return MAP_FAILED;
 }
 
+static pthread_once_t horizon_alias_once = PTHREAD_ONCE_INIT;
+static u64 horizon_alias_start, horizon_alias_end;
+
+static void horizon_alias_init( void )
+{
+    u64 base = 0, size = 0;
+    char message[128];
+
+    if (R_FAILED( svcGetInfo( &base, InfoType_AliasRegionAddress, CUR_PROCESS_HANDLE, 0 ) ) ||
+        R_FAILED( svcGetInfo( &size, InfoType_AliasRegionSize, CUR_PROCESS_HANDLE, 0 ) ) ||
+        !size || base + size <= base)
+        base = size = 0;
+    horizon_alias_start = base;
+    horizon_alias_end = base + size;
+    snprintf( message, sizeof(message), "[CARAFE] alias region 0x%llx-0x%llx",
+              (unsigned long long)horizon_alias_start, (unsigned long long)horizon_alias_end );
+    wine_nx_runtime_trace( message );
+}
+
+static BOOL horizon_in_alias_region( const void *start, size_t size )
+{
+    u64 begin = (ULONG_PTR)start, end = begin + size;
+
+    pthread_once( &horizon_alias_once, horizon_alias_init );
+    return horizon_alias_start < horizon_alias_end && begin < horizon_alias_end && end > horizon_alias_start;
+}
+
+static void horizon_report_alias_probe( const void *start, size_t size )
+{
+    static unsigned int reports;
+    char message[128];
+
+    if (__atomic_fetch_add( &reports, 1, __ATOMIC_RELAXED ) >= 8) return;
+    snprintf( message, sizeof(message), "[CARAFE] mapping %p+0x%lx falls in the alias region, refused",
+              start, (unsigned long)size );
+    wine_nx_runtime_trace( message );
+}
+
 void *horizon_mmap( void *start, size_t size, int prot, int flags, int fd, off_t offset )
 {
     struct horizon_memfile *section;
@@ -20278,6 +20316,16 @@ void *horizon_mmap( void *start, size_t size, int prot, int flags, int fd, off_t
     }
 
     if (flags & MAP_FIXED) return horizon_mmap_fixed( start, size, prot, flags, fd, offset );
+    if (start && horizon_in_alias_region( start, size ))
+    {
+        horizon_report_alias_probe( start, size );
+        if (flags & MAP_FIXED_NOREPLACE)
+        {
+            errno = ENOMEM;
+            return MAP_FAILED;
+        }
+        return horizon_mmap_alloc( size, prot, flags, fd, offset );
+    }
     if (start)
     {
         void *ret = horizon_mmap_tryfixed( start, size, prot, flags, fd, offset );
