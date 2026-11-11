@@ -3630,9 +3630,11 @@ static void carafe_server_count( unsigned int req, unsigned long long start )
 
 static void carafe_threads_refusal( void )
 {
+    extern void carafeErrorThreadRefused( void ) __attribute__((weak));
     unsigned int refused;
 
     if (!__atomic_load_n( &horizon_lifecycle.tebs, __ATOMIC_RELAXED )) return;
+    if (carafeErrorThreadRefused) carafeErrorThreadRefused();
     refused = __atomic_add_fetch( &carafe_threads_refused, 1, __ATOMIC_RELAXED );
     if (refused & (refused - 1)) return;
     carafe_server_report();
