@@ -2983,6 +2983,13 @@ BOOL WINAPI NtUserClipCursor( const RECT *rect )
         rect = &new_rect;
     }
 
+#ifdef __SWITCH__
+    if (!rect)
+    {
+        new_rect = map_rect_virt_to_raw( get_virtual_screen_rect( dpi, MDT_DEFAULT ), dpi );
+        rect = &new_rect;
+    }
+#endif
     SERVER_START_REQ( set_cursor )
     {
         if (rect)
