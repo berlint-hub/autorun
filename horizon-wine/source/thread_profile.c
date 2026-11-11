@@ -1616,7 +1616,13 @@ struct wine_nx_thread_view
     unsigned int permille;
     u64 mask;
     int movable;
+    int side;
 };
+
+unsigned int wine_nx_thread_side_cores( void )
+{
+    return four_cores_enabled ? 8u : 0u;
+}
 
 unsigned int wine_nx_thread_views( struct wine_nx_thread_view *views, unsigned int max )
 {
@@ -1643,7 +1649,8 @@ unsigned int wine_nx_thread_views( struct wine_nx_thread_view *views, unsigned i
             memcpy( view->name, thread->name, sizeof(view->name) );
             view->permille = nx_prof_permille( ticks, thread->orchestrator_ticks, interval );
             if (R_FAILED( svcGetThreadCoreMask( &core, &view->mask, thread->handle ) )) view->mask = 0;
-            view->movable = thread->kind == 'w' && !thread->fixed && !thread->helper && !thread->migratable;
+            view->movable = thread->kind == 'w' && !thread->fixed && !thread->migratable;
+            view->side = thread->helper;
         }
         thread->orchestrator_ticks = ticks;
     }
@@ -1662,8 +1669,12 @@ int wine_nx_thread_place( unsigned int tid, s32 core, u32 mask )
         struct nx_prof_thread *thread = &registry[i];
 
         if (!thread->handle || thread->kind != 'w' || thread->tid != tid) continue;
-        if (thread->fixed || thread->helper || thread->migratable) break;
-        if (R_SUCCEEDED( svcSetThreadCoreMask( thread->handle, core, mask ) ))
+        if (thread->fixed || thread->migratable) break;
+        if (mask == 8u)
+            placed = thread->helper || offload_thread_locked( thread ) > 0;
+        else if (thread->helper)
+            placed = restore_thread_locked( thread, core, mask );
+        else if (R_SUCCEEDED( svcSetThreadCoreMask( thread->handle, core, mask ) ))
         {
             if (thread->teb && &horizon_follow_thread_cores)
                 horizon_follow_thread_cores( (void *)(uintptr_t)thread->teb, mask );
