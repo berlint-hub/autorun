@@ -14705,6 +14705,7 @@ unsigned long long horizon_next_thread_local_page( unsigned long long addr, unsi
 
 void horizon_get_address_space_limits( void **start, void **limit )
 {
+    static int traced;
     u64 base = 0, size = 0;
     Result rc_base, rc_size;
 
@@ -14714,9 +14715,10 @@ void horizon_get_address_space_limits( void **start, void **limit )
     {
         *start = (void *)base;
         *limit = (void *)(base + size);
-        horizon_trace( "[VA] Horizon ASLR region base=0x%llx size=0x%llx limit=0x%llx",
-                       (unsigned long long)base, (unsigned long long)size,
-                       (unsigned long long)(base + size) );
+        if (!__atomic_exchange_n( &traced, 1, __ATOMIC_RELAXED ))
+            horizon_trace( "[VA] Horizon ASLR region base=0x%llx size=0x%llx limit=0x%llx",
+                           (unsigned long long)base, (unsigned long long)size,
+                           (unsigned long long)(base + size) );
         return;
     }
 
