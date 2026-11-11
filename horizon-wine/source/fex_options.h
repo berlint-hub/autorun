@@ -32,6 +32,7 @@ enum nx_fex_option_id
     NX_FEX_X87_CONVERSION_ROUNDING,
     NX_FEX_X87_FAST_STACK,
     NX_FEX_X87_SINGLE_PRECISION,
+    NX_FEX_GDB_SYMBOLS,
     NX_FEX_OPTION_COUNT
 };
 
@@ -121,6 +122,9 @@ static const struct nx_fex_option nx_fex_options[NX_FEX_OPTION_COUNT] =
       1, 1, 2, { "0", "1" }, { "0 - Off", "1 - On" } },
     { NX_FEX_X87_SINGLE_PRECISION, "FEX_X87SINGLEPRECISION",
       "With reduced x87 precision, computes x87 math in 32-bit floats, as Direct3D 9 games set the precision to.",
+      1, 0, 2, { "0", "1" }, { "0 - Off", "1 - On" } },
+    { NX_FEX_GDB_SYMBOLS, "FEX_GDBSYMBOLS",
+      "Records every x86 instruction in each translated block's address map, so the profiler names each one. The code is the same.",
       1, 0, 2, { "0", "1" }, { "0 - Off", "1 - On" } },
 };
 
