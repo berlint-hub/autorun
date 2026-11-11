@@ -143,7 +143,7 @@ static const struct nx_fex_option nx_fex_options[NX_FEX_OPTION_COUNT] =
       1, 1, 2, { "0", "1" }, { "0 - Off", "1 - On" } },
     { NX_FEX_JUMP_TABLES, "FEX_JUMPTABLES",
       "A switch jumps straight to its cases inside the translated block instead of through the lookup table.",
-      1, 0, 2, { "0", "1" }, { "0 - Off", "1 - On" } },
+      1, 1, 2, { "0", "1" }, { "0 - Off", "1 - On" } },
     { NX_FEX_COMPACT_RETURNS, "FEX_COMPACTRETURNS",
       "Returns keep their rarely used lookup outside the hot code, so more of it fits the instruction cache.",
       1, 0, 2, { "0", "1" }, { "0 - Off", "1 - On" } },
