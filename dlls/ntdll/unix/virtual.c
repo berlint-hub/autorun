@@ -4996,15 +4996,30 @@ static void set_large_address_space(void)
 }
 
 
+#ifdef __SWITCH__
+static ULONG_PTR thread_data_limit_low( unsigned int *alloc_type )
+{
+    if ((ULONG_PTR)host_addr_space_limit > limit_4g) return limit_4g;
+    *alloc_type |= MEM_TOP_DOWN;
+    return 0;
+}
+#else
+static inline ULONG_PTR thread_data_limit_low( unsigned int *alloc_type )
+{
+    return limit_4g;
+}
+#endif
+
 /***********************************************************************
  *           virtual_alloc_first_thread_data
  */
 struct thread_data *virtual_alloc_first_thread_data(void)
 {
-    unsigned int status;
+    unsigned int status, alloc_type = MEM_TOP_DOWN;
     struct thread_data *thread_data;
     struct file_view *view;
     SIZE_T size = signal_stack_mask + 1;
+    ULONG_PTR limit_low = thread_data_limit_low( &alloc_type );
 #ifndef __SWITCH__
     size += kernel_stack_size;
 #endif
@@ -5015,14 +5030,28 @@ struct thread_data *virtual_alloc_first_thread_data(void)
                        VPROT_WRITE |
 #endif
                        VPROT_READ | VPROT_COMMITTED, 0, 0, 0 );
+#ifdef __SWITCH__
+    if (status && (ULONG_PTR)host_addr_space_limit <= limit_4g)
+    {
+        unsigned int fixed_status = status;
+        char msg[128];
+
+        status = map_view( &view, NULL, page_size, MEM_TOP_DOWN, VPROT_WRITE | VPROT_READ | VPROT_COMMITTED,
+                           0, limit_4g - 1, 0 );
+        if (!status) user_shared_data = view->base;
+        snprintf( msg, sizeof(msg), "[USD] 0x7ffe0000 unavailable (%08x); shared user data at %p (%08x)",
+                  fixed_status, status ? NULL : view->base, status );
+        if (&wine_nx_runtime_trace) wine_nx_runtime_trace( msg );
+    }
+#endif
     if (status)
     {
         ERR( "wine: failed to map the shared user data: %08x\n", status );
         exit(1);
     }
 
-    status = map_view( &view, NULL, size, MEM_TOP_DOWN,
-                       VPROT_READ | VPROT_WRITE | VPROT_COMMITTED, limit_4g, 0, 0 );
+    status = map_view( &view, NULL, size, alloc_type,
+                       VPROT_READ | VPROT_WRITE | VPROT_COMMITTED, limit_low, 0, 0 );
     if (status)
     {
         ERR( "wine: failed to allocate initial thread data: %08x\n", status );
@@ -5167,12 +5196,14 @@ struct thread_data *virtual_alloc_thread_data(void)
     struct file_view *view;
     struct thread_data *data = NULL;
     SIZE_T size = signal_stack_mask + 1;
+    unsigned int alloc_type = 0;
+    ULONG_PTR limit_low = thread_data_limit_low( &alloc_type );
 #ifndef __SWITCH__
     size += kernel_stack_size;
 #endif
 
     server_enter_uninterrupted_section( &virtual_mutex, &sigset );
-    status = map_view( &view, NULL, size, 0, VPROT_READ | VPROT_WRITE | VPROT_COMMITTED, limit_4g, 0, 0 );
+    status = map_view( &view, NULL, size, alloc_type, VPROT_READ | VPROT_WRITE | VPROT_COMMITTED, limit_low, 0, 0 );
     if (!status)
     {
 #if defined(__SWITCH__) && defined(WINE_NX_SWAP_POC)
