@@ -20940,7 +20940,13 @@ static int horizon_section_alias( void *dst, void *src, size_t size )
                        dst, src, (unsigned long)size, rc );
         WARN( "svcMapProcessMemory(%p, %p, %zu) failed %#x.\n", dst, src, size, rc );
         section_failure( "alias", dst, src, size, (int)rc );
-        errno = ENOMEM;
+        if (R_MODULE(rc) == Module_Kernel && R_DESCRIPTION(rc) == KernelError_InvalidMemoryState)
+            errno = EEXIST;
+        else if (R_MODULE(rc) == Module_Kernel &&
+                 (R_DESCRIPTION(rc) == KernelError_ResourceExhausted ||
+                  R_DESCRIPTION(rc) == KernelError_OutOfMemory))
+            errno = ENOMEM;
+        else errno = EINVAL;
         return -1;
     }
     return 0;
@@ -21941,26 +21947,24 @@ static void *horizon_mmap_section( void *start, size_t size, int prot, int flags
         }
     }
 
-    if (state == SECTION_ALIASED && horizon_memfile_map( section, addr, offset, size ))
+    if (!(mapping = alloc_section_range( addr, size, section, offset, prot, SECTION_HOLE, reservation )))
     {
-        const int saved_errno = errno;
-
-        remove_reservation( reservation );
-        errno = saved_errno;
-        goto failed;
-    }
-    if (!(mapping = alloc_section_range( addr, size, section, offset, prot, state, reservation )))
-    {
-        if (state == SECTION_ALIASED)
-        {
-            horizon_memfile_alias( section, addr, offset, size, 0 );
-            horizon_memfile_use( section, offset, size, -1 );
-        }
         remove_reservation( reservation );
         errno = ENOMEM;
         goto failed;
     }
     list_add_mapping( mapping );
+    if (state == SECTION_ALIASED && horizon_memfile_map( section, addr, offset, size ))
+    {
+        const int saved_errno = errno;
+
+        list_remove_mapping( mapping );
+        remove_reservation( reservation );
+        free_section_range( mapping );
+        errno = saved_errno;
+        goto failed;
+    }
+    mapping->section_state = state;
     section_view_maps++;
     pthread_mutex_unlock( &mapping_mutex );
     return addr;
