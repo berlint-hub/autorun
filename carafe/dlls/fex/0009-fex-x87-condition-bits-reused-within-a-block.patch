@@ -4,9 +4,10 @@ loaded the four bits FCOM had just stored, and every FXCH stored C1 = 0 again. T
 the state seen outside the block does not change.
 MIT, as the files it changes.
 
+diff --git a/FEXCore/Source/Interface/Core/OpcodeDispatcher.cpp b/FEXCore/Source/Interface/Core/OpcodeDispatcher.cpp
 --- a/FEXCore/Source/Interface/Core/OpcodeDispatcher.cpp
 +++ b/FEXCore/Source/Interface/Core/OpcodeDispatcher.cpp
-@@ -4622,6 +4622,8 @@ void OpDispatchBuilder::ResetWorkingList() {
+@@ -4792,6 +4792,8 @@ void OpDispatchBuilder::ResetWorkingList() {
    CurrentCodeBlock = nullptr;
    RegCache.Written = 0;
    RegCache.Cached = 0;
@@ -15,10 +16,11 @@ MIT, as the files it changes.
  }
  
  void OpDispatchBuilder::UnhandledOp(OpcodeArgs) {
+diff --git a/FEXCore/Source/Interface/Core/OpcodeDispatcher.h b/FEXCore/Source/Interface/Core/OpcodeDispatcher.h
 --- a/FEXCore/Source/Interface/Core/OpcodeDispatcher.h
 +++ b/FEXCore/Source/Interface/Core/OpcodeDispatcher.h
-@@ -1309,6 +1309,8 @@ private:
-   FEX_CONFIG_OPT(ReducedPrecisionMode, X87REDUCEDPRECISION);
+@@ -1354,6 +1354,8 @@ private:
+   FEX_CONFIG_OPT(UndefinedFlagAcidTest, UNDEFINEDFLAGACIDTEST);
    FEX_CONFIG_OPT(ConversionRoundingMode, X87CONVERSIONROUNDING);
    FEX_CONFIG_OPT(FastStackMode, X87FASTSTACK);
 +  Ref X87ConditionBlock {};
@@ -26,7 +28,7 @@ MIT, as the files it changes.
  
    struct JumpTargetInfo {
      Ref BlockEntry;
-@@ -1844,10 +1846,27 @@ private:
+@@ -1912,10 +1914,27 @@ private:
          _Select(OpSize::i64Bit, OpSize::i64Bit, CondClass::EQ, Value, Constant(0), _And(OpSize::i32Bit, PackedTF, Constant(~1)), Constant(1));
        _StoreContextGPR(OpSize::i8Bit, NewPackedTF, ARRAY_OFFSETOF(FEXCore::Core::CPUState, flags, BitOffset));
      } else {
@@ -54,7 +56,7 @@ MIT, as the files it changes.
    void SetAF(unsigned K) {
      // AF is stored in bit 4 of the AF flag byte, with garbage in the other
      // bits. This allows us to defer the extract in the usual case. When it is
-@@ -2100,6 +2119,10 @@ private:
+@@ -2234,6 +2253,10 @@ private:
        // Recover the sign bit, it is the logical DF value
        return _Lshr(OpSize::i64Bit, LoadDF(), Constant(63));
      } else {
@@ -65,9 +67,10 @@ MIT, as the files it changes.
        return _LoadContextGPR(OpSize::i8Bit, ARRAY_OFFSETOF(Core::CPUState, flags, BitOffset));
      }
    }
+diff --git a/FEXCore/Source/Interface/Core/OpcodeDispatcher/X87.cpp b/FEXCore/Source/Interface/Core/OpcodeDispatcher/X87.cpp
 --- a/FEXCore/Source/Interface/Core/OpcodeDispatcher/X87.cpp
 +++ b/FEXCore/Source/Interface/Core/OpcodeDispatcher/X87.cpp
-@@ -747,17 +747,20 @@ Ref OpDispatchBuilder::ReconstructFSW_Helper(Ref T) {
+@@ -778,17 +778,20 @@ Ref OpDispatchBuilder::ReconstructFSW_Helper(Ref T) {
    Ref FSW = _Lshl(OpSize::i64Bit, Top, Constant(11));
  
    // We must construct the FSW from our various bits

@@ -7,10 +7,9 @@ return, with reduced x87 precision. Doom 3 spent about a fifth of its translated
 time in _ftol2 while loading a map (jit-blocks.txt, block 0x134a4b4).
 
 diff --git a/FEXCore/Source/Interface/Core/Core.cpp b/FEXCore/Source/Interface/Core/Core.cpp
-index eb5106e..b3435eb 100644
 --- a/FEXCore/Source/Interface/Core/Core.cpp
 +++ b/FEXCore/Source/Interface/Core/Core.cpp
-@@ -760,6 +760,7 @@ ContextImpl::GenerateIR(FEXCore::Core::InternalThreadState* Thread, uint64_t Gue
+@@ -756,6 +756,7 @@ ContextImpl::GenerateIR(FEXCore::Core::InternalThreadState* Thread, uint64_t Gue
            Thread->OpDispatcher->StartNewBlock();
          }
  
@@ -18,7 +17,7 @@ index eb5106e..b3435eb 100644
          if (TableInfo && TableInfo->OpcodeDispatcher.OpDispatch) {
            auto Fn = TableInfo->OpcodeDispatcher.OpDispatch;
            Thread->OpDispatcher->ResetHandledLock();
-@@ -776,7 +777,12 @@ ContextImpl::GenerateIR(FEXCore::Core::InternalThreadState* Thread, uint64_t Gue
+@@ -772,7 +773,12 @@ ContextImpl::GenerateIR(FEXCore::Core::InternalThreadState* Thread, uint64_t Gue
            }
  
            Thread->OpDispatcher->SetForceTSO(ForceTSO);
@@ -32,7 +31,7 @@ index eb5106e..b3435eb 100644
            if (Thread->OpDispatcher->HadDecodeFailure()) {
              HadDispatchError = true;
            } else {
-@@ -833,6 +839,10 @@ ContextImpl::GenerateIR(FEXCore::Core::InternalThreadState* Thread, uint64_t Gue
+@@ -835,6 +841,10 @@ ContextImpl::GenerateIR(FEXCore::Core::InternalThreadState* Thread, uint64_t Gue
          }
  
  
@@ -44,10 +43,9 @@ index eb5106e..b3435eb 100644
            break;
          }
 diff --git a/FEXCore/Source/Interface/Core/OpcodeDispatcher.h b/FEXCore/Source/Interface/Core/OpcodeDispatcher.h
-index 15684d5..9dbc82a 100644
 --- a/FEXCore/Source/Interface/Core/OpcodeDispatcher.h
 +++ b/FEXCore/Source/Interface/Core/OpcodeDispatcher.h
-@@ -766,6 +766,8 @@ public:
+@@ -778,6 +778,8 @@ public:
    void FDIVF64(OpcodeArgs, IR::OpSize Width, bool Integer, bool Reverse, OpResult ResInST0);
    void FILDF64(OpcodeArgs);
    void FISTF64(OpcodeArgs, bool Truncate);
@@ -57,7 +55,6 @@ index 15684d5..9dbc82a 100644
    void FLDF64(OpcodeArgs, IR::OpSize Width);
    void FMULF64(OpcodeArgs, IR::OpSize Width, bool Integer, OpResult ResInST0);
 diff --git a/FEXCore/Source/Interface/Core/OpcodeDispatcher/X87F64.cpp b/FEXCore/Source/Interface/Core/OpcodeDispatcher/X87F64.cpp
-index b6db75e..9b9e80e 100644
 --- a/FEXCore/Source/Interface/Core/OpcodeDispatcher/X87F64.cpp
 +++ b/FEXCore/Source/Interface/Core/OpcodeDispatcher/X87F64.cpp
 @@ -18,6 +18,7 @@ $end_info$
@@ -68,8 +65,8 @@ index b6db75e..9b9e80e 100644
  
  namespace FEXCore::IR {
  class OrderedNode;
-@@ -113,6 +114,64 @@ void OpDispatchBuilder::FILDF64(OpcodeArgs) {
-   _PushStack(ConvertedData, Invalid(), OpSize::iInvalid);
+@@ -118,6 +119,64 @@ void OpDispatchBuilder::FILDF64(OpcodeArgs) {
+   StoreX87FIP(Op);
  }
  
 +// A cast of a float to an integer in a program built by Visual C++ 6 to 2003 is

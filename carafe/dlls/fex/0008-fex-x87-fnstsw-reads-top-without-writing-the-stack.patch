@@ -4,30 +4,33 @@ block, and the block's end wrote them again. MSVC code compares floats with FCOM
 was paid at almost every float comparison. A new IR op returns TOP as the stack pass tracks it.
 MIT, as the files it changes.
 
+diff --git a/FEXCore/Source/Interface/Core/OpcodeDispatcher.h b/FEXCore/Source/Interface/Core/OpcodeDispatcher.h
 --- a/FEXCore/Source/Interface/Core/OpcodeDispatcher.h
 +++ b/FEXCore/Source/Interface/Core/OpcodeDispatcher.h
-@@ -1308,6 +1308,7 @@ protected:
- private:
+@@ -1353,6 +1353,7 @@ private:
    FEX_CONFIG_OPT(ReducedPrecisionMode, X87REDUCEDPRECISION);
+   FEX_CONFIG_OPT(UndefinedFlagAcidTest, UNDEFINEDFLAGACIDTEST);
    FEX_CONFIG_OPT(ConversionRoundingMode, X87CONVERSIONROUNDING);
 +  FEX_CONFIG_OPT(FastStackMode, X87FASTSTACK);
  
    struct JumpTargetInfo {
      Ref BlockEntry;
+diff --git a/FEXCore/Source/Interface/Core/OpcodeDispatcher/X87.cpp b/FEXCore/Source/Interface/Core/OpcodeDispatcher/X87.cpp
 --- a/FEXCore/Source/Interface/Core/OpcodeDispatcher/X87.cpp
 +++ b/FEXCore/Source/Interface/Core/OpcodeDispatcher/X87.cpp
-@@ -769,7 +769,7 @@ Ref OpDispatchBuilder::ReconstructFSW_Helper(Ref T) {
+@@ -800,7 +800,7 @@ Ref OpDispatchBuilder::ReconstructFSW_Helper(Ref T) {
  // There's no load Status Word instruction but you can load it through frstor
  // or fldenv.
- void OpDispatchBuilder::X87FNSTSW(OpcodeArgs) {
+ void OpDispatchBuilder::X87FNSTSW(OpcodeArgs, bool DestRAX) {
 -  Ref TopValue = _SyncStackToSlow();
 +  Ref TopValue = FastStackMode ? _StackTop() : _SyncStackToSlow();
    Ref StatusWord = ReconstructFSW_Helper(TopValue);
-   StoreResultGPR(Op, StatusWord);
- }
+   if (DestRAX) {
+     StoreGPRRegister(X86State::REG_RAX, StatusWord, OpSize::i16Bit);
+diff --git a/FEXCore/Source/Interface/IR/IR.json b/FEXCore/Source/Interface/IR/IR.json
 --- a/FEXCore/Source/Interface/IR/IR.json
 +++ b/FEXCore/Source/Interface/IR/IR.json
-@@ -2860,6 +2860,14 @@
+@@ -2953,6 +2953,14 @@
          "HasSideEffects": true,
          "DestSize": "OpSize::i64Bit"
        },
@@ -42,6 +45,7 @@ MIT, as the files it changes.
        "StackForceSlow": {
          "Desc": [
            "Forces the slow path."
+diff --git a/FEXCore/Source/Interface/IR/Passes/x87StackOptimizationPass.cpp b/FEXCore/Source/Interface/IR/Passes/x87StackOptimizationPass.cpp
 --- a/FEXCore/Source/Interface/IR/Passes/x87StackOptimizationPass.cpp
 +++ b/FEXCore/Source/Interface/IR/Passes/x87StackOptimizationPass.cpp
 @@ -1292,6 +1292,17 @@ void X87StackOptimization::Run(IREmitter* Emit) {

@@ -1,9 +1,9 @@
 # The experimental FEX
 
 Patches tried out on top of Carafe's FEX for 32-bit programs. The build is
-FEX-2609, `horizon-wine/fex/horizon.patch`, the series in `../fex`, and then
-every `*.patch` in this folder in name order (`../build-fex.sh ... experimental`).
-With no patch here it is Carafe's build under another name.
+FEX-2611.1, `horizon-wine/fex/horizon-2611.patch`, the series in `../fex`, and
+then every `*.patch` in this folder in name order (`../build-fex.sh ...
+experimental`). With no patch here it is Carafe's build under another name.
 
 It is released apart from Carafe's, as `fex-experimental-<version>`, and a game
 runs on it only when its settings say so: **Game settings, Emulation, FEX
@@ -12,7 +12,7 @@ set to it are not touched by anything here.
 
 ## What each version tries
 
-| Version | On top of Carafe's `fex=2609-1` |
+| Version | On top of Carafe's build (`fex=2609-1` up to `2609-6`, then `fex=2611-1`) |
 | --- | --- |
 | `2609-1` | Nothing: Carafe's build under another name. Its release was removed once `2609-4` came, to keep the list short. |
 | `2609-2` | FEX's own code compiled for the console's CPU (`-mcpu=cortex-a57`). No patch: the translated code is the same, the translator and its helpers are tuned for the A57. (Link-time optimization was tried with it and does not link, see `../build-fex.sh`.) |
@@ -20,6 +20,7 @@ set to it are not touched by anything here.
 | `2609-4` | `2609-3` and `0002`: the C runtime's `_ftol` (Visual C++ 6) and `_ftol2` (Visual C++ 2002/2003), which every `(int)` cast of a float calls, are one conversion instead of some thirty instructions, with x87 reduced precision on. Doom 3 spent about a fifth of its translated time there while loading a map; in play it was under 1%. |
 | `2609-5` | `2609-4` and `0003`: a disk cache of translated code of its own for each experimental build. With FEX options, disk cache on, `2609-4` ran the code `2609-3` had stored, so its change was never translated; its release was removed. |
 | `2609-6` | `2609-5` and `0004`: a 32-bit `DIV`/`IDIV` whose `EDX` is only the extension of `EAX` (nearly all of them) divides 32 bits instead of joining the two into 64, a shorter sequence and a shorter divide on the A57. From `berlint-hub/FEX` (`arena/799d045b-fex`). `2609-2`'s release was removed to keep three. |
+| `2611-1` | `2609-6` carried to FEX-2611.1, on top of Carafe's `fex=2611-1`. `0001` is gone: FEX-2611 has `preserve_all` itself. `0002`, `0003` and `0004` are the same changes fitted to FEX-2611.1. |
 
 A game with **FEX options, disk cache** on keeps translated code on the card.
 The cache does not know which FEX filled it, so from `2609-5` on the version is
@@ -30,7 +31,7 @@ To try something:
 
 1. Add a patch against the tree the Carafe series leaves, named like those
    (`0001-fex-what-it-does.patch`).
-2. Raise `fex-experimental` in `../versions.txt` (`2609-2`, `2609-3`, ...): a
+2. Raise `fex-experimental` in `../versions.txt` (`2611-2`, `2611-3`, ...): a
    card sees a new release only under a new version.
 3. Push. The `carafe dlls` workflow builds and releases it, and the launcher
    lists it under Experimental.

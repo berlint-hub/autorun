@@ -6,9 +6,10 @@ place one 132 MB reservation. The decoder now takes MaxInst plus 64 entries, and
 8 MB per 5000 instructions, rounded up to whole megabytes, at least 1 MB and at most 8 MB.
 MIT, as the files it changes.
 
+diff --git a/FEXCore/Source/Interface/Core/Frontend.cpp b/FEXCore/Source/Interface/Core/Frontend.cpp
 --- a/FEXCore/Source/Interface/Core/Frontend.cpp
 +++ b/FEXCore/Source/Interface/Core/Frontend.cpp
-@@ -69,7 +69,8 @@
+@@ -70,7 +70,8 @@ static uint32_t MapVEXToReg(uint8_t vvvv, bool HasXMM) {
  Decoder::Decoder(FEXCore::Core::InternalThreadState* Thread)
    : Thread {Thread}
    , CTX {static_cast<FEXCore::Context::ContextImpl*>(Thread->CTX)}
@@ -18,7 +19,7 @@ MIT, as the files it changes.
  
    FEX_CONFIG_OPT(ReducedPrecision, X87REDUCEDPRECISION);
    if (ReducedPrecision) {
-@@ -1623,7 +1624,7 @@
+@@ -1715,7 +1716,7 @@ void Decoder::DecodeLoop(const uint8_t* _InstStream, uint64_t GuestSizePause) {
        }
  
        // Check if we need to end the entire multiblock
@@ -27,9 +28,10 @@ MIT, as the files it changes.
        if (FinalInstruction) {
          break;
        }
+diff --git a/FEXCore/Source/Interface/Core/Frontend.h b/FEXCore/Source/Interface/Core/Frontend.h
 --- a/FEXCore/Source/Interface/Core/Frontend.h
 +++ b/FEXCore/Source/Interface/Core/Frontend.h
-@@ -131,6 +131,13 @@
+@@ -138,6 +138,13 @@ private:
    void DecodeREXIfValid(int8_t ExpectedOffset = -1);
  
    static constexpr size_t DefaultDecodedBufferSize = 0x10000;
@@ -43,9 +45,10 @@ MIT, as the files it changes.
    FEXCore::X86Tables::DecodedInst* DecodedBuffer {};
    Utils::PoolBufferWithTimedRetirement<FEXCore::X86Tables::DecodedInst*, 5000, 500> PoolObject;
    size_t DecodedSize {};
+diff --git a/FEXCore/Source/Interface/Core/OpcodeDispatcher.cpp b/FEXCore/Source/Interface/Core/OpcodeDispatcher.cpp
 --- a/FEXCore/Source/Interface/Core/OpcodeDispatcher.cpp
 +++ b/FEXCore/Source/Interface/Core/OpcodeDispatcher.cpp
-@@ -4598,7 +4598,7 @@
+@@ -4768,7 +4768,7 @@ void OpDispatchBuilder::StoreResult(RegClass Class, X86Tables::DecodedOp Op, Ref
  }
  
  OpDispatchBuilder::OpDispatchBuilder(FEXCore::Context::ContextImpl* ctx, FEXCore::Core::InternalThreadState* Thread)
@@ -53,10 +56,11 @@ MIT, as the files it changes.
 +  : IREmitter {ctx->OpDispatcherAllocator, ctx->HostFeatures.SupportsTSOImm9 != 0, ListSizeForBlock(ctx->Config.MaxInstPerBlock)}
    , CTX {ctx}
    , Thread {Thread} {
-   if (CTX->HostFeatures.SupportsAVX && CTX->HostFeatures.SupportsSVE256) {
+   if (CTX->HostFeatures.SupportsAVX() && CTX->HostFeatures.SupportsSVE256()) {
+diff --git a/FEXCore/Source/Interface/IR/IREmitter.h b/FEXCore/Source/Interface/IR/IREmitter.h
 --- a/FEXCore/Source/Interface/IR/IREmitter.h
 +++ b/FEXCore/Source/Interface/IR/IREmitter.h
-@@ -19,8 +19,16 @@
+@@ -19,8 +19,16 @@ namespace FEXCore::IR {
  
  class IREmitter {
  public:

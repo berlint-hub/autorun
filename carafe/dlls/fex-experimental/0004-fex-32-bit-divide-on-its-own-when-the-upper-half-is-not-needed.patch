@@ -8,7 +8,7 @@ then one test sends it to a W-form divide of EAX alone, three instructions
 shorter, and on Cortex-A57 a 32-bit divide takes at most about half as long
 as a 64-bit one. The frontend keeps 32 bits of each result, so the low halves
 being the same is enough. From berlint-hub/FEX, arena/799d045b-fex
-(div-fast-path.patch), fitted to FEX-2609.
+(div-fast-path.patch), fitted to FEX-2609 and carried to FEX-2611.1.
 
 diff --git a/FEXCore/Source/Interface/Core/JIT/ALUOps.cpp b/FEXCore/Source/Interface/Core/JIT/ALUOps.cpp
 index 1c10a6a..b47c840 100644
