@@ -191,7 +191,15 @@ repository the card follows: Autorun's, or the fork of it named in
 fork's own source. The choice is one word in `horizon-dlls/source.txt`; changing
 it only reads the other manifest, and Update then replaces the files whose size
 or SHA-256 differ, either way round. A manifest may name files in either
-repository. The card keeps the manifest it
+repository. What the fork has of its own comes from this repository's `build`
+workflow: it builds the Wine DLLs whose source here differs from what Autorun's
+repository ships (both `ntdll.dll`, `wow64.dll`, both `dinput.dll`,
+`dinput8.dll` and `opengl32.dll`: opengl32's tables without their locks, and
+Carafe's thread suspension through FEX, address waits of ended threads and
+DirectInput through the HID gamepad), leaves them under
+`refs/dll-drop/wine-dlls` and as the `wine-dlls-<commit>` artifact, and
+`tools/dll-fork-take-drop.py`, run in a checkout of the fork, puts them in it
+with their manifest entries. The card keeps the manifest it
 installed from in `horizon-dlls/manifest.json`, and `horizon-dlls/classes.reg`,
 the COM classes its DLLs serve, which the registry loads before `system.reg`. A
 file the runtime cannot run (a feature it does not report,
@@ -252,9 +260,12 @@ seconds: frames, OpenGL and system call rates, memory and translation counters.
 Its reading figures tell a slow load apart from a busy one: `reads`/`read_mb`
 are what the program asked for, `sd_reads`/`sd_mb` what the card was asked for
 after the read cache, and `cache_mb` what that cache holds. The cache
-(`source/sd_read_cache.h`) keeps up to eight pieces of each open file, and takes
-between 32 and 192 MB depending on the heap a game leaves free; a write to a
-file throws away what is held for it. A miss reads a whole 128 KB chunk; the
+(`source/sd_read_cache.h`) keeps up to 32 pieces of each open file, and of the
+last 32 files closed, for the next open of the same path (Doom 3 opens a `.pk4`
+again for each file in it); it takes between 32 and 192 MB depending on the heap
+a game leaves free, and a write, rename, removal or truncation of a file throws
+away what is held for it. `[SDFILES]` names the files the card gave the most to
+and what was asked of them. A miss reads a whole 128 KB chunk; the
 cache can also read ahead from 16 KB (`fill_min`), which on The Sims 2 halved
 the bytes from the card but not the time. `code_mb` is the translated code the run
 holds now over the code memory Horizon gave it, and `code_all_mb` every byte
