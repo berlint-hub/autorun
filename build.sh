@@ -78,15 +78,25 @@ export WINE_NX_LLVM_MINGW="$llvm" WINE_NX_JOBS="$jobs" WINE_NX_BUILD_ID="${WINE_
 step "Pulling $image"
 docker pull -q "$image" >/dev/null
 
-# The boot payloads Quick setup installs (Atmosphere 1.11.2's Mesosphere and
-# loader, and Horizon-OC's), embedded in the runtime. Built once; it takes a
-# while, as Atmosphere's libraries are built twice. Atmosphere builds only
-# against devkitPro's released libnx, which the image keeps apart.
-if [ ! -f "$hw/toolchains/boot-payloads/bundle/setup_boot_manifest.h" ]; then
+# The boot payloads Quick setup installs (Atmosphere's Mesosphere and loader at
+# the release build-boot-bundle.sh pins, and Horizon-OC's), embedded in the
+# runtime. Built once for what they are made from; it takes a while, as
+# Atmosphere's libraries are built twice. Atmosphere builds only against
+# devkitPro's released libnx, which the image keeps apart. The bundle records
+# the scripts and patch it was made with, so a new Atmosphere release in them
+# builds it again rather than keeping the old one (Quick setup installs only
+# over the Atmosphere version the bundle is for).
+bundle="$hw/toolchains/boot-payloads/bundle"
+boot_inputs="$(cat "$hw/build-boot-bundle.sh" "$hw/tools/make-boot-bundle.py" "$hw/mesosphere/low-window.patch" |
+               sha256sum | cut -c1-64)"
+if [ ! -f "$bundle/setup_boot_manifest.h" ] || [ "$(cat "$bundle/inputs" 2>/dev/null)" != "$boot_inputs" ]; then
     step "Building the boot payloads (Atmosphere and Horizon-OC), once"
+    # The stamp is written in the container too: what it made is root's.
     docker run --rm -v "$root:/work" -w /work -e WINE_NX_JOBS="$jobs" \
         -e GIT_CONFIG_COUNT=1 -e GIT_CONFIG_KEY_0=safe.directory -e GIT_CONFIG_VALUE_0='*' \
-        -e DEVKITPRO=/opt/devkitpro-release "$image" sh horizon-wine/build-boot-bundle.sh
+        -e DEVKITPRO=/opt/devkitpro-release -e BOOT_INPUTS="$boot_inputs" "$image" sh -ec \
+        'sh horizon-wine/build-boot-bundle.sh
+         echo "$BOOT_INPUTS" > horizon-wine/toolchains/boot-payloads/bundle/inputs'
 fi
 
 # mesa-switch newer than the image's (build-mesa-switch.sh), which every

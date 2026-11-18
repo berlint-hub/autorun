@@ -305,7 +305,7 @@ the part of Windows each file belongs to. No Autorun package carries any of it.
 
 ```sh
 docker run --rm -v "$PWD:/work" -w /work -e DEVKITPRO=/opt/devkitpro-release "$(cat horizon-wine/switch-dev.txt)" \
-    sh horizon-wine/build-boot-bundle.sh         # Atmosphere 1.11.2 and HOC boot payloads, once
+    sh horizon-wine/build-boot-bundle.sh         # Atmosphere 1.12.2 and HOC boot payloads, once
 sh horizon-wine/build-mesa-switch.sh              # mesa-switch newer than the image's, once per pinned commit
 WINE_NX_LLVM_MINGW="$PWD/horizon-wine/toolchains/llvm-mingw-20260505-ucrt-macos-universal" \
 WINE_NX_FEX=1 WINE_NX_DXVK=1 WINE_NX_VKD3D=1 \
