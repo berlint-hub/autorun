@@ -1,5 +1,6 @@
 #include "Interface/Core/LookupCache.h"
 #include "Interface/Core/SharedCodeBufferManager.h"
+#include <FEXCore/Config/Config.h>
 #include <FEXCore/Utils/AllocatorHooks.h>
 #include <FEXCore/Utils/LogManager.h>
 #include <cstdio>
@@ -9,6 +10,7 @@
 #include <sys/wait.h>
 #include <unistd.h>
 #include <vector>
+#include "fex_test_compat.h"
 
 static constexpr size_t MiB = 1024 * 1024;
 static size_t limit = 64 * MiB;
@@ -55,6 +57,10 @@ static void check_buffer(FEXCore::CPU::CodeBuffer& buffer, size_t size) {
 
 int main() {
   LogMan::Throw::InstallHandler([](const char* message) { fprintf(stderr, "%s\n", message); std::abort(); });
+  // FEX-2611's SharedCodeBufferManager reads its JIT naming options, as FEX
+  // reads them in a process, once its configuration is loaded.
+  FEXCore::Config::Initialize();
+  FEXCore::Config::Load();
   FEXCore::Allocator::mmap = map_memory;
   FEXCore::Allocator::munmap = unmap_memory;
   for (bool fail_with_null : {false, true}) {
@@ -63,7 +69,7 @@ int main() {
       limit = available;
       requests.clear();
       {
-        FEXCore::CPU::CodeBuffer buffer(64 * MiB);
+        auto buffer = fex_test_code_buffer<FEXCore::CPU::CodeBuffer>(64 * MiB);
         std::vector<size_t> expected;
         for (size_t size = 64 * MiB; size >= available; size /= 2) expected.push_back(size);
         check(requests == expected, "wrong retry sequence");
@@ -100,7 +106,7 @@ int main() {
         if (level == LogMan::ASSERT)
           _exit(requests == std::vector<size_t> {64 * MiB, 32 * MiB, 16 * MiB} ? 0 : 2);
       });
-      FEXCore::CPU::CodeBuffer buffer(64 * MiB);
+      auto buffer = fex_test_code_buffer<FEXCore::CPU::CodeBuffer>(64 * MiB);
       _exit(3);
     }
     int status;

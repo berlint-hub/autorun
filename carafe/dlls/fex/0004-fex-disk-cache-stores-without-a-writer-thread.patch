@@ -13,29 +13,18 @@ taken, entry points and relocations must fall inside the code, and a record skip
 reader in the middle of it. The cache directory moves, so a cache written before this is not read.
 MIT, as the files it changes.
 
---- a/FEXCore/include/FEXCore/Core/DiskCache.h
-+++ b/FEXCore/include/FEXCore/Core/DiskCache.h
-@@ -140,6 +140,9 @@
-     bool ReadAll(fextl::vector<uint8_t>& Out); // from first blob
-     bool ReadBlob(uint64_t Offset, std::span<uint8_t> OutBlob);
-     bool WriteBlob(const MesaFOZ::foz_payload_key& Key, std::span<const std::span<const uint8_t>> BlobChunks, uint64_t& OutBlobOffset);
-+    void SetEnd(uint64_t Offset) {
-+      EndOffset = Offset;
-+    }
- 
-   private:
-     static constexpr uint32_t OPEN_LOCK_TIMEOUT_MS = 100;
-@@ -147,6 +150,7 @@
-     fextl::string FileName;
-     fextl::unique_ptr<File::File> FD;
-     bool ReadOnly = false;
-+    uint64_t EndOffset = 0;
-   };
- 
-   class IndexedDB {
+diff --git a/FEXCore/Source/Interface/Core/DiskCache.cpp b/FEXCore/Source/Interface/Core/DiskCache.cpp
 --- a/FEXCore/Source/Interface/Core/DiskCache.cpp
 +++ b/FEXCore/Source/Interface/Core/DiskCache.cpp
-@@ -97,10 +97,22 @@
+@@ -21,6 +21,7 @@
+ #include <cstdint>
+ #include <cstring>
+ #include <atomic>
++#include <mutex>
+ 
+ namespace FEXCore {
+ 
+@@ -101,10 +102,37 @@ namespace DiskCache {
  
      if (!Valid) {
        FD.reset();
@@ -55,10 +44,25 @@ MIT, as the files it changes.
 +    return Crc ? Crc : 1;
 +  }
 +
++  // On Horizon there is no writer thread: a new thread of a 32-bit game starts as
++  // an x86 one there, and FEX's own code would run as x86 on it. The work a
++  // writer would take (storing a block, pruning the memory LRU) runs on the
++  // thread that hands it over, one item at a time; a store prunes from inside,
++  // so the lock can be taken again by the thread that holds it.
++  static void QueueOrRun(WorkQueueThread* Writer, fextl::unique_ptr<WorkQueueThread::WorkItem> Item) {
++    if (Writer) {
++      Writer->QueueWork(std::move(Item));
++      return;
++    }
++    static std::recursive_mutex InlineWorkMutex;
++    std::scoped_lock Lock(InlineWorkMutex);
++    Item->Run();
++  }
++
    ssize_t FOZFile::Size() {
      return FD ? FD->Size() : -1;
    }
-@@ -122,11 +134,15 @@
+@@ -126,11 +154,15 @@ namespace DiskCache {
    }
  
    bool FOZFile::WriteBlob(const MesaFOZ::foz_payload_key& Key, std::span<const std::span<const uint8_t>> BlobChunks, uint64_t& OutBlobOffset) {
@@ -74,7 +78,7 @@ MIT, as the files it changes.
  
      if (FD->PWrite(Key.bytes, sizeof(Key.bytes), WriteOffset) != sizeof(Key.bytes)) {
        return false;
-@@ -142,6 +158,9 @@
+@@ -146,6 +178,9 @@ namespace DiskCache {
                                                 .format = MesaFOZ::FOSSILIZE_COMPRESSION_NONE,
                                                 .crc = 0, // todo? maybe
                                                 .uncompressed_size = (uint32_t)TotalBlobSize};
@@ -84,7 +88,7 @@ MIT, as the files it changes.
  
      if (FD->PWrite(&ScratchHeader, sizeof(ScratchHeader), WriteOffset) != sizeof(ScratchHeader)) {
        return false;
-@@ -160,6 +179,7 @@
+@@ -164,6 +199,7 @@ namespace DiskCache {
        WriteOffset += Chunk.size();
      }
  
@@ -92,7 +96,7 @@ MIT, as the files it changes.
      return true;
    }
  
-@@ -195,6 +215,7 @@
+@@ -199,6 +235,7 @@ namespace DiskCache {
      const uint8_t* IndexDataStart = Data.data();
      const size_t IndexDataSize = Data.size();
      size_t ReadOffset = 0;
@@ -100,7 +104,7 @@ MIT, as the files it changes.
      while (ReadOffset + sizeof(MesaFOZ::foz_payload_key) + sizeof(MesaFOZ::foz_payload_header) <= IndexDataSize) {
        const auto* FOZKey = reinterpret_cast<const MesaFOZ::foz_payload_key*>(IndexDataStart + ReadOffset);
        ReadOffset += sizeof(MesaFOZ::foz_payload_key);
-@@ -206,6 +227,14 @@
+@@ -210,6 +247,14 @@ namespace DiskCache {
        if (FOZHeader->payload_size < IndexBlobSize || ReadOffset + FOZHeader->payload_size > IndexDataSize) {
          break;
        }
@@ -115,7 +119,7 @@ MIT, as the files it changes.
        const auto* IndexBlobCommon = reinterpret_cast<const MesaFOZ::mesa_index_db_file_entry*>(IndexDataStart + ReadOffset);
        ReadOffset += sizeof(MesaFOZ::mesa_index_db_file_entry);
        const auto* IndexBlobExtra = reinterpret_cast<const IndexExtraBlobHeader*>(IndexDataStart + ReadOffset);
-@@ -214,9 +243,11 @@
+@@ -218,9 +263,11 @@ namespace DiskCache {
        // skip corrupt (carefully) so we don't have to figure that out in the hot path later
        if (IndexBlobCommon->cache_db_file_offset > (uint64_t)CacheFOZSize ||
            IndexBlobCommon->size > (uint64_t)CacheFOZSize - IndexBlobCommon->cache_db_file_offset) {
@@ -127,7 +131,7 @@ MIT, as the files it changes.
          continue;
        }
        IndexBlobSize += IndexBlobExtra->GuestExtentsCount * sizeof(uint32_t);
-@@ -238,6 +269,7 @@
+@@ -242,6 +289,7 @@ namespace DiskCache {
            }
          }
          if (!ExtentsValid) {
@@ -135,7 +139,7 @@ MIT, as the files it changes.
            continue;
          }
          auto It = CacheIndex.find(IndexBlobCommon->hash);
-@@ -252,8 +284,12 @@
+@@ -256,8 +304,12 @@ namespace DiskCache {
        } else {
          FoundMetadata = true;
        }
@@ -148,54 +152,58 @@ MIT, as the files it changes.
    }
  
    bool IndexedDB::ReadCacheBlob(uint64_t Offset, std::span<uint8_t> OutBlob) {
-@@ -407,6 +443,9 @@
-       uint8_t Is64BitMode;
+@@ -408,6 +460,10 @@ namespace DiskCache {
+       uint16_t FormatVersion;
        uint64_t HostFeaturesHash;
-     } BucketHeader = {FormatVersion, CTX->Config.Is64BitMode, CTX->HostFeatures.HashForCaching()};
+     } MachineBucketData = {FormatVersion, HostFeatureHash.HostFeaturesHash};
 +#ifdef FEX_HORIZON
-+    BucketHeader.FormatVersion |= 0x8000;
++    // Carafe's records carry a hash of their payload: a cache written without it is not read.
++    MachineBucketData.FormatVersion |= 0x8000;
 +#endif
  
-     fextl::vector<uint8_t> BucketBytes;
-     BucketBytes.resize(sizeof(BucketHeader) + SerializedConfig.size());
-@@ -457,10 +496,12 @@
+     uint8_t ProcessFeaturesHash {};
+     memcpy(&ProcessFeaturesHash, &HostFeatureHash.ProcessFeaturesHash, sizeof(ProcessFeaturesHash));
+@@ -478,10 +534,12 @@ namespace DiskCache {
      WritingDiskCache = (bool)RWCacheDB;
      ReadingDiskCache = !ROCacheDBs.empty() || RWCacheDB != nullptr;
  
 +#ifndef FEX_HORIZON
      if (IsWritingDiskCache()) {
        FEXCore::Threads::Flags WriterThreadFlags = {.LowPriority = true, .Internal = true};
-       Writer = fextl::make_unique<WorkQueueThread>(WriterThreadFlags);
+       Writer = fextl::make_unique<WorkQueueThread>(WriterThreadFlags, "FEX:DiskCache");
      }
 +#endif
    }
  
    uint64_t DiskCache::MakeLookupKey(Core::InternalThreadState* Thread, const uint64_t CodeKey, bool Writable, bool MonoBackpatcher) {
-@@ -699,9 +740,23 @@
-     HitData.Blob.resize(GuestPages.size() * sizeof(uint64_t) + EntrySizeWithoutGuestCode);
-     memcpy(HitData.Blob.data(), GuestPages.data(), GuestPages.size() * sizeof(uint64_t));
-     uint32_t BlobOffset = GuestPages.size() * sizeof(uint64_t);
+@@ -791,8 +849,24 @@ namespace DiskCache {
+         // LogMan::Msg::IFmt("lru hit! {}", MemoryLRUCurrentSize);
+         MemoryLRU.splice(MemoryLRU.begin(), MemoryLRU, *LRUIter);
+       }
+-    } else if (!Entry.DB->ReadCacheBlob(Entry.Offset, {HitData.Blob.data() + BlobOffset, EntrySizeWithoutGuestCode})) {
+-      return std::nullopt;
++    } else {
 +#ifdef FEX_HORIZON
-+    HitData.Blob.resize(BlobOffset + Entry.Size);
-+    MesaFOZ::foz_payload_header PayloadHeader;
-+    if (Entry.Offset < sizeof(PayloadHeader) ||
-+        !Entry.DB->ReadCacheBlob(Entry.Offset - sizeof(PayloadHeader), {reinterpret_cast<uint8_t*>(&PayloadHeader), sizeof(PayloadHeader)}) ||
-+        PayloadHeader.payload_size != Entry.Size || !Entry.DB->ReadCacheBlob(Entry.Offset, {HitData.Blob.data() + BlobOffset, Entry.Size})) {
-+      return std::nullopt;
-+    }
-+    const std::span<const uint8_t> Payload[] = {{HitData.Blob.data() + BlobOffset, Entry.Size}};
-+    if (PayloadHeader.crc != PayloadCrc(Payload)) {
-+      return std::nullopt;
-+    }
++      HitData.Blob.resize(BlobOffset + Entry.Size);
++      MesaFOZ::foz_payload_header PayloadHeader;
++      if (Entry.Offset < sizeof(PayloadHeader) ||
++          !Entry.DB->ReadCacheBlob(Entry.Offset - sizeof(PayloadHeader), {reinterpret_cast<uint8_t*>(&PayloadHeader), sizeof(PayloadHeader)}) ||
++          PayloadHeader.payload_size != Entry.Size || !Entry.DB->ReadCacheBlob(Entry.Offset, {HitData.Blob.data() + BlobOffset, Entry.Size})) {
++        return std::nullopt;
++      }
++      const std::span<const uint8_t> Payload[] = {{HitData.Blob.data() + BlobOffset, Entry.Size}};
++      if (PayloadHeader.crc != PayloadCrc(Payload)) {
++        return std::nullopt;
++      }
 +#else
-     if (!Entry.DB->ReadCacheBlob(Entry.Offset, {HitData.Blob.data() + BlobOffset, EntrySizeWithoutGuestCode})) {
-       return std::nullopt;
-     }
++      if (!Entry.DB->ReadCacheBlob(Entry.Offset, {HitData.Blob.data() + BlobOffset, EntrySizeWithoutGuestCode})) {
++        return std::nullopt;
++      }
 +#endif
+     }
  
      if (EntrySizeWithoutGuestCode < sizeof(BlobFixedHeader)) {
-       return std::nullopt;
-@@ -710,8 +765,8 @@
+@@ -802,8 +876,8 @@ namespace DiskCache {
      memcpy(&Header, HitData.Blob.data() + BlobOffset, sizeof(Header));
      BlobOffset += sizeof(Header);
  
@@ -206,7 +214,16 @@ MIT, as the files it changes.
      if (EntrySizeWithoutGuestCode != SizeNeeded) {
        return std::nullopt;
      }
-@@ -735,6 +790,22 @@
+@@ -832,7 +906,7 @@ namespace DiskCache {
+     }
+ 
+     if (StoreInMemory && MemoryLRUCurrentSize > MemoryLRUMaxSize + MemoryLRUEvictThreshold) {
+-      Writer->QueueWork(fextl::make_unique<PruneMemoryLRUWorkItem>(this));
++      QueueOrRun(Writer.get(), fextl::make_unique<PruneMemoryLRUWorkItem>(this));
+     }
+ 
+     HitData.HostCode = {HitData.Blob.data() + BlobOffset, Header.HostSize};
+@@ -850,6 +924,22 @@ namespace DiskCache {
  
      HitData.GuestPages = {reinterpret_cast<uint64_t*>(HitData.Blob.data()), GuestPages.size()};
  
@@ -229,16 +246,42 @@ MIT, as the files it changes.
      for (auto& EntryPointRip : HitData.EntryPointRIPs) {
        EntryPointRip += GuestRIP;
      }
-@@ -1039,6 +1110,12 @@
-     memcpy(IndexBlob.data(), &IndexBlobHeader, sizeof(IndexExtraBlobHeader));
-     memcpy(IndexBlob.data() + sizeof(IndexExtraBlobHeader), ExactGuestCodeExtents.data(), ExactGuestCodeExtents.size() * sizeof(uint32_t));
+@@ -973,7 +1063,7 @@ namespace DiskCache {
+       }
  
-+    if (!Writer) {
-+      static std::mutex InlineStoreMutex;
-+      std::scoped_lock InlineStoreLock(InlineStoreMutex);
-+      RWCacheDB->StoreCacheBlob(Key, LookupKey, Blob, Index, IndexLock, IndexBlob);
-+      return true;
-+    }
+       if (KeepEntryInMemory && Self->MemoryLRUCurrentSize > Self->MemoryLRUMaxSize + Self->MemoryLRUEvictThreshold) {
+-        Self->Writer->QueueWork(fextl::make_unique<PruneMemoryLRUWorkItem>(Self));
++        QueueOrRun(Self->Writer.get(), fextl::make_unique<PruneMemoryLRUWorkItem>(Self));
+       }
+     }
+   };
+@@ -1248,7 +1338,7 @@ namespace DiskCache {
+     }
+ 
      // hand the rest off to the writer thread
-     Writer->QueueWork(fextl::make_unique<CacheStoreWorkItem>(this, RWCacheDB.get(), Key, LookupKey, std::move(Blob), std::move(IndexBlob)));
+-    Writer->QueueWork(fextl::make_unique<CacheStoreWorkItem>(this, RWCacheDB.get(), Key, LookupKey, std::span(BlobData, TotalSize),
++    QueueOrRun(Writer.get(), fextl::make_unique<CacheStoreWorkItem>(this, RWCacheDB.get(), Key, LookupKey, std::span(BlobData, TotalSize),
+                                                              std::move(IndexBlob), StoreDisk));
      return true;
+   }
+diff --git a/FEXCore/Source/Interface/Core/DiskCache.h b/FEXCore/Source/Interface/Core/DiskCache.h
+--- a/FEXCore/Source/Interface/Core/DiskCache.h
++++ b/FEXCore/Source/Interface/Core/DiskCache.h
+@@ -152,6 +152,9 @@ namespace DiskCache {
+     bool ReadAll(fextl::vector<uint8_t>& Out); // from first blob
+     bool ReadBlob(uint64_t Offset, std::span<uint8_t> OutBlob);
+     bool WriteBlob(const MesaFOZ::foz_payload_key& Key, std::span<const std::span<const uint8_t>> BlobChunks, uint64_t& OutBlobOffset);
++    void SetEnd(uint64_t Offset) {
++      EndOffset = Offset;
++    }
+ 
+   private:
+     static constexpr uint32_t OPEN_LOCK_TIMEOUT_MS = 100;
+@@ -159,6 +162,7 @@ namespace DiskCache {
+     fextl::string FileName;
+     fextl::unique_ptr<File::File> FD;
+     bool ReadOnly = false;
++    uint64_t EndOffset = 0;
+   };
+ 
+   class IndexedDB {

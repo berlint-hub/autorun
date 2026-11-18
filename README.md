@@ -109,6 +109,9 @@ the same way.
    - installs the boot changes some games need: a Mesosphere build that lets a
      game run at low memory addresses, with the stock loader or
      [Horizon-OC](https://github.com/Horizon-OC/Horizon-OC)'s for overclocking.
+     They are built from Atmosphère 1.12.2 (firmware up to 23.5.0), and Quick
+     setup installs them only while that version is running: update
+     Atmosphère first if it says the version does not match.
 
    **Settings -> System -> Quick setup** runs it again.
 

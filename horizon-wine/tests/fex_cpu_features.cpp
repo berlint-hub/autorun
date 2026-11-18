@@ -10,8 +10,26 @@
 #include <cstring>
 #include <sys/mman.h>
 #include <vector>
+#include "fex_test_compat.h"
 
 using namespace FEXCore::X86State;
+
+/* FEX-2611 also takes the process ID. On Horizon the module answers it with
+ * GetCurrentProcessId; any value does here. */
+template <typename Type>
+static auto fetch_host_features( bool is_wine, Type type )
+{
+  if constexpr (requires { FEX::Windows::CPUFeatures::FetchHostFeatures( is_wine, type, 1u ); })
+    return FEX::Windows::CPUFeatures::FetchHostFeatures( is_wine, type, 1u );
+  else
+    return FEX::Windows::CPUFeatures::FetchHostFeatures( is_wine, type );
+}
+
+/* FEX-2611's CPUFeatures.cpp asks the unix side whether TPIDRRO_EL0 holds the
+ * CPU index; on Horizon the module answers no without asking. */
+namespace FEX::Windows::UnixLib {
+bool SupportsTPIDRRO_CPU() { return false; }
+}
 
 class Syscalls final : public FEXCore::HLE::SyscallHandler {
 public:
@@ -41,11 +59,12 @@ int main(int argc, char** argv) {
   FEXCore::Config::Set(FEXCore::Config::CONFIG_IS64BIT_MODE, wide ? "1" : "0");
   FEXCore::Config::Set(FEXCore::Config::CONFIG_TSOENABLED, "0");
   LogMan::Throw::InstallHandler([](const char* message) { fprintf(stderr, "%s\n", message); std::abort(); });
-  auto features = FEX::Windows::CPUFeatures::FetchHostFeatures(true, wide ? FEXCore::HostFeatures::HostTypeEnum::Arm64ec :
-                                                                          FEXCore::HostFeatures::HostTypeEnum::Wow64);
+  auto features = fetch_host_features(true, wide ? FEXCore::HostFeatures::HostTypeEnum::Arm64ec :
+                                                 FEXCore::HostFeatures::HostTypeEnum::Wow64);
   assert(features.SupportsCRC);
   assert(!features.SupportsAES && !features.SupportsSHA && !features.SupportsPMULL_128Bit);
-  assert(!features.SupportsAtomics && !features.SupportsSVE128 && !features.SupportsSVE256);
+  assert(!features.SupportsAtomics && !fex_test_sve128(features) && !fex_test_sve256(features));
+  fex_test_fault_path(features);
   {
     auto baseline = features;
     baseline.SupportsCRC = false;

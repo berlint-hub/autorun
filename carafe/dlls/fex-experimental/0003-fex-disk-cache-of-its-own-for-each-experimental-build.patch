@@ -7,11 +7,10 @@ had stored and its own change was never translated. The build script writes
 the version into Interface/Core/ExperimentalBuild.h, and it goes into the key.
 
 diff --git a/FEXCore/Source/Interface/Core/DiskCache.cpp b/FEXCore/Source/Interface/Core/DiskCache.cpp
-index 8f328bc..f8fb953 100644
 --- a/FEXCore/Source/Interface/Core/DiskCache.cpp
 +++ b/FEXCore/Source/Interface/Core/DiskCache.cpp
-@@ -16,6 +16,11 @@
- #include "FEXCore/fextl/memory.h"
+@@ -20,6 +20,11 @@
+ 
  #include <cstdint>
  #include <cstring>
 +
@@ -20,9 +19,9 @@ index 8f328bc..f8fb953 100644
 +#include "Interface/Core/ExperimentalBuild.h"
 +#endif
  #include <atomic>
+ #include <mutex>
  
- namespace FEXCore {
-@@ -437,6 +442,11 @@ namespace DiskCache {
+@@ -453,6 +458,11 @@ namespace DiskCache {
      }
  
      fextl::string SerializedConfig = FEXCore::Config::SerializeForCache();
@@ -32,5 +31,5 @@ index 8f328bc..f8fb953 100644
 +    SerializedConfig += "\nexperimental build " FEX_EXPERIMENTAL_BUILD;
 +#endif
  
-     struct __attribute__((packed)) {
-       uint16_t FormatVersion;
+     const auto HostFeatureHash = CTX->HostFeatures.HashForCaching();
+ 

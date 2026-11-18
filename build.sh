@@ -2,12 +2,14 @@
 # Build Autorun: the runtime, in the switch-dev image, and the SD card archive,
 # horizon-wine/build-autorun/autorun-NNN.zip.
 #
-#   sh build.sh [--x86] [--dlls] [--nxvk] [--clean] [--jobs N]
+#   sh build.sh [--x86] [--dlls] [--nxvk] [--image-mesa] [--clean] [--jobs N]
 #
 #   --x86    ship the x86-only runtime (Box64, no FEX) instead of the AMD64 one
 #   --dlls   also build the DLL repository's DLLs (horizon-dlls) that changed
 #   --nxvk   also build a second runtime linked with nxvk (NVK and Zink), which
 #            a game can be set to in its settings (Graphics driver)
+#   --image-mesa  link the switch-dev image's mesa-switch instead of the newer
+#            one build-mesa-switch.sh builds and keeps in vendor/mesa-switch
 #   --clean  remove the runtime's build folders first
 #   --jobs   parallel jobs (default: the machine's cores)
 #
@@ -20,16 +22,17 @@
 set -eu
 root="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 hw="$root/horizon-wine"
-x86=0 dlls=0 clean=0 nxvk=0
+x86=0 dlls=0 clean=0 nxvk=0 image_mesa=0
 jobs="$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 8)"
 while [ $# -gt 0 ]; do
     case "$1" in
         --x86) x86=1 ;;
         --dlls) dlls=1 ;;
         --nxvk) nxvk=1 ;;
+        --image-mesa) image_mesa=1 ;;
         --clean) clean=1 ;;
         --jobs) jobs="$2"; shift ;;
-        -h|--help) sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        -h|--help) sed -n '2,21p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *) echo "Unknown option $1; see --help." >&2; exit 1 ;;
     esac
     shift
@@ -75,16 +78,43 @@ export WINE_NX_LLVM_MINGW="$llvm" WINE_NX_JOBS="$jobs" WINE_NX_BUILD_ID="${WINE_
 step "Pulling $image"
 docker pull -q "$image" >/dev/null
 
-# The boot payloads Quick setup installs (Atmosphere 1.11.2's Mesosphere and
-# loader, and Horizon-OC's), embedded in the runtime. Built once; it takes a
-# while, as Atmosphere's libraries are built twice. Atmosphere builds only
-# against devkitPro's released libnx, which the image keeps apart.
-if [ ! -f "$hw/toolchains/boot-payloads/bundle/setup_boot_manifest.h" ]; then
+# The boot payloads Quick setup installs (Atmosphere's Mesosphere and loader at
+# the release build-boot-bundle.sh pins, and Horizon-OC's), embedded in the
+# runtime. Built once for what they are made from; it takes a while, as
+# Atmosphere's libraries are built twice. Atmosphere builds only against
+# devkitPro's released libnx, which the image keeps apart. The bundle records
+# the scripts and patch it was made with, so a new Atmosphere release in them
+# builds it again rather than keeping the old one (Quick setup installs only
+# over the Atmosphere version the bundle is for).
+bundle="$hw/toolchains/boot-payloads/bundle"
+boot_inputs="$(cat "$hw/build-boot-bundle.sh" "$hw/tools/make-boot-bundle.py" "$hw/mesosphere/low-window.patch" |
+               sha256sum | cut -c1-64)"
+if [ ! -f "$bundle/setup_boot_manifest.h" ] || [ "$(cat "$bundle/inputs" 2>/dev/null)" != "$boot_inputs" ]; then
     step "Building the boot payloads (Atmosphere and Horizon-OC), once"
+    # The stamp is written in the container too: what it made is root's.
     docker run --rm -v "$root:/work" -w /work -e WINE_NX_JOBS="$jobs" \
         -e GIT_CONFIG_COUNT=1 -e GIT_CONFIG_KEY_0=safe.directory -e GIT_CONFIG_VALUE_0='*' \
-        -e DEVKITPRO=/opt/devkitpro-release "$image" sh horizon-wine/build-boot-bundle.sh
+        -e DEVKITPRO=/opt/devkitpro-release -e BOOT_INPUTS="$boot_inputs" "$image" sh -ec \
+        'sh horizon-wine/build-boot-bundle.sh
+         echo "$BOOT_INPUTS" > horizon-wine/toolchains/boot-payloads/bundle/inputs'
 fi
+
+# mesa-switch newer than the image's (build-mesa-switch.sh), which every
+# runtime links: its OpenGL and Vulkan, and the headers the nxvk runtime is
+# compiled against. When it cannot be built the image's is linked, and the
+# build says so. A path in the build container, as CMake sees it.
+if [ -z "${WINE_NX_MESA_SWITCH_DIR:-}" ]; then
+    WINE_NX_MESA_SWITCH_DIR=/opt/devkitpro/portlibs/switch/lib
+    if [ "$image_mesa" = 0 ]; then
+        step "Building mesa-switch, once for its pinned commit"
+        if sh "$hw/build-mesa-switch.sh"; then
+            WINE_NX_MESA_SWITCH_DIR=/work/horizon-wine/vendor/mesa-switch/pkg/lib
+        else
+            echo "::warning::mesa-switch could not be built; the runtime links the switch-dev image's"
+        fi
+    fi
+fi
+export WINE_NX_MESA_SWITCH_DIR
 
 if [ "$clean" = 1 ]; then
     step "Removing the runtime's build folders"

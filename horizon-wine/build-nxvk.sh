@@ -18,7 +18,9 @@
 set -eu
 root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 hw="$root/horizon-wine"
-commit=c3abea1efde44027b7e3e20b48eb55beeecd5ab4
+# a5841f8 (2026-11-12): Mesa's threads (glthread, the shader and disk cache
+# queues) get a 1 MiB stack on Horizon, not newlib's default.
+commit=a5841f80f80567a15a27653ded53a50d565d28c9
 src="$hw/vendor/nxvk"
 pkg="$src/switch/build/pkg"
 image="autorun-nxvk:$commit"

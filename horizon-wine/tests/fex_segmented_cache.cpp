@@ -10,6 +10,7 @@
 #include <cstring>
 #include <map>
 #include <sys/mman.h>
+#include "fex_test_compat.h"
 
 static constexpr size_t MiB = 1024 * 1024;
 static constexpr uintptr_t Guest = 0x1000000;
@@ -77,7 +78,7 @@ int main(int argc, char** argv) {
 
   FEXCore::HostFeatures features {};
   features.DCacheLineLog2 = 4;
-  features.HostType = FEXCore::HostFeatures::HostTypeEnum::Wow64;
+  fex_test_set_host_type( features, FEXCore::HostFeatures::HostTypeEnum::Wow64 );
   features.CPUMIDRs.assign(4, 0x411fd071);
   Syscalls syscalls;
   FEXCore::SignalDelegator signals;

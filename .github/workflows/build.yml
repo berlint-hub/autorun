@@ -388,10 +388,13 @@ jobs:
           df -h /
 
       - name: Toolchains and boot payloads
+        # A new key when the image or what the boot payloads are made from
+        # changes (a new Atmosphere release): build.sh builds them again then,
+        # and this saves them.
         uses: actions/cache@v4
         with:
           path: horizon-wine/toolchains
-          key: toolchains-${{ hashFiles('horizon-wine/switch-dev.txt') }}
+          key: toolchains-${{ hashFiles('horizon-wine/switch-dev.txt', 'horizon-wine/build-boot-bundle.sh', 'horizon-wine/tools/make-boot-bundle.py', 'horizon-wine/mesosphere/low-window.patch') }}
 
       - name: Wine's PE tree
         # Most of the build's time is here, and most of it does not change
@@ -402,6 +405,16 @@ jobs:
           path: horizon-wine/build-wine-amd64-pe
           key: wine-pe-${{ github.sha }}
           restore-keys: wine-pe-
+
+      - name: mesa-switch's package
+        # The Mesa every runtime links (build-mesa-switch.sh): mesa-switch at
+        # the commit pinned there, newer than the switch-dev image's, built in
+        # that image with the image's own recipe; kept until the script or
+        # the image changes.
+        uses: actions/cache@v4
+        with:
+          path: horizon-wine/vendor/mesa-switch/pkg
+          key: mesa-switch-pkg-${{ hashFiles('horizon-wine/build-mesa-switch.sh', 'horizon-wine/switch-dev.txt') }}
 
       - name: nxvk's package
         # The second runtime's Mesa (build-nxvk.sh): NVK and Zink from nxvk,

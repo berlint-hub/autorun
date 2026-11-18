@@ -73,6 +73,14 @@ if args.vulkan:
     if b'a Vulkan surface has the screen' not in nro.read_bytes():
         parser.error('The NRO has no mesa-switch Vulkan display driver')
     mesa_revision = switch_dev['mesa_switch']
+    # Linked with build-mesa-switch.sh's package rather than the image's: its
+    # commit, from the stamp beside lib/ (a path in the build container).
+    mesa_dir = cache['WINE_NX_MESA_SWITCH_DIR']
+    if mesa_dir.startswith('/work/'):
+        stamp = horizon_wine.parent / mesa_dir[len('/work/'):] / '../commit'
+        if not stamp.is_file():
+            parser.error(f'{mesa_dir} has no commit stamp; build it with build-mesa-switch.sh')
+        mesa_revision = stamp.read_text().split()[0]
 if args.stage_output:
     stage_root = args.stage_output.resolve()
     stage_root.mkdir(parents=True, exist_ok=False)

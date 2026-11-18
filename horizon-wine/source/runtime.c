@@ -5898,8 +5898,9 @@ int main( int argc, char **argv )
 #endif
     }
     log_line( "[CPU] %s", target_machine == IMAGE_FILE_MACHINE_ARM64 ? "Native ARM64" :
-                         !runtime_fex ? "Box64" : runtime_fex_carafe_active && runtime_fex_carafe == 2 ? "FEX-2609 (Experimental)" :
-                         runtime_fex_carafe_active ? "FEX-2609 (Carafe)" : "FEX-2609" );
+                         !runtime_fex ? "Box64" : runtime_fex_carafe_active && runtime_fex_carafe == 2 ? "FEX (Experimental)" :
+                         runtime_fex_carafe_active ? "FEX (Carafe)" :
+                         "FEX, the DLL repository's (FEX-2609 from Autorun's, FEX-2611.1 from the fork)" );
 #ifdef WINE_NX_AMD64
     if (target_machine == IMAGE_FILE_MACHINE_AMD64)
     {

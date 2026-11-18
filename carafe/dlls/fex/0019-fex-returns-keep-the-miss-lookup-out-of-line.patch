@@ -5,10 +5,10 @@ return site sat in hot instruction cache lines unused; on the A57 an instruction
 once the hot code outgrows the 48 KB instruction cache. Off by default.
 MIT, as the files it changes.
 
-diff -ruN -x cpp-optparse -x .git a/FEXCore/Source/Interface/Config/Config.json.in b/FEXCore/Source/Interface/Config/Config.json.in
+diff --git a/FEXCore/Source/Interface/Config/Config.json.in b/FEXCore/Source/Interface/Config/Config.json.in
 --- a/FEXCore/Source/Interface/Config/Config.json.in
 +++ b/FEXCore/Source/Interface/Config/Config.json.in
-@@ -672,6 +672,15 @@
+@@ -739,6 +739,15 @@
            "matches it, others take the lookup as before."
          ]
        },
@@ -24,12 +24,12 @@ diff -ruN -x cpp-optparse -x .git a/FEXCore/Source/Interface/Config/Config.json.
        "StallProcess": {
          "Type": "bool",
          "Default": "false",
-diff -ruN -x cpp-optparse -x .git a/FEXCore/Source/Interface/Core/JIT/BranchOps.cpp b/FEXCore/Source/Interface/Core/JIT/BranchOps.cpp
+diff --git a/FEXCore/Source/Interface/Core/JIT/BranchOps.cpp b/FEXCore/Source/Interface/Core/JIT/BranchOps.cpp
 --- a/FEXCore/Source/Interface/Core/JIT/BranchOps.cpp
 +++ b/FEXCore/Source/Interface/Core/JIT/BranchOps.cpp
-@@ -207,6 +207,15 @@
-       (void)Bind(&NotOnTop);
-     }
+@@ -198,6 +198,15 @@ DEF_OP(ExitFunction) {
+     ARMEmitter::ForwardLabel SkipFullLookup;
+     auto RipReg = GetReg(Op->NewRIP);
  
 +    if (Op->Hint == IR::BranchHint::Return && CompactReturns()) {
 +      ldp<ARMEmitter::IndexType::POST>(TMP1, TMP2, REG_CALLRET_SP, 0x10);
@@ -43,7 +43,7 @@ diff -ruN -x cpp-optparse -x .git a/FEXCore/Source/Interface/Core/JIT/BranchOps.
      if (Op->Hint == IR::BranchHint::Return) {
        // First try to pop from the call-ret stack, otherwise follow the normal path (but ending in a ret)
        ldp<ARMEmitter::IndexType::POST>(TMP1, TMP2, REG_CALLRET_SP, 0x10);
-@@ -287,6 +296,34 @@
+@@ -278,6 +287,34 @@ DEF_OP(ExitFunction) {
    }
  }
  
@@ -78,10 +78,33 @@ diff -ruN -x cpp-optparse -x .git a/FEXCore/Source/Interface/Core/JIT/BranchOps.
  DEF_OP(JumpTableEntry) {
    auto Op = IROp->C<IR::IROp_JumpTableEntry>();
  
-diff -ruN -x cpp-optparse -x .git a/FEXCore/Source/Interface/Core/JIT/JITClass.h b/FEXCore/Source/Interface/Core/JIT/JITClass.h
+diff --git a/FEXCore/Source/Interface/Core/JIT/JIT.cpp b/FEXCore/Source/Interface/Core/JIT/JIT.cpp
+--- a/FEXCore/Source/Interface/Core/JIT/JIT.cpp
++++ b/FEXCore/Source/Interface/Core/JIT/JIT.cpp
+@@ -943,6 +943,7 @@ CPUBackend::CompiledCode Arm64JITCore::EmitJITCode(uint64_t Entry, uint64_t Size
+   PendingCallCaches.clear();
+   PendingJumpTableCases.clear();
+   PendingJumpTables.clear();
++  PendingReturnLookups.clear();
+   JumpTargets.resize(IR->GetHeader()->BlockCount, {});
+   Relocations.resize(PrevNumAllocations, FEXCore::CPU::Relocation::Default()); // Discard any relocations generated from a previous attempt
+ 
+@@ -1075,6 +1076,11 @@ CPUBackend::CompiledCode Arm64JITCore::EmitJITCode(uint64_t Entry, uint64_t Size
+   }
+   PendingTargetLabel = nullptr;
+ 
++  for (auto& ReturnLookup : PendingReturnLookups) {
++    BindOrRestart(&ReturnLookup.Label);
++    EmitReturnLookup(ReturnLookup.RipReg);
++  }
++
+   ARMEmitter::ForwardLabel l_ExitLink;
+   for (auto& PendingJumpThunk : PendingJumpThunks) {
+     // Align as 64-bit atomics are used on the HostCode field.
+diff --git a/FEXCore/Source/Interface/Core/JIT/JITClass.h b/FEXCore/Source/Interface/Core/JIT/JITClass.h
 --- a/FEXCore/Source/Interface/Core/JIT/JITClass.h
 +++ b/FEXCore/Source/Interface/Core/JIT/JITClass.h
-@@ -131,6 +131,15 @@
+@@ -131,6 +131,15 @@ private:
    fextl::vector<PendingJumpTableCase> PendingJumpTableCases;
    fextl::vector<PendingJumpTable> PendingJumpTables;
  
@@ -97,26 +120,3 @@ diff -ruN -x cpp-optparse -x .git a/FEXCore/Source/Interface/Core/JIT/JITClass.h
    static uint64_t IndirectCallLink(FEXCore::Core::CpuStateFrame* Frame, IndirectCallCacheRecord* Record);
  
    Utils::PoolBufferWithTimedRetirement<uint8_t*, 5000, 500> TempCodeBufferAllocator;
-diff -ruN -x cpp-optparse -x .git a/FEXCore/Source/Interface/Core/JIT/JIT.cpp b/FEXCore/Source/Interface/Core/JIT/JIT.cpp
---- a/FEXCore/Source/Interface/Core/JIT/JIT.cpp
-+++ b/FEXCore/Source/Interface/Core/JIT/JIT.cpp
-@@ -931,6 +931,7 @@
-   PendingCallCaches.clear();
-   PendingJumpTableCases.clear();
-   PendingJumpTables.clear();
-+  PendingReturnLookups.clear();
-   JumpTargets.resize(IR->GetHeader()->BlockCount, {});
-   Relocations.resize(PrevNumAllocations, FEXCore::CPU::Relocation::Default()); // Discard any relocations generated from a previous attempt
- 
-@@ -1063,6 +1064,11 @@
-   }
-   PendingTargetLabel = nullptr;
- 
-+  for (auto& ReturnLookup : PendingReturnLookups) {
-+    BindOrRestart(&ReturnLookup.Label);
-+    EmitReturnLookup(ReturnLookup.RipReg);
-+  }
-+
-   ARMEmitter::ForwardLabel l_ExitLink;
-   for (auto& PendingJumpThunk : PendingJumpThunks) {
-     // Align as 64-bit atomics are used on the HostCode field.

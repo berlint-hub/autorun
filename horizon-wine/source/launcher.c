@@ -4196,7 +4196,10 @@ static int file_browser_pick_kind( struct launcher *l, char *target, size_t size
                     snprintf( row->value, sizeof(row->value), "%s", files[i].shortcut == 1 ? "Shortcut" : "Batch file" );
                 else if (kind == BROWSE_TEXT)
                 {
-                    const char *extension = strrchr( files[i].name, '.' ) + 1;
+                    /* The name was cut to fit files[i].name when it was longer
+                     * (a long one in a script of several bytes a character),
+                     * and its dot can be in the part cut off. */
+                    const char *dot = strrchr( files[i].name, '.' ), *extension = dot ? dot + 1 : "text";
                     size_t k;
 
                     for (k = 0; extension[k] && k < 12; k++) row->value[k] = toupper( (unsigned char)extension[k] );

@@ -10,6 +10,7 @@
 #include <ucontext.h>
 #include <unistd.h>
 #include <vector>
+#include "fex_test_compat.h"
 
 static bool permission_mode;
 static FEXCore::Context::Context* active_context;
@@ -89,7 +90,7 @@ int main(int argc, char** argv) {
   LogMan::Throw::InstallHandler([](const char* message) { fprintf(stderr, "%s\n", message); std::abort(); });
   FEXCore::HostFeatures features {};
   features.DCacheLineLog2 = 4;
-  features.HostType = FEXCore::HostFeatures::HostTypeEnum::Wow64;
+  fex_test_set_host_type( features, FEXCore::HostFeatures::HostTypeEnum::Wow64 );
   features.CPUMIDRs.assign(4, 0x411fd071);
   Syscalls syscalls;
   FEXCore::SignalDelegator signals;

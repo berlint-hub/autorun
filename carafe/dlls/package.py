@@ -26,7 +26,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[1]
-FEX_REVISION = '395b132f346b1a45def246d10c52245edba1ef02'
+FEX_REVISION = '4f9c1f1e36443d22d7655477e34f51b95b685bf1'
 DXVK_REVISION = 'b1a1c99ab52b687cf950d62c88bc2fa316b41663'
 DXVK_DLLS = ('d3d8.dll', 'd3d9.dll', 'd3d10core.dll', 'd3d11.dll', 'dxgi.dll')
 MACHINES = {'x32': (0x014c, 0x10b), 'x64': (0x8664, 0x20b), 'arm64': (0xaa64, 0x20b)}
@@ -114,9 +114,9 @@ def pack_fex(dll, source, output, experimental=False):
         sys.exit(f'libwow64fex.dll lacks what wow64.dll asks of it: {sorted(required - exports)}')
     fex = ROOT / 'horizon-wine/fex'
     manifest = {
-        'name': name, 'version': version, 'fex': 'FEX-2609', 'revision': FEX_REVISION,
+        'name': name, 'version': version, 'fex': 'FEX-2611.1', 'revision': FEX_REVISION,
         'built_from': subprocess.check_output(['git', '-C', str(ROOT), 'rev-parse', 'HEAD'], text=True).strip(),
-        'horizon_patch_sha256': digest((fex / 'horizon.patch').read_bytes()),
+        'horizon_patch_sha256': digest((fex / 'horizon-2611.patch').read_bytes()),
         'abi_sha256': {name: digest((fex / name).read_bytes())
                        for name in ('unixlib.h', 'jit_registry.h', 'code_storage.h', 'cache_policy.h')},
         'carafe_patches': patches('fex'),

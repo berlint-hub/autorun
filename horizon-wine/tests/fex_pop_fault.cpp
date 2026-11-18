@@ -11,6 +11,7 @@
 #include <ucontext.h>
 #include <unistd.h>
 #include <vector>
+#include "fex_test_compat.h"
 
 using namespace FEXCore::X86State;
 static FEXCore::Context::Context* context;
@@ -68,7 +69,7 @@ int main(int argc, char** argv) {
   FEXCore::Config::Set(FEXCore::Config::CONFIG_TSOENABLED, "1");
   FEXCore::HostFeatures features {};
   features.DCacheLineLog2 = 4;
-  features.HostType = FEXCore::HostFeatures::HostTypeEnum::Wow64;
+  fex_test_set_host_type( features, FEXCore::HostFeatures::HostTypeEnum::Wow64 );
   features.CPUMIDRs.assign(4, 0x411fd071);
   auto owner = FEXCore::Context::Context::CreateNewContext(features);
   context = owner.get();

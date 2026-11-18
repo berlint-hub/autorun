@@ -5,29 +5,10 @@ sends the call through a dispatcher stub that finds or compiles the target, fill
 block link whose delinker clears it when the target's code goes. Off by default.
 MIT, as the files it changes.
 
-diff -ruN -x cpp-optparse -x .git a/FEXCore/include/FEXCore/Core/CoreState.h b/FEXCore/include/FEXCore/Core/CoreState.h
---- a/FEXCore/include/FEXCore/Core/CoreState.h
-+++ b/FEXCore/include/FEXCore/Core/CoreState.h
-@@ -347,6 +347,7 @@
-   uint64_t SyscallHandlerObj {};
-   uint64_t SyscallHandlerFunc {};
-   uint64_t ExitFunctionLink {};
-+  uint64_t IndirectCallLink {};
-   uint64_t MonoBackpatcherWrite {};
-   uint64_t LUDIV {};
-   uint64_t LDIV {};
-@@ -368,6 +369,7 @@
-   uint64_t DispatcherLoopTopEnterEC {};
-   uint64_t DispatcherLoopTopEnterECFillSRA {};
-   uint64_t ExitFunctionLinker {};
-+  uint64_t IndirectCallLinker {};
-   uint64_t ThreadStopHandlerSpillSRA {};
-   uint64_t ThreadPauseHandlerSpillSRA {};
-   uint64_t GuestSignal_SIGILL {};
-diff -ruN -x cpp-optparse -x .git a/FEXCore/Source/Interface/Config/Config.json.in b/FEXCore/Source/Interface/Config/Config.json.in
+diff --git a/FEXCore/Source/Interface/Config/Config.json.in b/FEXCore/Source/Interface/Config/Config.json.in
 --- a/FEXCore/Source/Interface/Config/Config.json.in
 +++ b/FEXCore/Source/Interface/Config/Config.json.in
-@@ -643,6 +643,15 @@
+@@ -710,6 +710,15 @@
            "jumps, inserts carry bits with fewer instructions and drops dead NZCV inserts and carry inversions."
          ]
        },
@@ -43,10 +24,10 @@ diff -ruN -x cpp-optparse -x .git a/FEXCore/Source/Interface/Config/Config.json.
        "StallProcess": {
          "Type": "bool",
          "Default": "false",
-diff -ruN -x cpp-optparse -x .git a/FEXCore/Source/Interface/Core/Dispatcher/Dispatcher.cpp b/FEXCore/Source/Interface/Core/Dispatcher/Dispatcher.cpp
+diff --git a/FEXCore/Source/Interface/Core/Dispatcher/Dispatcher.cpp b/FEXCore/Source/Interface/Core/Dispatcher/Dispatcher.cpp
 --- a/FEXCore/Source/Interface/Core/Dispatcher/Dispatcher.cpp
 +++ b/FEXCore/Source/Interface/Core/Dispatcher/Dispatcher.cpp
-@@ -317,6 +317,31 @@
+@@ -324,6 +324,31 @@ void Dispatcher::EmitDispatcher() {
      br(TMP1);
    }
  
@@ -78,29 +59,29 @@ diff -ruN -x cpp-optparse -x .git a/FEXCore/Source/Interface/Core/Dispatcher/Dis
    // Need to create the block
    {
      (void)Bind(&NoBlock);
-@@ -2629,6 +2654,7 @@
+@@ -2693,6 +2718,7 @@ void Dispatcher::InitThreadPointers(FEXCore::Core::InternalThreadState* Thread)
      Ptrs.DispatcherLoopTopEnterEC = AbsoluteLoopTopAddressEnterEC;
      Ptrs.DispatcherLoopTopEnterECFillSRA = AbsoluteLoopTopAddressEnterECFillSRA;
      Ptrs.ExitFunctionLinker = ExitFunctionLinkerAddress;
 +    Ptrs.IndirectCallLinker = IndirectCallLinkerAddress;
      Ptrs.ThreadStopHandlerSpillSRA = ThreadStopHandlerAddressSpillSRA;
      Ptrs.ThreadPauseHandlerSpillSRA = ThreadPauseHandlerAddressSpillSRA;
-     Ptrs.GuestSignal_SIGILL = GuestSignal_SIGILL;
-diff -ruN -x cpp-optparse -x .git a/FEXCore/Source/Interface/Core/Dispatcher/Dispatcher.h b/FEXCore/Source/Interface/Core/Dispatcher/Dispatcher.h
+     Ptrs.ThreadDispatchSyscallHandler = ThreadDispatchSyscallHandler;
+diff --git a/FEXCore/Source/Interface/Core/Dispatcher/Dispatcher.h b/FEXCore/Source/Interface/Core/Dispatcher/Dispatcher.h
 --- a/FEXCore/Source/Interface/Core/Dispatcher/Dispatcher.h
 +++ b/FEXCore/Source/Interface/Core/Dispatcher/Dispatcher.h
-@@ -82,6 +82,7 @@
-   uint64_t ThreadPauseHandlerAddress {};
-   uint64_t ThreadPauseHandlerAddressSpillSRA {};
+@@ -84,6 +84,7 @@ private:
+   uint64_t ThreadDispatchSyscallHandler {};
+   uint64_t ThreadDispatchRemoveCodeEntry {};
    uint64_t ExitFunctionLinkerAddress {};
 +  uint64_t IndirectCallLinkerAddress {};
    uint64_t SignalHandlerReturnAddress {};
    uint64_t SignalHandlerReturnAddressRT {};
    uint64_t GuestSignal_SIGILL {};
-diff -ruN -x cpp-optparse -x .git a/FEXCore/Source/Interface/Core/JIT/BranchOps.cpp b/FEXCore/Source/Interface/Core/JIT/BranchOps.cpp
+diff --git a/FEXCore/Source/Interface/Core/JIT/BranchOps.cpp b/FEXCore/Source/Interface/Core/JIT/BranchOps.cpp
 --- a/FEXCore/Source/Interface/Core/JIT/BranchOps.cpp
 +++ b/FEXCore/Source/Interface/Core/JIT/BranchOps.cpp
-@@ -212,6 +212,27 @@
+@@ -213,6 +213,27 @@ DEF_OP(ExitFunction) {
        }
      }
  
@@ -128,7 +109,7 @@ diff -ruN -x cpp-optparse -x .git a/FEXCore/Source/Interface/Core/JIT/BranchOps.
      // L1 Cache
  
      // Calculate (tmp1 + ((ripreg & L1_ENTRIES_MASK) << 4)) for the address
-@@ -231,6 +252,9 @@
+@@ -232,6 +253,9 @@ DEF_OP(ExitFunction) {
      str(RipReg.X(), STATE, offsetof(FEXCore::Core::CpuStateFrame, State.rip));
  
      (void)Bind(&SkipFullLookup);
@@ -138,29 +119,10 @@ diff -ruN -x cpp-optparse -x .git a/FEXCore/Source/Interface/Core/JIT/BranchOps.
      if (Op->Hint == IR::BranchHint::Call) {
        ARMEmitter::ForwardLabel l_CallReturn;
        if (!Op->CallReturnBlock.IsInvalid()) {
-diff -ruN -x cpp-optparse -x .git a/FEXCore/Source/Interface/Core/JIT/JITClass.h b/FEXCore/Source/Interface/Core/JIT/JITClass.h
---- a/FEXCore/Source/Interface/Core/JIT/JITClass.h
-+++ b/FEXCore/Source/Interface/Core/JIT/JITClass.h
-@@ -110,6 +110,15 @@
-   };
-   fextl::vector<PendingJumpThunk> PendingJumpThunks;
- 
-+  struct IndirectCallCacheRecord {
-+    uint64_t GuestRIP;
-+    uint64_t HostCode;
-+  };
-+  fextl::vector<ARMEmitter::ForwardLabel> PendingCallCaches;
-+  FEX_CONFIG_OPT(IndirectCallCache, INDIRECTCALLCACHE);
-+
-+  static uint64_t IndirectCallLink(FEXCore::Core::CpuStateFrame* Frame, IndirectCallCacheRecord* Record);
-+
-   Utils::PoolBufferWithTimedRetirement<uint8_t*, 5000, 500> TempCodeBufferAllocator;
- 
-   static uint64_t ExitFunctionLink(FEXCore::Core::CpuStateFrame* Frame, FEXCore::Context::ExitFunctionLinkData* Record);
-diff -ruN -x cpp-optparse -x .git a/FEXCore/Source/Interface/Core/JIT/JIT.cpp b/FEXCore/Source/Interface/Core/JIT/JIT.cpp
+diff --git a/FEXCore/Source/Interface/Core/JIT/JIT.cpp b/FEXCore/Source/Interface/Core/JIT/JIT.cpp
 --- a/FEXCore/Source/Interface/Core/JIT/JIT.cpp
 +++ b/FEXCore/Source/Interface/Core/JIT/JIT.cpp
-@@ -614,6 +614,48 @@
+@@ -623,6 +623,48 @@ uint64_t Arm64JITCore::ExitFunctionLink(FEXCore::Core::CpuStateFrame* Frame, FEX
    return HostCode;
  }
  
@@ -209,15 +171,15 @@ diff -ruN -x cpp-optparse -x .git a/FEXCore/Source/Interface/Core/JIT/JIT.cpp b/
  void Arm64JITCore::Op_NoOp(const IR::IROp_Header* IROp, IR::Ref Node) {}
  
  Arm64JITCore::Arm64JITCore(FEXCore::Context::ContextImpl* ctx, FEXCore::Core::InternalThreadState* Thread)
-@@ -665,6 +707,7 @@
-       Ptrs.SyscallHandlerFunc = PMF.GetVTableEntry(CTX->SyscallHandler);
+@@ -675,6 +717,7 @@ Arm64JITCore::Arm64JITCore(FEXCore::Context::ContextImpl* ctx, FEXCore::Core::In
      }
      Ptrs.ExitFunctionLink = reinterpret_cast<uintptr_t>(&Arm64JITCore::ExitFunctionLink);
+     Ptrs.RDRANDFallback = reinterpret_cast<uint64_t>(RDRANDFallback);
 +    Ptrs.IndirectCallLink = reinterpret_cast<uintptr_t>(&Arm64JITCore::IndirectCallLink);
-     Ptrs.LUDIV = reinterpret_cast<uint64_t>(LUDIV);
-     Ptrs.LDIV = reinterpret_cast<uint64_t>(LDIV);
    }
-@@ -885,6 +928,7 @@
+ 
+   CurrentCodeBuffer = SharedCodeBuffers.GetLatest();
+@@ -897,6 +940,7 @@ CPUBackend::CompiledCode Arm64JITCore::EmitJITCode(uint64_t Entry, uint64_t Size
    JumpTargets.clear();
    CallReturnTargets.clear();
    PendingJumpThunks.clear();
@@ -225,7 +187,7 @@ diff -ruN -x cpp-optparse -x .git a/FEXCore/Source/Interface/Core/JIT/JIT.cpp b/
    JumpTargets.resize(IR->GetHeader()->BlockCount, {});
    Relocations.resize(PrevNumAllocations, FEXCore::CPU::Relocation::Default()); // Discard any relocations generated from a previous attempt
  
-@@ -1044,6 +1088,13 @@
+@@ -1056,6 +1100,13 @@ CPUBackend::CompiledCode Arm64JITCore::EmitJITCode(uint64_t Entry, uint64_t Size
      dc64(PendingJumpThunk.CallerAddress - ThunkAddress); // CallerOffset
    }
  
@@ -239,3 +201,41 @@ diff -ruN -x cpp-optparse -x .git a/FEXCore/Source/Interface/Core/JIT/JIT.cpp b/
    BindOrRestart(&l_ExitLink);
    PlaceNamedSymbolLiteral(InsertNamedSymbolLiteral(RelocNamedSymbolLiteral::NamedSymbol::SYMBOL_LITERAL_EXITFUNCTION_LINKER));
  
+diff --git a/FEXCore/Source/Interface/Core/JIT/JITClass.h b/FEXCore/Source/Interface/Core/JIT/JITClass.h
+--- a/FEXCore/Source/Interface/Core/JIT/JITClass.h
++++ b/FEXCore/Source/Interface/Core/JIT/JITClass.h
+@@ -110,6 +110,15 @@ private:
+   };
+   fextl::vector<PendingJumpThunk> PendingJumpThunks;
+ 
++  struct IndirectCallCacheRecord {
++    uint64_t GuestRIP;
++    uint64_t HostCode;
++  };
++  fextl::vector<ARMEmitter::ForwardLabel> PendingCallCaches;
++  FEX_CONFIG_OPT(IndirectCallCache, INDIRECTCALLCACHE);
++
++  static uint64_t IndirectCallLink(FEXCore::Core::CpuStateFrame* Frame, IndirectCallCacheRecord* Record);
++
+   Utils::PoolBufferWithTimedRetirement<uint8_t*, 5000, 500> TempCodeBufferAllocator;
+ 
+   static uint64_t ExitFunctionLink(FEXCore::Core::CpuStateFrame* Frame, FEXCore::Context::ExitFunctionLinkData* Record);
+diff --git a/FEXCore/include/FEXCore/Core/CoreState.h b/FEXCore/include/FEXCore/Core/CoreState.h
+--- a/FEXCore/include/FEXCore/Core/CoreState.h
++++ b/FEXCore/include/FEXCore/Core/CoreState.h
+@@ -377,6 +377,7 @@ struct JITPointers {
+   uint64_t SyscallHandlerObj {};
+   uint64_t SyscallHandlerFunc {};
+   uint64_t ExitFunctionLink {};
++  uint64_t IndirectCallLink {};
+   uint64_t MonoBackpatcherWrite {};
+   uint64_t RDRANDFallback {};
+   uint64_t ThunkCallbackRet {};
+@@ -403,6 +404,7 @@ struct JITPointers {
+   uint64_t DispatcherLoopTopEnterEC {};
+   uint64_t DispatcherLoopTopEnterECFillSRA {};
+   uint64_t ExitFunctionLinker {};
++  uint64_t IndirectCallLinker {};
+   uint64_t ThreadStopHandlerSpillSRA {};
+   uint64_t ThreadPauseHandlerSpillSRA {};
+   uint64_t ThreadDispatchSyscallHandler {};
