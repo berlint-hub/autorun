@@ -6,11 +6,14 @@ build="${WINE_NX_FEX_CORE_BUILD_DIR:-$horizon_wine/toolchains/build-fex-2609-cor
 host_cc="${WINE_NX_HOST_CC:-/usr/bin/clang}"
 host_cxx="${WINE_NX_HOST_CXX:-/usr/bin/clang++}"
 test "$(uname -s)" = Linux && test "$(uname -m)" = aarch64
-if git -C "$source_dir" apply --reverse --check "$horizon_wine/fex/horizon.patch" 2>/dev/null; then
+# FEX-2609's Horizon patch, or another with WINE_NX_FEX_PATCH (horizon-2611.patch
+# for FEX-2611.1 in WINE_NX_FEX_DIR).
+patch="$horizon_wine/fex/${WINE_NX_FEX_PATCH:-horizon.patch}"
+if git -C "$source_dir" apply --reverse --check "$patch" 2>/dev/null; then
     :
 elif [ -z "$(git -C "$source_dir" status --porcelain)" ]; then
-    git -C "$source_dir" apply --check "$horizon_wine/fex/horizon.patch"
-    git -C "$source_dir" apply "$horizon_wine/fex/horizon.patch"
+    git -C "$source_dir" apply --check "$patch"
+    git -C "$source_dir" apply "$patch"
 else
     echo "FEX has unexpected changes; no files were reset." >&2
     exit 1

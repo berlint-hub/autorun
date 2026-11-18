@@ -15,7 +15,9 @@ assert 'ProcessHeap' not in header and 'RtlAllocateHeap' not in header
 bootstrap = (crt / 'CRT.cpp').read_text().split('void InitCRTProcess()', 1)[1]
 assert bootstrap.index('HorizonInitialize()') < bootstrap.index('RunFuncArray(')
 unix = (horizon_wine / 'source/fex_unix.c').read_text()
-heap_bridge = unix[unix.index('static NTSTATUS heap_allocate('):unix.index('const unixlib_entry_t')]
+# The heap calls only: Carafe's FEX statistics (c26b37a) follow them, with
+# Windows types this fixture does not have.
+heap_bridge = unix[unix.index('static NTSTATUS heap_allocate('):unix.index('struct wine_nx_fex_stats_area')]
 heap_bridge = heap_bridge.replace('*p = args;', '*p = static_cast<wine_nx_fex_heap*>(args);')
 fixture = r'''
 #include <atomic>

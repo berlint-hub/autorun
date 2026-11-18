@@ -300,6 +300,19 @@ a submodule at `horizon-dlls/`. That is all of system32 (ARM64X) and syswow64
 one set for the x86 and AMD64 runtimes, laid out as on the card and grouped by
 the part of Windows each file belongs to. No Autorun package carries any of it.
 
+FEX's CPU modules are a FEX release with Autorun's Horizon patch, from
+`horizon-wine/fex` with the ABI headers the runtime shares with them
+(`unixlib.h`, ABI version 3). `horizon.patch` is FEX-2609's: Autorun's DLL
+repository, Carafe's build and the experimental one (`carafe/dlls`) use it.
+`horizon-2611.patch` is its port to FEX-2611.1, which the fork of the DLL
+repository builds. Two things in it differ from a plain port. Its WoW64
+frontend keeps FEX-2609's way of suspending a thread (the interrupt fault page
+each block writes, `NeedsPendingInterruptFaultCheck`): FEX-2611 moved WoW64 to
+the CPU area's doorbell, which this Wine completes for ARM64EC only. And FEX's
+own unix calls numbered 7 and on (FEX-2611's `GetPID` and
+`CheckSupportsTPIDRRO_CPU`) are answered in the module, since those numbers are
+the runtime's (`WINE_NX_FEX_QUERY` and on).
+
 `sh build.sh` at the repository root does all of it, fetching what is missing
 (`--help` lists its options). The steps it runs, from the repository root:
 
