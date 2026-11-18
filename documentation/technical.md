@@ -191,7 +191,9 @@ repository the card follows: Autorun's, or the fork of it named in
 fork's own source. The choice is one word in `horizon-dlls/source.txt`; changing
 it only reads the other manifest, and Update then replaces the files whose size
 or SHA-256 differ, either way round. A manifest may name files in either
-repository. The card keeps the manifest it
+repository. A card that takes the whole set at once takes the fork's release,
+or Autorun's when the fork has none: its files are held to the fork's manifest
+as they are unpacked, and those that differ come one at a time. The card keeps the manifest it
 installed from in `horizon-dlls/manifest.json`, and `horizon-dlls/classes.reg`,
 the COM classes its DLLs serve, which the registry loads before `system.reg`. A
 file the runtime cannot run (a feature it does not report,

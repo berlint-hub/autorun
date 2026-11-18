@@ -142,25 +142,38 @@ static int worker( void *opaque )
          * anything newer than the release -- one file at a time. */
         if (d->plan.pending >= ARCHIVE_FILES && d->plan.pending * 2 >= d->plan.files)
         {
+            /* The fork's own release, and when it has none or it could not
+             * be downloaded, Autorun's: the fork shares most of its files,
+             * each is held to the fork's manifest as it is unpacked, and
+             * those that differ come one at a time below. Without this a
+             * card set to the fork took some 1600 files one by one. */
+            const char *const releases[2] = { d->fork ? HORIZON_DLLS_FORK_BUNDLE_URL : HORIZON_DLLS_BUNDLE_URL,
+                                              d->fork ? HORIZON_DLLS_BUNDLE_URL : NULL };
             struct horizon_dlls_bundle_stats stats = {0};
-            unsigned char *bundle;
-            unsigned long long size;
+            unsigned char *bundle = NULL;
+            unsigned long long size = 0;
+            unsigned int release;
             char line[400];
 
             /* All of it first, over every connection, a range each; then
              * unpacked from memory, each file to the card whole. */
-            set_what( d, "Downloading the Windows DLLs" );
-            d->logged_at = SDL_GetTicks();
-            d->logged_bytes = 0;
-            d->result = horizon_dlls_download( transports, connections,
-                                               d->fork ? HORIZON_DLLS_FORK_BUNDLE_URL : HORIZON_DLLS_BUNDLE_URL, &bundle, &size,
-                                               progress, d, &stats );
-            snprintf( line, sizeof(line), "[DLLS] release of %s: %s; %llu KB over %u connections in %u ms (%.0f KB/s); %s",
-                      d->fork ? "the fork" : "the repository", horizon_dlls_error( d->result ), stats.bytes >> 10,
-                      stats.connections, stats.download_ms,
-                      stats.download_ms ? (stats.bytes >> 10) * 1000.0 / stats.download_ms : 0,
-                      horizon_dlls_curl_last( &transports[0] ) );
-            wine_nx_runtime_trace( line );
+            for (release = 0; release < 2 && releases[release]; release++)
+            {
+                memset( &stats, 0, sizeof(stats) );
+                set_what( d, "Downloading the Windows DLLs" );
+                d->logged_at = SDL_GetTicks();
+                d->logged_bytes = 0;
+                d->result = horizon_dlls_download( transports, connections, releases[release], &bundle, &size,
+                                                   progress, d, &stats );
+                snprintf( line, sizeof(line), "[DLLS] release of %s: %s; %llu KB over %u connections in %u ms "
+                          "(%.0f KB/s); %s",
+                          release ? "the repository, for the fork" : d->fork ? "the fork" : "the repository",
+                          horizon_dlls_error( d->result ), stats.bytes >> 10, stats.connections, stats.download_ms,
+                          stats.download_ms ? (stats.bytes >> 10) * 1000.0 / stats.download_ms : 0,
+                          horizon_dlls_curl_last( &transports[0] ) );
+                wine_nx_runtime_trace( line );
+                if (d->result == HORIZON_DLLS_OK || d->result == HORIZON_DLLS_CANCELLED) break;
+            }
             if (d->result == HORIZON_DLLS_OK)
             {
                 set_what( d, "Unpacking the Windows DLLs" );
