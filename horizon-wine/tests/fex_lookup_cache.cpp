@@ -11,6 +11,7 @@
 #include <map>
 #include <sys/mman.h>
 #include <vector>
+#include "fex_test_compat.h"
 
 static void check(bool condition, const char* message) {
   if (!condition) { fprintf(stderr, "FEX lookup: %s\n", message); std::exit(1); }
@@ -62,7 +63,7 @@ int main(int argc, char** argv) {
   LogMan::Throw::InstallHandler([](const char* message) { fprintf(stderr, "%s\n", message); std::abort(); });
   FEXCore::HostFeatures features {};
   features.DCacheLineLog2 = 4;
-  features.HostType = FEXCore::HostFeatures::HostTypeEnum::Wow64;
+  fex_test_set_host_type( features, FEXCore::HostFeatures::HostTypeEnum::Wow64 );
   features.CPUMIDRs.assign(4, 0x411fd071);
   Syscalls syscalls;
   syscalls.wide_guest = wide;

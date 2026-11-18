@@ -24,7 +24,10 @@ cmake -S "$source_dir" -B "$build" -G Ninja \
     -DENABLE_LTO=OFF -DENABLE_OFFLINE_TELEMETRY=OFF -DBUILD_STEAM_SUPPORT=ON \
     -DCMAKE_CXX_SCAN_FOR_MODULES=OFF \
     -DCMAKE_CXX_FLAGS="-DFEX_HORIZON_CACHE_TEST -I$horizon_wine/fex"
-cmake --build "$build" --target FEXCore JemallocDummy -j "${WINE_NX_JOBS:-4}"
+# Every archive the tests link: FEX-2611 no longer builds FEXCore_Base and the
+# externals as part of FEXCore.
+cmake --build "$build" --target FEXCore FEXCore_Base JemallocDummy fmt xxhash cephes_128bit softfloat_3e \
+    -j "${WINE_NX_JOBS:-4}"
 for test in fex_pop_fault fex_lookup_cache fex_code_buffer fex_writable_code fex_segmented_cache; do
     "$host_cxx" -std=c++20 -O2 -g -Wall -Wextra -Werror \
         -DARCHITECTURE_arm64=1 -DFEX_DISABLE_TELEMETRY=1 -DFEX_HORIZON_CACHE_TEST \
