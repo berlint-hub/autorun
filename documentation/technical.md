@@ -306,18 +306,28 @@ the part of Windows each file belongs to. No Autorun package carries any of it.
 ```sh
 docker run --rm -v "$PWD:/work" -w /work -e DEVKITPRO=/opt/devkitpro-release "$(cat horizon-wine/switch-dev.txt)" \
     sh horizon-wine/build-boot-bundle.sh         # Atmosphere 1.11.2 and HOC boot payloads, once
+sh horizon-wine/build-mesa-switch.sh              # mesa-switch newer than the image's, once per pinned commit
 WINE_NX_LLVM_MINGW="$PWD/horizon-wine/toolchains/llvm-mingw-20260505-ucrt-macos-universal" \
 WINE_NX_FEX=1 WINE_NX_DXVK=1 WINE_NX_VKD3D=1 \
+WINE_NX_MESA_SWITCH_DIR=/work/horizon-wine/vendor/mesa-switch/pkg/lib \
     sh horizon-wine/build-amd64-components.sh    # the AMD64 NRO, and the build-wine-amd64-pe tree
 horizon-dlls/tools/build-dlls.py                  # the DLL repository: what changed since its manifest
 python3 horizon-wine/tools/package-autorun.py    # the card: autorun-NNN.zip, with the AMD64 runtime
 ```
 
-The runtime links mesa-switch, LSFG-VK and libusbhsfs from the image's portlibs;
-a build records the image's revisions (`switch-dev.json` in the build folder)
-in the package's `build-manifest.json`. `WINE_NX_MESA_SWITCH_DIR` links another
-mesa-switch build instead. A change to Mesa, LSFG-VK's port or libusbhsfs's
-UASP patches is made in switch-dev and comes with a new image.
+The runtime links LSFG-VK and libusbhsfs from the image's portlibs, and
+mesa-switch from `horizon-wine/vendor/mesa-switch/pkg`: `build-mesa-switch.sh`
+builds the commit it pins (berlint-hub/mesa-switch, Mesa 26.2.4 and the Horizon
+fixes after the image's d4a00ea) in the image, with the image's own recipe
+(`/usr/local/share/switch-dev/mesa-build.sh`), and stages the archives and the
+headers that changed. `WINE_NX_MESA_SWITCH_DIR` names the folder of archives,
+as a path in the build container; `build.sh --image-mesa` links the image's
+portlibs instead, as `build.sh` does when the newer one cannot be built. A build
+records the image's revisions (`switch-dev.json` in the build folder) in the
+package's `build-manifest.json`, with the commit of the mesa-switch it linked. A
+change to LSFG-VK's port or libusbhsfs's UASP patches is made in switch-dev and
+comes with a new image; a newer mesa-switch is a new commit in
+`build-mesa-switch.sh`.
 
 `package-autorun.py` is what a card wants, with the DLL repository's `switch`
 folder beside it: the runtime, Wine's NLS files and fonts, Autorun's setup

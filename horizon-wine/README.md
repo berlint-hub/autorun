@@ -87,8 +87,14 @@ From the repository root, with the requirements in
 [technical.md](../documentation/technical.md#building). The Switch build runs in
 the [switch-dev](https://github.com/autorunhq/switch-dev) image named in
 `switch-dev.txt`, which has libnx, mesa-switch, LSFG-VK and libusbhsfs built in.
+The runtime links a newer mesa-switch than the image's: `build-mesa-switch.sh`
+builds the commit it pins in that image, with the image's own recipe, into
+`vendor/mesa-switch/pkg`, and `build.sh` does so first (`--image-mesa` links the
+image's instead).
 
 ```sh
+sh horizon-wine/build-mesa-switch.sh            # mesa-switch newer than the image's, once per pinned commit
+WINE_NX_MESA_SWITCH_DIR=/work/horizon-wine/vendor/mesa-switch/pkg/lib \
 sh horizon-wine/build-amd64-components.sh       # AMD64 runtime and the Wine tree (see technical.md for its environment)
 python3 horizon-wine/tools/package-autorun.py   # autorun-NNN.zip
 
