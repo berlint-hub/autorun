@@ -306,13 +306,20 @@ FEX's CPU modules are a FEX release with Autorun's Horizon patch, from
 repository uses it. `horizon-2611.patch` is its port to FEX-2611.1, which the
 fork of the DLL repository builds, and so do Carafe's build and the
 experimental one (`carafe/dlls`), whose series was carried to FEX-2611.1 with
-it. Two things in it differ from a plain port. Its WoW64
+it. Three things in it differ from a plain port. Its WoW64
 frontend keeps FEX-2609's way of suspending a thread (the interrupt fault page
 each block writes, `NeedsPendingInterruptFaultCheck`): FEX-2611 moved WoW64 to
 the CPU area's doorbell, which this Wine completes for ARM64EC only. And FEX's
 own unix calls numbered 7 and on (FEX-2611's `GetPID` and
 `CheckSupportsTPIDRRO_CPU`) are answered in the module, since those numbers are
-the runtime's (`WINE_NX_FEX_QUERY` and on).
+the runtime's (`WINE_NX_FEX_QUERY` and on). And FEX-2611's RDRAND fallback for
+Windows seeds itself, when the module is loaded, from
+`__builtin_readcyclecounter()`, which reads CNTVCT_EL0: Horizon does not let a
+program read the virtual counter, so the module trapped with an illegal
+instruction before any program code ran. On Horizon it reads CNTPCT_EL0, as
+the patch's other counter reads do. `fex_payload.py` in the DLL fork and
+`carafe/dlls/package.py` reject a module with any access to the virtual
+counter or timer.
 
 `sh build.sh` at the repository root does all of it, fetching what is missing
 (`--help` lists its options). The steps it runs, from the repository root:

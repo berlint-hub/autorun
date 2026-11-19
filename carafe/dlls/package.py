@@ -95,6 +95,31 @@ def write_archive(output, top, files):
     return path
 
 
+# Horizon does not let a program read the virtual counter or touch the virtual
+# timer (CNTKCTL_EL1 keeps EL0VCTEN and EL0VTEN off): such an instruction traps
+# as an illegal one, as FEX-2611's RDRAND fallback did when its module was
+# loaded (__builtin_readcyclecounter() reads CNTVCT_EL0). MRS and MSR of op0 3,
+# op1 3, CRn 14: CNTVCT_EL0, CNTVCTSS_EL0 and the CNTV_* timer registers.
+VIRTUAL_COUNTER_ACCESS = ((0xFFDFFFE0, 0xD51BE040, 'CNTVCT_EL0'), (0xFFDFFFE0, 0xD51BE0C0, 'CNTVCTSS_EL0'),
+                          (0xFFDFFF00, 0xD51BE300, 'CNTV_*_EL0'))
+
+
+def virtual_counter_accesses(data):
+    """The instructions in a PE image's executable sections that Horizon traps."""
+    offset = struct.unpack_from('<I', data, 0x3c)[0]
+    sections = offset + 24 + struct.unpack_from('<H', data, offset + 20)[0]
+    found = []
+    for section in range(struct.unpack_from('<H', data, offset + 6)[0]):
+        size, rva, raw_size, raw = struct.unpack_from('<IIII', data, sections + section * 40 + 8)
+        if not struct.unpack_from('<I', data, sections + section * 40 + 36)[0] & 0x20000000:
+            continue
+        for at in range(raw, min(raw + min(size, raw_size), len(data)) - 3, 4):
+            word = struct.unpack_from('<I', data, at)[0]
+            found += [(rva + at - raw, register) for mask, value, register in VIRTUAL_COUNTER_ACCESS
+                      if word & mask == value]
+    return found
+
+
 def pack_fex(dll, source, output, experimental=False):
     version = versions()['fex-experimental' if experimental else 'fex']
     name = 'fex-experimental' if experimental else 'fex-carafe'
@@ -102,6 +127,10 @@ def pack_fex(dll, source, output, experimental=False):
     output.mkdir(parents=True, exist_ok=True)
     subprocess.run([tool('llvm-strip'), '--strip-debug', '-o', str(stripped), str(dll)], check=True)
     data = check_image(stripped, 'arm64')
+    trapped = virtual_counter_accesses(data)
+    if trapped:
+        sys.exit('libwow64fex.dll reads registers Horizon does not let a program read: ' +
+                 ', '.join(f'{register} at RVA {rva:#x}' for rva, register in trapped[:4]))
     info = subprocess.check_output([tool('llvm-readobj'), '--coff-imports', '--coff-exports', str(stripped)],
                                    text=True)
     imports = set(re.findall(r'Import \{\n  Name: (.+)', info))
