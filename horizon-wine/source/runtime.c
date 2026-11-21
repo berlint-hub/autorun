@@ -1246,14 +1246,43 @@ void wine_nx_cursor_bitmap( uint32_t *rgba )
 }
 
 /* The floating keyboard (osk.c) draws its labels with the console's own font,
- * which stays mapped for as long as the service is open. */
+ * which stays mapped for as long as the service is open; so do Carafe's
+ * loading and error screens and its menu (carafe_draw.c, carafe_loading.c).
+ *
+ * It is closed when this program ends. The programs of a card run one after
+ * another in the loader's one process (the launcher, a game on either
+ * runtime, the error screen), and a service a program leaves open stays open
+ * in it: every one that showed the loading screen left a pl:u session and the
+ * 17 MB the fonts are mapped in behind. The service has few sessions to give,
+ * overlays hold some, and once they ran out the next launcher stopped at
+ * "bringing the screen up: the shared font" until Autorun was closed from
+ * HOME -- after a game had failed on the nxvk runtime and the error screen
+ * had been shown. */
+static pthread_mutex_t osk_font_mutex = PTHREAD_MUTEX_INITIALIZER;
+static int osk_font_service;
+
+static void osk_font_release( void )
+{
+    if (pthread_mutex_trylock( &osk_font_mutex )) return;
+    if (osk_font_service) plExit();
+    osk_font_service = 0;
+    pthread_mutex_unlock( &osk_font_mutex );
+}
+
 int wine_nx_osk_font( const void **data, size_t *size )
 {
-    static int opened;
     PlFontData font;
 
-    if (!opened && R_FAILED( plInitialize( PlServiceType_User ) )) return 0;
-    opened = 1;
+    pthread_mutex_lock( &osk_font_mutex );
+    if (!osk_font_service && R_SUCCEEDED( plInitialize( PlServiceType_User ) ))
+    {
+        static int registered;
+
+        osk_font_service = 1;
+        if (!registered++) atexit( osk_font_release );
+    }
+    pthread_mutex_unlock( &osk_font_mutex );
+    if (!osk_font_service) return 0;
     if (R_FAILED( plGetSharedFontByType( &font, PlSharedFontType_Standard ) ) || !font.address) return 0;
     *data = font.address;
     *size = font.size;

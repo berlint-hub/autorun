@@ -1,5 +1,6 @@
 #include <pthread.h>
 #include <stdint.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include <switch.h>
@@ -50,10 +51,38 @@ static bool g_face_tried[FaceCount];
 static PlFontData g_face_data[FaceCount];
 static bool g_face_loaded[FaceCount];
 
+/* When the program ends, the fonts are closed and the service with them: the
+ * loader's process outlives the program, and a pl:u session left open there
+ * stays open for the programs after it (wine_nx_osk_font in runtime.c). */
+static void textShutdown(void) {
+    if (pthread_mutex_trylock(&g_lock) != 0) {
+        return;
+    }
+    for (int i = 0; i < FACE_SLOTS; i++) {
+        if (g_slots[i].font != NULL) {
+            TTF_CloseFont(g_slots[i].font);
+            g_slots[i].font = NULL;
+        }
+    }
+    g_next = 0;
+    if (g_service_ready) {
+        plExit();
+    }
+    g_service_tried = g_service_ready = false;
+    memset(g_face_tried, 0, sizeof(g_face_tried));
+    memset(g_face_loaded, 0, sizeof(g_face_loaded));
+    pthread_mutex_unlock(&g_lock);
+}
+
 static bool faceLoaded(Face face) {
     if (!g_service_tried) {
+        static bool registered;
         g_service_tried = true;
         g_service_ready = R_SUCCEEDED(plInitialize(PlServiceType_User));
+        if (g_service_ready && !registered) {
+            registered = true;
+            atexit(textShutdown);
+        }
     }
     if (!g_service_ready) {
         return false;
