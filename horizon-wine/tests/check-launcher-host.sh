@@ -92,6 +92,12 @@ clang -std=gnu11 -Wall -Wextra -Werror -O1 -g -fsanitize=address,undefined -fno-
 python3 "$horizon_wine/tools/make-embed.py" "$build/forwarder-icon.c" \
     wine_nx_icon_any "$horizon_wine/assets/autorun.jpg" \
     wine_nx_joycons "$horizon_wine/assets/controls/joycons.png"
+# A program set to the newest of Carafe's FEX builds starts on the newest release.
+clang -std=gnu11 -Wall -Wextra -Werror -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer \
+    -I "$horizon_wine/source" $(sdl2-config --cflags) -I/opt/homebrew/include \
+    "$horizon_wine/tests/launcher_fex_upgrade.c" "$horizon_wine/source/launcher_graphics.c" "$horizon_wine/source/dxvk_options.c" \
+    $(sdl2-config --libs) -o "$build/launcher_fex_upgrade"
+"$build/launcher_fex_upgrade"
 clang -std=gnu11 -Wall -Wextra -Werror -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer \
     -I "$horizon_wine/source" $(sdl2-config --cflags) -I/opt/homebrew/include -I/opt/homebrew/opt/openssl/include \
     "$horizon_wine/tests/launcher_host.c" "$horizon_wine/source/launcher.c" "$horizon_wine/source/launcher_catalog.c" "$horizon_wine/source/launcher_ui.c" "$horizon_wine/source/launcher_audio.c" \
