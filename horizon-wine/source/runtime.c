@@ -824,11 +824,28 @@ void wine_nx_input_profile_get( struct input_profile *out )
     pthread_mutex_unlock( &wine_nx_input_profile_mutex );
 }
 
+/* Said where the profile is set (the program's settings as it starts, the
+ * settings menu later), and again when what it says changes. Said from the
+ * input thread's first poll, it showed zeros whenever that poll came before the
+ * program's settings were read, as if the stick could not move the cursor. */
 void wine_nx_input_profile_set( const struct input_profile *in )
 {
+    static int told, told_mode, told_speed, told_deadzone[2];
+    int tell;
+
     pthread_mutex_lock( &wine_nx_input_profile_mutex );
     wine_nx_input_profile = *in;
+    tell = !told || in->mode != told_mode || in->mouse_speed != told_speed ||
+           in->deadzone[0] != told_deadzone[0] || in->deadzone[1] != told_deadzone[1];
+    told = 1;
+    told_mode = in->mode;
+    told_speed = in->mouse_speed;
+    told_deadzone[0] = in->deadzone[0];
+    told_deadzone[1] = in->deadzone[1];
     pthread_mutex_unlock( &wine_nx_input_profile_mutex );
+    if (tell)
+        log_line( "[POINTER] input mode %d, mouse speed %d, deadzone %d/%d",
+                  in->mode, in->mouse_speed, in->deadzone[0], in->deadzone[1] );
 }
 
 /***********************************************************************
@@ -1655,20 +1672,10 @@ int wine_nx_pointer_poll( int *x, int *y, unsigned int *buttons )
             wine_nx_compositor_redraw();
         }
     }
-    /* Said once: the profile in force decides whether the stick may move the
-     * cursor at all, and a finger is the one pointer that should always
-     * work. */
+    /* The profile in force decides whether the stick may move the cursor at
+     * all, and a finger is the one pointer that should always work. Its
+     * [POINTER] line is said where it is set (wine_nx_input_profile_set). */
     wine_nx_input_profile_get( &profile );
-    {
-        static int profile_told;
-
-        if (!profile_told)
-        {
-            profile_told = 1;
-            log_line( "[POINTER] input mode %d, mouse speed %d, deadzone %d/%d",
-                      profile.mode, profile.mouse_speed, profile.deadzone[0], profile.deadzone[1] );
-        }
-    }
     emulate = !keyboard && !controls_open && !tasks_open && profile.mode == INPUT_KEYBOARD_MOUSE;
 
     /* A mouse plugged into the dock reports relative deltas and wheel turns so
