@@ -1098,6 +1098,13 @@ void dxvk_resolve_version( enum dxvk_source source, const char *runtime_dir, uns
     backend_resolve_version( dxvk_backends[source], runtime_dir, machine, requested, selected );
 }
 
+int dxvk_release_newer( enum dxvk_source source, const char *candidate, const char *installed )
+{
+    return source >= 0 && source < DXVK_BACKEND_COUNT && candidate && installed &&
+           backend_stable_version( dxvk_backends[source], candidate ) &&
+           (!installed[0] || compare_versions( candidate, installed ) > 0);
+}
+
 int dxvk_release_path( enum dxvk_source source, const char *runtime_dir, unsigned short machine, const char *version,
                        char *path, size_t size )
 {

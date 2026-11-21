@@ -433,13 +433,71 @@ int launcher_graphics_ensure( struct launcher_graphics *g, unsigned short machin
     return 1;
 }
 
+/* A program set to the newest of Carafe's FEX builds starts on the newest
+ * release, not only the newest one on the card: a fix comes out as a new
+ * release (2611-2 for 2611-1, whose module could not load on a console), and
+ * the card kept the broken one until a version was chosen by hand. The
+ * releases are looked up as the program starts, for a few seconds at most;
+ * without a network it starts on what is installed, as before. A version
+ * chosen in the game's settings is kept. */
+#define FEX_CHECK_MS 4000
+
+static const struct dxvk_release *newer_fex_release( struct launcher_graphics *g, enum dxvk_source source,
+                                                     const char *installed )
+{
+    const struct dxvk_release *newest = NULL;
+    struct graphics_catalog *c;
+    int i;
+
+    if (!(c = open_catalog( g, 0, source ))) return NULL;
+    if (c->thread)
+    {
+        Uint32 start = SDL_GetTicks();
+        char title[96];
+
+        snprintf( title, sizeof(title), "Starting with %s", backend_name( 0, source ) );
+        ui_progress_begin( g->ui );
+        /* Not ui_wait: with nothing moving it sleeps until the next event, and
+         * a stalled connection would hold the start past the limit. The
+         * progress screen reads the input on each round. */
+        while (c->thread && g->ui->running && !SDL_TICKS_PASSED( SDL_GetTicks(), start + FEX_CHECK_MS ))
+        {
+            ui_progress_update( g->ui, title, "Checking for a newer build...", 0, 0 );
+            poll_catalog( c );
+            if (c->thread) SDL_Delay( 50 );
+        }
+        ui_progress_end( g->ui );
+        /* Still asking, it goes on in the background, and the list the card
+         * kept is what there is: the worker fills its own copy, not this. */
+    }
+    for (i = 0; i < c->count; i++)
+    {
+        const struct dxvk_release *release = c->releases + i;
+
+        if (release->prerelease || !launcher_dxvk_version_selectable( release->version )) continue;
+        if (dxvk_release_newer( source, release->version, newest ? newest->version : installed )) newest = release;
+    }
+    return newest;
+}
+
 int launcher_graphics_ensure_fex( struct launcher_graphics *g, int build, char version[32] )
 {
+    enum dxvk_source source = DXVK_FEX_BACKEND( build );
     char fex[32];
 
     if (!g) return 0;
     strcpy( fex, version );
-    if (!ensure_backend( g, 0x014c, 0, 0, DXVK_FEX_BACKEND( build ), fex )) return 0;
+    if (!fex[0])
+    {
+        struct dxvk_version selected;
+        const struct dxvk_release *release;
+
+        resolve_version( g, 0x014c, 0, source, "", &selected );
+        if (selected.installed && g->ui->running &&
+            (release = newer_fex_release( g, source, selected.version )) &&
+            !install_release( g, 0, source, release ) && !g->ui->running) return 0;
+    }
+    if (!ensure_backend( g, 0x014c, 0, 0, source, fex )) return 0;
     strcpy( version, fex );
     return 1;
 }

@@ -83,6 +83,9 @@ int dxvk_root_version( enum dxvk_source source, const char *runtime_dir, unsigne
 void dxvk_resolve_version( enum dxvk_source source, const char *runtime_dir, unsigned short machine, const char *requested,
                            struct dxvk_version *selected );
 const char *dxvk_result_message( enum dxvk_result result );
+/* Whether candidate is a stable release of the source newer than installed
+ * (any stable one when installed is empty), in the version menus' order. */
+int dxvk_release_newer( enum dxvk_source source, const char *candidate, const char *installed );
 /* The folder a release of a source is installed in, or its bundled one when
  * version is empty. */
 int dxvk_release_path( enum dxvk_source source, const char *runtime_dir, unsigned short machine, const char *version,

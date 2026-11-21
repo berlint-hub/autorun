@@ -353,6 +353,7 @@ already does it for DXVK, Sarek, GPLAsync and VKD3D-Proton.
 | **Game Settings, Graphics, DXVK version, DXVK Carafe**; `dxvk-source=carafe` in a program's settings; installed in `drive_c/dxvk-carafe` and `dxvk-carafe64` | `launcher_graphics.c`, `launcher_settings.h`, `launcher.c` |
 | **Game Settings, Emulation, FEX build** (32-bit programs on FEX): Autorun or Carafe; `fex-build=carafe` and `fex-version=`; installed in `drive_c/fex-carafe/versions` | `launcher_graphics.c`, `launcher_settings.h`, `launcher.c` |
 | The FEX a program is set to is the file in system32 when it starts, and the stock one is back when the launcher opens | `horizon-wine/source/fex_build.c`, `runtime.c`, `launcher.c` |
+| A program set to the newest release of Carafe's or the experimental build (`fex-version=` empty) starts on the newest release, not only the newest on the card: a newer stable one in the release list is installed as it starts, with four seconds at most to ask; a version chosen by hand is kept | `horizon-wine/source/launcher_graphics.c` (`launcher_graphics_ensure_fex`), `tests/launcher_fex_upgrade.c` |
 | The ten DXVK options only Carafe's build reads (patches `0060`, `0068`–`0071`, `0082`), shown and written for that source only | `horizon-wine/source/dxvk_options.c` |
 | The twelve FEX options (patches `0051`, `0054`, `0056`, `0057`, `0059`, `0073`–`0075`, `0077`), the same rows and defaults as Carafe's, shown and passed only to Carafe's build | `horizon-wine/source/fex_options.h` |
 

@@ -213,6 +213,13 @@ const char *dxvk_result_message( enum dxvk_result result )
     return "DXVK is unavailable in the host launcher test.";
 }
 
+/* The stand-in catalog's versions only grow; its prereleases end in -rc1. */
+int dxvk_release_newer( enum dxvk_source source, const char *candidate, const char *installed )
+{
+    (void)source;
+    return candidate && installed && !strstr( candidate, "-rc" ) && strcmp( candidate, installed ) > 0;
+}
+
 enum dxvk_result vkd3d_release_catalog( const char *runtime_dir, struct dxvk_release *releases,
                                        int max_releases, int *count, int cache_only,
                                        dxvk_progress_callback progress, void *opaque )

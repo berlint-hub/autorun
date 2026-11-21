@@ -250,6 +250,14 @@ static void test_catalog(void)
     assert( !backend_stable_version( &fex_carafe_backend, "2609-rc1" ) );
     assert( compare_versions( "2609-2", "2609-1" ) > 0 && compare_versions( "2610-1", "2609-9" ) > 0 );
     assert( compare_versions( "3.1.1-10", "3.1.1-9" ) > 0 );
+    /* What the launcher takes as a newer build for a program set to the newest. */
+    assert( dxvk_release_newer( DXVK_BACKEND_FEX_EXPERIMENTAL, "2611-2", "2611-1" ) );
+    assert( dxvk_release_newer( DXVK_BACKEND_FEX_CARAFE, "2611-1", "2609-6" ) );
+    assert( dxvk_release_newer( DXVK_BACKEND_FEX_CARAFE, "2611-1", "" ) );
+    assert( !dxvk_release_newer( DXVK_BACKEND_FEX_CARAFE, "2611-1", "2611-1" ) );
+    assert( !dxvk_release_newer( DXVK_BACKEND_FEX_CARAFE, "2609-6", "2611-1" ) );
+    assert( !dxvk_release_newer( DXVK_BACKEND_FEX_EXPERIMENTAL, "2611-rc1", "2611-1" ) );
+    assert( !dxvk_release_newer( DXVK_BACKEND_COUNT, "2611-2", "2611-1" ) );
 }
 
 static void test_installed( const char *root )
