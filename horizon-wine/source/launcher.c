@@ -284,6 +284,9 @@ int launcher_platform_font( const void **data, size_t *size )
 
     if (R_FAILED( plInitialize( PlServiceType_User ) )) return 0;
     font_service = 1;
+    /* Said apart from the step before: opening the service waits for a free
+     * session, and the font for the service to have loaded it. */
+    launcher_log( "[LAUNCHER] bringing the screen up: the shared font's service is open" );
     if (R_FAILED( plGetSharedFontByType( &font, PlSharedFontType_Standard ) ) || !font.address) return 0;
     *data = font.address;
     *size = font.size;
