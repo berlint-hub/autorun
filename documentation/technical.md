@@ -319,7 +319,11 @@ program read the virtual counter, so the module trapped with an illegal
 instruction before any program code ran. On Horizon it reads CNTPCT_EL0, as
 the patch's other counter reads do. `fex_payload.py` in the DLL fork and
 `carafe/dlls/package.py` reject a module with any access to the virtual
-counter or timer.
+counter or timer. Should a CPU module still take an illegal instruction in its
+own code (`dlls/ntdll/unix/horizon.c`, `horizon_cpu_module_cannot_run`), the
+program ends with `0xc000001d` and the error screen names the module and the
+offset; handed to the program, that fault had left Wine's dispatcher going
+round at 100% with nothing on the screen.
 
 `sh build.sh` at the repository root does all of it, fetching what is missing
 (`--help` lists its options). The steps it runs, from the repository root:

@@ -1022,7 +1022,8 @@ void carafeErrorException(unsigned int code, const void* address) {
     if (wine_nx_image_at != NULL) {
         void* base = NULL;
         char name[NAME_SIZE];
-        if (wine_nx_image_at(address, &base, name, sizeof(name)) == 0) {
+        /* Nonzero when an image is mapped there, as for every other caller. */
+        if (wine_nx_image_at(address, &base, name, sizeof(name))) {
             if (name[0] == '\0') {
                 gameExecutable(name, sizeof(name));
             }
