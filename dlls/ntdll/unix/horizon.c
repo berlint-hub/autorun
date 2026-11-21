@@ -19626,6 +19626,55 @@ static void horizon_trace_native_program_fault( const ThreadExceptionDump *ctx )
     horizon_trace_native_backtrace( ctx );
 }
 
+#if defined(__aarch64__)
+/* An instruction the console cannot run, in the code of the CPU module itself
+ * (FEX's libwow64fex.dll or libarm64ecfex.dll): the module is not built for
+ * the Switch, and every program on it stops there. FEX-2611's modules read
+ * CNTVCT_EL0, which Horizon does not let a program read, while loading. Handed
+ * to the program, the fault never came back: Wine's dispatcher unwound from
+ * the module into the runtime's own frames and went round there at 100% for
+ * good, with nothing on the screen. FEX puts the undefined instructions it
+ * means to fault on (a guest's UD, the ARM64EC suspend trap) in the code it
+ * translates, never in its own image, so an illegal instruction there is
+ * always this. The program ends with it instead, and the error screen names
+ * the module and the place. */
+extern BOOL wine_nx_image_at( const void *addr, void **base, char *name, size_t size );
+static ULONG_PTR horizon_cpu_module_fault_pc;
+
+static BOOL horizon_cpu_module_cannot_run( const ThreadExceptionDump *ctx )
+{
+    char name[64], buf[400];
+    void *base;
+
+    if (!wine_nx_image_at( (const void *)(ULONG_PTR)ctx->pc.x, &base, name, sizeof(name) )) return FALSE;
+    if (strcasecmp( name, "libwow64fex.dll" ) && strcasecmp( name, "libarm64ecfex.dll" )) return FALSE;
+    snprintf( buf, sizeof(buf),
+              "[FAIL] %s cannot run on this console: its instruction %#010x at %s+%#llx traps (esr=%#x). "
+              "Set the game's FEX build to another one, or the CPU to Box64",
+              name, *(const unsigned int *)(ULONG_PTR)ctx->pc.x, name,
+              (unsigned long long)(ctx->pc.x - (ULONG_PTR)base), (unsigned int)ctx->esr );
+    wine_nx_runtime_trace( buf );
+    horizon_cpu_module_fault_pc = ctx->pc.x;
+    return TRUE;
+}
+
+/* Runs on the faulting thread's own stack, as horizon_native_failure_exit. */
+static void horizon_cpu_module_failure_exit( void )
+{
+    extern unsigned int wine_nx_program_exit_code __attribute__((weak));
+    extern void carafeErrorException( unsigned int code, const void *address ) __attribute__((weak));
+    extern void wine_nx_request_quit( const char *why ) __attribute__((weak));
+    extern void wine_nx_quit_point( void ) __attribute__((weak));
+
+    if (carafeErrorException)
+        carafeErrorException( STATUS_ILLEGAL_INSTRUCTION, (const void *)horizon_cpu_module_fault_pc );
+    if (&wine_nx_program_exit_code) wine_nx_program_exit_code = STATUS_ILLEGAL_INSTRUCTION;
+    if (wine_nx_request_quit) wine_nx_request_quit( "the CPU module cannot run on this console" );
+    if (wine_nx_quit_point) wine_nx_quit_point();
+    for (;;) svcSleepThread( 1000ULL * 1000ULL * 1000ULL );
+}
+#endif
+
 void __libnx_exception_handler( ThreadExceptionDump *ctx )
 {
     EXCEPTION_RECORD rec = { 0 };
@@ -19728,6 +19777,15 @@ void __libnx_exception_handler( ThreadExceptionDump *ctx )
             break;
         }
         if (rec.ExceptionCode != STATUS_ACCESS_VIOLATION) rec.NumberParameters = 0;
+        if (rec.ExceptionCode == STATUS_ILLEGAL_INSTRUCTION && exception_class != 0x3c &&
+            horizon_cpu_module_cannot_run( ctx ))
+        {
+            ctx->sp.x = (ctx->sp.x - 0x400) & ~(u64)15;
+            ctx->fp.x = 0;
+            ctx->lr.x = 0;
+            ctx->pc.x = (ULONG_PTR)horizon_cpu_module_failure_exit;
+            horizon_resume_exception( ctx );
+        }
         status = rec.ExceptionCode == STATUS_ACCESS_VIOLATION ?
                  virtual_handle_fault( data, &rec, (void *)ctx->sp.x ) : rec.ExceptionCode;
         if (!status) horizon_resume_exception( ctx );
