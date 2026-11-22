@@ -158,6 +158,34 @@ my %manual_win_functions =
      "wglUseFontOutlinesA" => 1,
      "wglUseFontOutlinesW" => 1,
     );
+# Calls a 32-bit program makes thousands of times a frame that only set the
+# current context's state: binds, enables, array pointers, program parameters,
+# blending, depth and stencil (Doom 3 makes some 25000 calls a frame, most of
+# them these). The PE side keeps them in a batch of its thread's and sends the
+# batch across the WoW64 unix boundary in one call, before the next call that
+# is not one of them (wgl.c, defer_call): every UNIX_CALL sends it first, so the
+# host sees the calls in the program's order. Each returns nothing, and reads
+# nothing of the program's memory when it is made but the array named here,
+# which goes into the batch with it; an array pointer (glVertexPointer) is a
+# value until a draw call, which is not deferred.
+my %deferred_calls =
+    (
+     "glActiveTexture" => "", "glActiveTextureARB" => "",
+     "glClientActiveTexture" => "", "glClientActiveTextureARB" => "",
+     "glBindTexture" => "", "glBindBuffer" => "", "glBindBufferARB" => "", "glBindProgramARB" => "",
+     "glEnable" => "", "glDisable" => "", "glEnableClientState" => "", "glDisableClientState" => "",
+     "glEnableVertexAttribArray" => "", "glEnableVertexAttribArrayARB" => "",
+     "glDisableVertexAttribArray" => "", "glDisableVertexAttribArrayARB" => "",
+     "glVertexAttribPointer" => "", "glVertexAttribPointerARB" => "",
+     "glVertexPointer" => "", "glNormalPointer" => "", "glColorPointer" => "", "glTexCoordPointer" => "",
+     "glProgramEnvParameter4fARB" => "", "glProgramEnvParameter4fvARB" => "params:4 * sizeof(GLfloat)",
+     "glBlendFunc" => "", "glDepthFunc" => "", "glDepthMask" => "", "glColorMask" => "",
+     "glCullFace" => "", "glFrontFace" => "", "glShadeModel" => "", "glAlphaFunc" => "", "glPolygonOffset" => "",
+     "glStencilFunc" => "", "glStencilOp" => "", "glStencilMask" => "",
+     "glColor4f" => "", "glColor4fv" => "v:4 * sizeof(GLfloat)", "glColor4ub" => "", "glColor4ubv" => "v:4 * sizeof(GLubyte)",
+     "glMatrixMode" => "", "glLoadIdentity" => "", "glLoadMatrixf" => "m:16 * sizeof(GLfloat)",
+     "glTexEnvi" => "", "glTexEnvf" => "",
+    );
 my %manual_win_thunks =
     (
      "glCreateSyncFromCLeventARB" => 1,
@@ -879,7 +907,18 @@ sub generate_win_thunk($$)
     $ret .= "    " . get_func_trace( $name, $func, 1 );
     $ret .= $checks;
     $ret .= $map_args;
-    $ret .= "    if ((status = UNIX_CALL( $name, &args ))) WARN( \"$name returned %#lx\\n\", status );\n";
+    if (defined $deferred_calls{$name})
+    {
+        my ($field, $size) = split /:/, $deferred_calls{$name};
+        die "$name is not a void function" unless is_void_func($func);
+        die "$name has checks or post-call work" if $get_integer;
+        if ($field) { $ret .= "    if ((status = UNIX_DEFER_DATA( $name, &args, $field, $size ))) WARN( \"$name returned %#lx\\n\", status );\n"; }
+        else { $ret .= "    if ((status = UNIX_DEFER( $name, &args ))) WARN( \"$name returned %#lx\\n\", status );\n"; }
+    }
+    else
+    {
+        $ret .= "    if ((status = UNIX_CALL( $name, &args ))) WARN( \"$name returned %#lx\\n\", status );\n";
+    }
     $ret .= "    else $get_integer\n" if $get_integer;
     $ret .= $post_call;
     $ret .= "    return args.ret;\n" unless is_void_func($func);
@@ -1805,6 +1844,13 @@ print OUT "    unsigned int num_formats;\n";
 print OUT "    unsigned int num_onscreen_formats;\n";
 print OUT "};\n\n";
 
+print OUT "struct flush_calls_params\n";
+print OUT "{\n";
+print OUT "    TEB *teb;\n";
+print OUT "    void *data;\n";
+print OUT "    unsigned int size;\n";
+print OUT "};\n\n";
+
 print OUT "enum unix_funcs\n";
 print OUT "{\n";
 print OUT "    unix_process_attach,\n";
@@ -1827,6 +1873,7 @@ foreach (sort keys %ext_functions)
     next if defined $manual_win_functions{$_};
     printf OUT "    unix_%s,\n", $_;
 }
+print OUT "    unix_flush_calls,\n";
 print OUT "    funcs_count\n";
 print OUT "};\n\n";
 
@@ -2076,13 +2123,15 @@ foreach (sort keys %ext_functions)
     next if defined $manual_win_functions{$_};
     printf OUT "    ext_%s,\n", $_;
 }
+print OUT "    flush_calls,\n";
 print OUT "};\n\n";
 print OUT "C_ASSERT(ARRAYSIZE(__wine_unix_call_funcs) == funcs_count);\n\n";
 
 print OUT "#ifdef _WIN64\n\n";
 print OUT "extern NTSTATUS wow64_thread_attach( void *args );\n";
 print OUT "extern NTSTATUS wow64_process_detach( void *args );\n";
-print OUT "extern NTSTATUS wow64_get_pixel_formats( void *args );\n\n";
+print OUT "extern NTSTATUS wow64_get_pixel_formats( void *args );\n";
+print OUT "extern NTSTATUS wow64_flush_calls( void *args );\n\n";
 
 foreach (sort keys %wgl_functions)
 {
@@ -2123,6 +2172,7 @@ foreach (sort keys %ext_functions)
     next if defined $manual_win_functions{$_};
     printf OUT "    wow64_ext_%s,\n", $_;
 }
+print OUT "    wow64_flush_calls,\n";
 print OUT "};\n\n";
 print OUT "C_ASSERT(ARRAYSIZE(__wine_unix_call_wow64_funcs) == funcs_count);\n\n";
 

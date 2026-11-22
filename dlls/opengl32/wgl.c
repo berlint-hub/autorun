@@ -3322,6 +3322,67 @@ static NTSTATUS WINAPI call_gl_debug_message_callback( void *args, ULONG size )
     return STATUS_SUCCESS;
 }
 
+#ifndef _WIN64
+
+/* WINE_NX_GL_BATCH=0 in the program's environment (its gl-batch=0 setting):
+ * every call crosses at once, as before batches. */
+static BOOL call_batch_disabled;
+
+void flush_call_batch( struct call_batch *batch )
+{
+    struct flush_calls_params args = { .teb = NtCurrentTeb(), .data = batch->data, .size = batch->used };
+    NTSTATUS status;
+
+    /* A call the batch's own calls lead back to (a debug message callback's)
+     * crosses at once rather than being added to what is being run. */
+    if (batch->flushing) return;
+    batch->flushing = 1;
+    if ((status = WINE_UNIX_CALL( unix_flush_calls, &args ))) WARN( "flush_calls returned %#lx\n", status );
+    batch->flushing = 0;
+    batch->used = 0;
+}
+
+/* The call's parameters, and the array one of them points at, go into the
+ * thread's batch: a header (the call, the size of the entry, a multiple of 8,
+ * as unix_wgl.c reads it), the parameters, and the array, which the copied
+ * parameter is pointed at. Without a batch (WINE_NX_GL_BATCH=0, or no memory
+ * for one), while it is being run, or with no array where one is read, the
+ * call crosses at once, after what is batched. */
+NTSTATUS defer_call( enum unix_funcs func, void *params, unsigned int size,
+                     const void *const *field, unsigned int data_size )
+{
+    TEB *teb = NtCurrentTeb();
+    struct call_batch *batch = teb->glReserved1[WINE_GL_RESERVED_CALL_BATCH];
+    const void *data = field ? *field : NULL;
+    unsigned int params_size = (size + 7) & ~7, need = 8 + params_size + ((data_size + 7) & ~7);
+    unsigned int *header;
+    unsigned char *copy;
+
+    if (!batch && !call_batch_disabled && (batch = calloc( 1, sizeof(*batch) )))
+        teb->glReserved1[WINE_GL_RESERVED_CALL_BATCH] = batch;
+    if (!batch || batch->flushing || (field && !data) || need > sizeof(batch->data))
+    {
+        flush_calls();
+        return WINE_UNIX_CALL( func, params );
+    }
+    if (need > sizeof(batch->data) - batch->used) flush_call_batch( batch );
+
+    header = (unsigned int *)(batch->data + batch->used);
+    header[0] = func;
+    header[1] = need;
+    copy = (unsigned char *)(header + 2);
+    memcpy( copy, params, size );
+    if (field)
+    {
+        memcpy( copy + params_size, data, data_size );
+        *(const void **)(copy + ((const unsigned char *)field - (const unsigned char *)params)) = copy + params_size;
+    }
+    batch->used += need;
+    return STATUS_SUCCESS;
+}
+
+#endif
+
 /***********************************************************************
  *           OpenGL initialisation routine
  */
@@ -3337,6 +3398,13 @@ BOOL WINAPI DllMain( HINSTANCE hinst, DWORD reason, LPVOID reserved )
     switch(reason)
     {
     case DLL_PROCESS_ATTACH:
+#ifndef _WIN64
+        {
+            WCHAR value[8];
+            call_batch_disabled = GetEnvironmentVariableW( L"WINE_NX_GL_BATCH", value, ARRAY_SIZE(value) ) &&
+                                  value[0] == '0';
+        }
+#endif
         if ((status = __wine_init_unix_call()) ||
             (status = UNIX_CALL( process_attach, &params )))
         {
@@ -3359,6 +3427,10 @@ BOOL WINAPI DllMain( HINSTANCE hinst, DWORD reason, LPVOID reserved )
         UNIX_CALL( process_detach, NULL );
         /* fallthrough */
     case DLL_THREAD_DETACH:
+        /* What the thread kept is run while its context is still current. */
+        flush_calls();
+        free( NtCurrentTeb()->glReserved1[WINE_GL_RESERVED_CALL_BATCH] );
+        NtCurrentTeb()->glReserved1[WINE_GL_RESERVED_CALL_BATCH] = NULL;
         if ((context = get_current_context())) context->base.current_tid = 0;
         free( NtCurrentTeb()->glReserved1[WINE_GL_RESERVED_FORMATS_PTR] );
         return TRUE;

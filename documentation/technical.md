@@ -474,6 +474,17 @@ changes, and fails if the pinned text moves.
   swap, a make-current and a context's or surface's end, as Mesa's DRI
   frontend does. `[INIT] OpenGL thread on` and a `Mesa queue gl` line in the
   log say it runs. A game that reads back from the GPU often can be slower.
+- Every OpenGL call of a 32-bit program crosses from its x86 opengl32 into
+  the unix side: FEX's bridge, the runtime's unix call dispatcher and its
+  kernel state, some 17% of Doom 3's main thread at its 25000 calls a frame.
+  The calls that only set the current context's state (binds, enables, array
+  pointers, program parameters, blending, depth and stencil:
+  `%deferred_calls` in `dlls/opengl32/make_opengl`) are kept in a batch of the
+  thread's and cross together, before any other call (`UNIX_CALL` sends the
+  batch first), at the end of the thread, or when the batch is full, so the
+  host runs every call in the program's order. A game the batches would not
+  suit is given them off with `gl-batch=0` in its settings (`[INIT] OpenGL
+  call batches off`).
 - A 32-bit program whose image is not large address aware is given addresses
   below 2 GiB only. **Large address aware** in the game's settings
   (`large-address-aware=1`) gives it those up to 4 GiB without patching the
