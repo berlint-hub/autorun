@@ -25,7 +25,9 @@ assert acquire.index('InterlockedExchange( &lists->shared, 1 );') < acquire.inde
 # Every object table lock goes through the pair; the handle tables keep theirs.
 tail = wgl[wgl.index('static struct object_table *get_object_table('):]
 assert '&table->lock' not in tail
-assert tail.count('LOCK_OBJECT_TABLE( table,') == 2 * tail.count('UNLOCK_OBJECT_TABLE( table,') == 20
+# Eleven pairs: alloc_map_context_object, the one-name bind path, is the last.
+assert tail.count('LOCK_OBJECT_TABLE( table,') == 2 * tail.count('UNLOCK_OBJECT_TABLE( table,') == 22
+assert 'BOOL alloc_map_context_object(' in tail
 for block in re.findall(r'[^N]LOCK_OBJECT_TABLE\( table, \w+ \)(.*?)UNLOCK_OBJECT_TABLE', tail, re.S):
     assert not re.search(r'\breturn\b|\bgoto\b', block), block
 assert 'lists->tables[i].shared = &lists->shared;' in wgl and 'lists->tables[i].busy = &lists->busy;' in wgl
@@ -57,6 +59,9 @@ static struct display_lists lists = { .refcount = 1 };
 static long value;           /* what the table holds: plain, for ThreadSanitizer */
 static atomic_int writers, stop;
 static long unlocked, locked;
+/* For the main thread to wait on: it cannot read the two above while the
+ * user is in the table. */
+static atomic_long seen_unlocked, seen_locked;
 
 static void *user(void *arg)
 {
@@ -65,6 +70,7 @@ static void *user(void *arg)
     {
         LOCK_OBJECT_TABLE( table, TRUE )
         if (table_locked) locked++; else unlocked++;
+        atomic_fetch_add(table_locked ? &seen_locked : &seen_unlocked, 1);
         assert(atomic_fetch_add(&writers, 1) == 0);
         value++;
         atomic_fetch_sub(&writers, 1);
@@ -83,7 +89,9 @@ int main(void)
     table->shared = &lists.shared;
     table->busy = &lists.busy;
     assert(!pthread_create(&thread, NULL, user, NULL));
-    for (int i = 0; i < 2000; i++) sched_yield();   /* the one context on its own */
+    /* The one context on its own, for as long as it takes its thread to get
+     * there: a count of yields was not always enough under the sanitizers. */
+    while (atomic_load(&seen_unlocked) < 100) sched_yield();
     display_lists_acquire(&lists);                  /* a second context shares the lists */
     for (int i = 0; i < 200000; i++)
     {
@@ -94,6 +102,7 @@ int main(void)
         atomic_fetch_sub(&writers, 1);
         UNLOCK_OBJECT_TABLE( table, TRUE )
     }
+    while (!atomic_load(&seen_locked)) sched_yield();   /* and beside the sharer */
     atomic_store(&stop, 1);
     pthread_join(thread, NULL);
     assert(unlocked > 0 && locked > 0 && value == unlocked + locked + mine && !atomic_load(&lists.busy));
