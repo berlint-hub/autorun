@@ -53,4 +53,43 @@ with tempfile.TemporaryDirectory(prefix='autorun-runtime-update-') as temporary:
         for name in preserved:
             assert (root / name).read_bytes() == data(name, b'old'), name
         assert not (root / 'updates/transaction/journal').exists()
-    print('app update: NRO and DLLs refreshed; settings, registry and saves preserved; rollback restored originals')
+    # The card archive (tools/package-autorun.py) as the build workflow
+    # releases it: the runtimes and their files, and no Windows modules, which
+    # the DLL repository brings. The card's modules stay as they are.
+    card = ['wine-nx-runtime.nro', 'wine-nx-runtime-nxvk.nro', 'wine-nx-runtime.sym', 'wine-nx-runtime-nxvk.sym',
+            'README.txt', 'game-fixes/bundled.json', 'drive_c/windows/autorun-setup.exe', 'licenses/nxvk/COPYING',
+            'build-manifest.json']
+    settings = ['config/settings.json', 'config/keys.txt']
+    modules = ['drive_c/windows/system32/ntdll.dll', 'drive_c/windows/syswow64/kernel32.dll']
+    card_path = temporary / 'card.zip'
+    with ZipFile(card_path, 'w', ZIP_DEFLATED) as archive:
+        for name in card + settings:
+            archive.writestr('switch/wine/' + name, data(name, b'new'))
+        archive.writestr('switch/wine/drive_c/WarCraft III/', b'')
+    root = temporary / 'card'
+    for name in card + settings + modules:
+        path = root / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data(name, b'old'))
+    subprocess.run([str(executable), str(root), str(card_path), '0'], check=True, env=environment)
+    for name in card:
+        assert (root / name).read_bytes() == data(name, b'new'), name
+    for name in settings + modules:
+        assert (root / name).read_bytes() == data(name, b'old'), name
+    assert (root / 'drive_c/WarCraft III').is_dir()
+    # An archive with some of the Windows modules and not the rest is refused:
+    # it would leave the card with half a system.
+    half_path = temporary / 'half.zip'
+    with ZipFile(half_path, 'w', ZIP_DEFLATED) as archive:
+        for name in ['wine-nx-runtime.nro', 'drive_c/windows/system32/ntdll.dll']:
+            archive.writestr('switch/wine/' + name, data(name, b'new'))
+    root = temporary / 'half'
+    for name in ['wine-nx-runtime.nro', 'drive_c/windows/system32/ntdll.dll']:
+        path = root / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data(name, b'old'))
+    subprocess.run([str(executable), str(root), str(half_path), '2'], check=True, env=environment)
+    for name in ['wine-nx-runtime.nro', 'drive_c/windows/system32/ntdll.dll']:
+        assert (root / name).read_bytes() == data(name, b'old'), name
+    print('app update: NRO and DLLs refreshed; settings, registry and saves preserved; rollback restored originals; '
+          'the card archive without Windows modules installs both runtimes and their files, half a system is refused')

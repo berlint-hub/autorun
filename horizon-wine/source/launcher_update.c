@@ -8,12 +8,18 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 
 #ifdef WINE_NX_BUILD_VERSION
 #include "autorun_version.h"
 #else
 #define AUTORUN_BUILD_TAG ""
 #define AUTORUN_BUILD_EPOCH 0
+#endif
+
+/* The commit this runtime was built from (build.sh's WINE_NX_BUILD_ID). */
+#ifndef WINE_NX_BUILD_ID
+#define WINE_NX_BUILD_ID ""
 #endif
 
 struct launcher_update
@@ -51,10 +57,27 @@ static uint64_t published_time( const char *date )
     return ((days * 24 + h) * 60 + min) * 60 + s;
 }
 
+/* A release the build workflow made from the commit this runtime is
+ * (autorun-<run>-<commit>): the card runs it already, though no install
+ * recorded its tag when the archive was put on the card by hand. Abbreviated
+ * hashes of different lengths name the same commit when one starts the other. */
+static int same_commit( const char *tag )
+{
+    const char *commit = strrchr( tag, '-' );
+    size_t mine = strlen( WINE_NX_BUILD_ID ), theirs;
+
+    if (!commit || mine < 7) return 0;
+    theirs = strlen( ++commit );
+    if (theirs < 7) return 0;
+    for (size_t i = 0; i < theirs; i++) if (!isxdigit( (unsigned char)commit[i] )) return 0;
+    return !strncasecmp( commit, WINE_NX_BUILD_ID, theirs < mine ? theirs : mine );
+}
+
 static int new_release( const struct launcher_update *u )
 {
     uint64_t published = published_time( u->release.published );
     if (!strcmp( u->release.tag, AUTORUN_BUILD_TAG ) || !strcmp( u->release.tag, u->installed )) return 0;
+    if (same_commit( u->release.tag )) return 0;
     const uint64_t built = AUTORUN_BUILD_EPOCH;
     if (!built) return 0;
     return published > built;

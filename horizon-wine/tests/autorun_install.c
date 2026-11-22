@@ -16,12 +16,16 @@ static void test_managed(void)
         "wine-nx-runtime.nro", "build-manifest.json", "drive_c/dxvk64/dxgi.dll",
         "drive_c/windows/system32/ntdll.dll", "drive_c/windows/syswow64/kernel32.dll",
         "share/wine/nls/locale.nls", "share/wine/fonts/tahoma.ttf",
-        "licenses/Wine-LGPL.txt"
+        "licenses/Wine-LGPL.txt", "licenses/nxvk/COPYING", "wine-nx-runtime-nxvk.nro",
+        "wine-nx-runtime.sym", "wine-nx-runtime-nxvk.sym", "README.txt", "game-fixes/bundled.json",
+        "drive_c/windows/autorun-setup.exe"
     };
     const char *keep[] = {
         "config/launcher.txt", "registry/user.reg", "drive_c/users/Switch/save.dat",
         "drive_c/windows/custom.ini", "drive_c/windows/system32/ntdll.dll/child",
-        "../wine-nx-runtime.nro", "drive_c/windows/system32/../ntdll.dll"
+        "../wine-nx-runtime.nro", "drive_c/windows/system32/../ntdll.dll",
+        "config/settings.json", "config/keys.txt", "game-fixes/index.json", "licenses/../config/keys.txt",
+        "wine-nx-runtime-other.nro"
     };
     for (unsigned i = 0; i < sizeof(replace) / sizeof(*replace); i++) assert(managed(replace[i]));
     for (unsigned i = 0; i < sizeof(keep) / sizeof(*keep); i++) assert(!managed(keep[i]));
@@ -62,6 +66,13 @@ int main(int argc, char **argv)
     test_plan_limits();
     if (argc == 1) return 0;
     assert(argc == 4);
+    /* 2: an archive the installer must refuse, leaving the card as it was. */
+    if (atoi(argv[3]) == 2)
+    {
+        assert(autorun_install_archive(argv[1], argv[2], "bundle-test", 1, NULL, NULL) == AUTORUN_INSTALL_INVALID);
+        assert(autorun_install_recover(argv[1], 0) == 0);
+        return 0;
+    }
     fail_publish = atoi(argv[3]);
     enum autorun_install_result result = autorun_install_archive(argv[1], argv[2], "bundle-test", 1, NULL, NULL);
     if (atoi(argv[3]))
