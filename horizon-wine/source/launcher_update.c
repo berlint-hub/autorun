@@ -2,6 +2,7 @@
 #include "launcher_ui.h"
 #include "autorun_update.h"
 #include "autorun_install.h"
+#include "runtime_symbols.h"
 
 #include <ctype.h>
 #include <stdint.h>
@@ -123,7 +124,14 @@ static int update_worker( void *opaque )
 #endif
         u->network_result = autorun_update_download( u->root, &u->release, archive, sizeof(archive), download_progress, u );
         if (u->network_result == AUTORUN_UPDATE_OK)
+        {
+            /* The runtime's own symbol file is among what the update replaces,
+             * and Horizon replaces no open file: closed until the update is
+             * done, and the same file opened again if it was not. */
+            wine_nx_runtime_symbols_close();
             u->install_result = autorun_install_archive( u->root, archive, u->release.tag, amd64, install_progress, u );
+            if (u->install_result != AUTORUN_INSTALL_OK) wine_nx_runtime_symbols_reopen();
+        }
     }
     SDL_AtomicSet( &u->done, 1 );
     event.type = SDL_USEREVENT;

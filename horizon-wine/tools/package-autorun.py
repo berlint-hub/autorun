@@ -300,7 +300,9 @@ if args.nxvk:
     shutil.copytree(nxvk_pkg / 'licenses', licenses / 'nxvk')
     print('nxvk runtime staged')
 # The runtime's function names beside each NRO, for its own log's faults and
-# stall reports (tools/runtime_symbols.py, source/runtime_symbols.c).
+# stall reports (tools/runtime_symbols.py, source/runtime_symbols.c), as
+# <NRO>.sym. Not <name>.sym: a runtime until 22524fc keeps that file open, and
+# its update, which cannot replace an open file on Horizon, failed on it.
 sys.path.insert(0, str(tools))
 import runtime_symbols  # noqa: E402
 for nro_name, build_dir in (('wine-nx-runtime', 'build-switch-wow64-mesa-switch' if args.x86 else 'build-switch-amd64'),
@@ -311,9 +313,9 @@ for nro_name, build_dir in (('wine-nx-runtime', 'build-switch-wow64-mesa-switch'
         continue
     # The NRO is made from the ELF; one older than it is another build's.
     if elf.is_file() and nro.is_file() and elf.stat().st_mtime <= nro.stat().st_mtime + 1:
-        print(f'{nro_name}.sym: {runtime_symbols.write(elf, stage / f"{nro_name}.sym")} functions')
+        print(f'{nro_name}.nro.sym: {runtime_symbols.write(elf, stage / f"{nro_name}.nro.sym")} functions')
     else:
-        print(f'{nro_name}.sym: no ELF of this build in {build_dir}; faults will give offsets only')
+        print(f'{nro_name}.nro.sym: no ELF of this build in {build_dir}; faults will give offsets only')
 subprocess.run([sys.executable, str(tools / 'verify-package.py'), str(stage), '--dlls', str(args.dlls)],
                check=True)
 
@@ -328,4 +330,7 @@ with ZipFile(archive, 'w', ZIP_DEFLATED) as z:
 with ZipFile(archive) as z:
     assert z.testzip() is None
     files = len(z.infolist())
+    # Files the runtimes until 22524fc keep open, which their updater fails on.
+    held = {'switch/wine/wine-nx-runtime.sym', 'switch/wine/wine-nx-runtime-nxvk.sym'} & set(z.namelist())
+    assert not held, f'{archive} has {sorted(held)}, which an update from an older runtime cannot replace'
 print(f'{archive} ({archive.stat().st_size / 2**20:.1f} MiB, {files} files)')

@@ -271,7 +271,7 @@ translations give their room back, at a small cost on every block entry;
 waits two seconds before it is reused.
 With the profiler on, `[THREADS]`, `[SERVER]` and `[PROF]` show where each busy
 thread spends its time. Sites in the runtime's own code (the `native`, `svc`
-and `callers` lines) are named by function from the `.sym` beside the NRO, a
+and `callers` lines) are named by function from the NRO's `.nro.sym` beside it, a
 long C++ name cut to 36 characters with its offset kept, and stay bare offsets
 (`+0x3e38a0`) without it. DLLs that fail to load are logged (`[NXLDR]`, and
 Wine's `err:` lines) even without verbose traces, and so are files a program

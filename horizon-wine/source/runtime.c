@@ -5206,30 +5206,9 @@ int main( int argc, char **argv )
 #else
     log_line( "[GRAPHICS] this runtime is linked with mesa-switch" );
 #endif
-    {
-        /* The runtime's function names for faults and stall reports, from the
-         * file the packager writes beside the NRO (tools/runtime_symbols.py). */
-        char symbols[520];
-        MemoryInfo info;
-        u32 page_info;
-        size_t length = strlen( own_nro );
-        int named = 0;
-
-        if (length > 4 && !strcasecmp( own_nro + length - 4, ".nro" ) && length < sizeof(symbols))
-        {
-            memcpy( symbols, own_nro, length - 4 );
-            strcpy( symbols + length - 4, ".sym" );
-            if (R_SUCCEEDED( svcQueryMemory( &info, &page_info, (u64)(uintptr_t)&return_to_launcher ) ))
-                named = wine_nx_runtime_symbols_open( symbols, (uintptr_t)info.addr );
-            if (named)
-                log_line( "[SYMBOLS] %d functions named from %s, code at %#lx", named, symbols,
-                          (unsigned long)info.addr );
-            else
-                log_line( "[SYMBOLS] none: %s is not on the card; faults give offsets in the runtime", symbols );
-        }
-    }
-    log_line( "[LOWVA] forwarder title %016llx", runtime_title_id() );
-    low_window_available = wine_nx_low_window_probe( log_line_plain );
+    /* An update that stopped half way is undone before the symbol file below
+     * is opened: the update may have to put that file back, and Horizon
+     * deletes or replaces no file that is open. */
     {
         int recovered = autorun_install_recover( RUNTIME_DIR, strstr( own_nro, "/updates/previous.nro" ) != NULL );
         if (recovered < 0)
@@ -5237,7 +5216,7 @@ int main( int argc, char **argv )
             wine_nx_console_quiet = 0;
             appletNotifyRunning( NULL );
             PadState pad;
-            log_line( "[UPDATE] Recovery failed. Restore switch/wine/updates/previous.nro before starting a game. Press + to close." );
+            log_line( "[UPDATE] Recovery failed. Open switch/wine/updates/previous.nro from the Homebrew Menu to restore the previous runtime. Press + to close." );
             padConfigureInput( 1, HidNpadStyleSet_NpadStandard );
             padInitializeDefault( &pad );
             while (appletMainLoop())
@@ -5260,6 +5239,37 @@ int main( int argc, char **argv )
             return 0;
         }
     }
+    {
+        /* The runtime's function names for faults and stall reports, from the
+         * file the packager writes beside the NRO (tools/runtime_symbols.py),
+         * named after it: wine-nx-runtime.nro.sym. It stays open while the
+         * runtime runs. Until 22524fc it was wine-nx-runtime.sym, which a
+         * runtime that kept it open could not replace in an update (the
+         * update failed, and so did undoing it): an update from such a
+         * runtime brings the file under the new name, and the old one, which
+         * nothing reads any more, goes. */
+        char symbols[520];
+        MemoryInfo info;
+        u32 page_info;
+        size_t length = strlen( own_nro );
+        int named = 0;
+
+        unlink( RUNTIME_DIR "/wine-nx-runtime.sym" );
+        unlink( RUNTIME_DIR "/wine-nx-runtime-nxvk.sym" );
+        if (length > 4 && !strcasecmp( own_nro + length - 4, ".nro" ) && length + 4 < sizeof(symbols))
+        {
+            snprintf( symbols, sizeof(symbols), "%s.sym", own_nro );
+            if (R_SUCCEEDED( svcQueryMemory( &info, &page_info, (u64)(uintptr_t)&return_to_launcher ) ))
+                named = wine_nx_runtime_symbols_open( symbols, (uintptr_t)info.addr );
+            if (named)
+                log_line( "[SYMBOLS] %d functions named from %s, code at %#lx", named, symbols,
+                          (unsigned long)info.addr );
+            else
+                log_line( "[SYMBOLS] none: %s is not on the card; faults give offsets in the runtime", symbols );
+        }
+    }
+    log_line( "[LOWVA] forwarder title %016llx", runtime_title_id() );
+    low_window_available = wine_nx_low_window_probe( log_line_plain );
     /* The launcher can access SteamGridDB before a game is selected. */
     log_memory_map( "start-up" );
     log_line( "[MAP] start-up: %d regions the loader already had lent", loader_lent_count );

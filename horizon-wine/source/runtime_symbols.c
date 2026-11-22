@@ -22,6 +22,8 @@
 static int symbols_fd = -1;
 static uint32_t symbols_count, symbols_names;
 static uintptr_t symbols_base;
+/* The file's path while it is closed for an update (wine_nx_runtime_symbols_close). */
+static char symbols_path[520];
 static pthread_mutex_t symbols_mutex = PTHREAD_MUTEX_INITIALIZER;
 /* Every record, once wine_nx_runtime_symbols_keep has read them: written
  * before it is published, never freed. */
@@ -46,8 +48,40 @@ int wine_nx_runtime_symbols_open( const char *path, uintptr_t base )
     memcpy( &symbols_count, header + 8, 4 );
     memcpy( &symbols_names, header + 12, 4 );
     symbols_base = base;
+    snprintf( symbols_path, sizeof(symbols_path), "%s", path );
     symbols_fd = fd;
     return symbols_count;
+}
+
+void wine_nx_runtime_symbols_close( void )
+{
+    pthread_mutex_lock( &symbols_mutex );
+    if (symbols_fd >= 0) close( symbols_fd );
+    symbols_fd = -1;
+    pthread_mutex_unlock( &symbols_mutex );
+}
+
+int wine_nx_runtime_symbols_reopen( void )
+{
+    int fd, ok = 0;
+
+    pthread_mutex_lock( &symbols_mutex );
+    if (symbols_fd >= 0) ok = 1;
+    else if (symbols_path[0] && (fd = open( symbols_path, O_RDONLY )) >= 0)
+    {
+        unsigned char header[16];
+
+        /* The same file, or none: the records kept in memory are its. */
+        if (read_at( fd, 0, header, sizeof(header) ) && !memcmp( header, SYMBOLS_MAGIC, 8 ) &&
+            !memcmp( header + 8, &symbols_count, 4 ) && !memcmp( header + 12, &symbols_names, 4 ))
+        {
+            symbols_fd = fd;
+            ok = 1;
+        }
+        else close( fd );
+    }
+    pthread_mutex_unlock( &symbols_mutex );
+    return ok;
 }
 
 /* The function at or below offset, as its record. */
