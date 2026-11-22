@@ -24,7 +24,7 @@
 #define WINE_NX_UPDATE_REPO "berlint-hub/autorun"
 #endif
 #define RELEASE_TAG_PREFIX "autorun-"
-#define RELEASE_API "https://api.github.com/repos/" WINE_NX_UPDATE_REPO "/releases?per_page=30"
+#define RELEASE_API "https://api.github.com/repos/" WINE_NX_UPDATE_REPO "/releases?per_page=60"
 #define DOWNLOAD_PREFIX "https://github.com/" WINE_NX_UPDATE_REPO "/releases/download/"
 #define METADATA_MAX (1024u * 1024u)
 #define ARCHIVE_MAX (1024u * 1024u * 1024u)
@@ -282,29 +282,43 @@ static int parse_release( const unsigned char *data, size_t size, struct autorun
     return 1;
 }
 
-/* The newest release of the card in the repository's list, which GitHub gives
- * newest first: 1 when there is one, 0 when the list has none (Carafe's
- * releases, drafts, prereleases and releases without one archive of the card
- * are passed over), -1 when the list is not one. */
+/* The newest release of the card in the repository's list: 1 when there is
+ * one, 0 when the list has none (Carafe's releases, drafts, prereleases and
+ * releases without one archive of the card are passed over), -1 when the list
+ * is not one. Newest by when it was published, not by its place: GitHub
+ * orders the list by the numbers in the tags as much as by date, and put
+ * fex-experimental-2611-3 before the newer autorun-228-d9ef853. */
 static int parse_release_list( const unsigned char *data, size_t size, struct autorun_release *release )
 {
     struct parser p = {data, data + size, 0};
+    struct autorun_release *candidate;
     const unsigned char *start;
+    int found = 0, result = -1;
 
     if (!data || !size || !consume( &p, '[' )) return -1;
+    if (!(candidate = malloc( sizeof(*candidate) ))) return -1;
     whitespace( &p );
-    if (p.p < p.end && *p.p == ']') return 0;
+    if (p.p < p.end && *p.p == ']') { result = 0; goto done; }
     for (;;)
     {
         whitespace( &p );
         start = p.p;
-        if (!skip_value( &p )) return -1;
-        if (parse_release( start, (size_t)(p.p - start), release ) &&
-            !strncmp( release->tag, RELEASE_TAG_PREFIX, sizeof(RELEASE_TAG_PREFIX) - 1 )) return 1;
+        if (!skip_value( &p )) goto done;
+        if (parse_release( start, (size_t)(p.p - start), candidate ) &&
+            !strncmp( candidate->tag, RELEASE_TAG_PREFIX, sizeof(RELEASE_TAG_PREFIX) - 1 ) &&
+            (!found || strcmp( candidate->published, release->published ) > 0))
+        {
+            /* published_at is ISO 8601 in UTC, which sorts as text. */
+            memcpy( release, candidate, sizeof(*release) );
+            found = 1;
+        }
         whitespace( &p );
-        if (p.p < p.end && *p.p == ']') return 0;
-        if (p.p == p.end || *p.p++ != ',') return -1;
+        if (p.p < p.end && *p.p == ']') { result = found; break; }
+        if (p.p == p.end || *p.p++ != ',') goto done;
     }
+done:
+    free( candidate );
+    return result;
 }
 
 static enum autorun_update_result request_metadata( struct memory_buffer *body,

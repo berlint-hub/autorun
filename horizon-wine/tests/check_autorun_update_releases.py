@@ -116,8 +116,17 @@ lists = {
         release('autorun-228-2345678', [archive('autorun-228-2345678', where='https://github.com/other/autorun/releases/download/')]),
         release('autorun-227-3456789', [archive('autorun-227-3456789')], notes='x' * 20000),
         release('autorun-226-a422bdf', [archive('autorun-226-a422bdf'), archive('autorun-226-a422bdf', 'symbols.txt')]),
-        release('autorun-225-b01adad', [archive('autorun-225-b01adad')]),
+        release('autorun-225-b01adad', [archive('autorun-225-b01adad')], published='2026-11-21T09:00:00Z'),
     ], 1, 'autorun-226-a422bdf'),
+    # GitHub orders by the numbers in the tags as much as by date: an older
+    # card before the newest, and Carafe's before both. The newest published
+    # is offered, wherever it is in the list.
+    'newest card not first': (fex + [
+        release('autorun-225-b01adad', [archive('autorun-225-b01adad')], published='2026-11-21T09:00:00Z'),
+        release('autorun-99-c0ffee1', [archive('autorun-99-c0ffee1')], published='2026-11-20T09:00:00Z'),
+        release('autorun-228-d9ef853', [archive('autorun-228-d9ef853')], published='2026-11-22T19:19:47Z'),
+        release('autorun-227-3456789', [archive('autorun-227-3456789')], published='2026-11-22T18:00:00Z'),
+    ], 1, 'autorun-228-d9ef853'),
     'Carafe releases only': (fex, 0, '-'),
     'no releases': ([], 0, '-'),
     'card without a digest': ([release('autorun-226-a422bdf', [archive('autorun-226-a422bdf', digest=None)])], 0, '-'),
@@ -145,6 +154,7 @@ with tempfile.TemporaryDirectory(prefix='autorun-update-releases-') as directory
     run = subprocess.run([str(path / 'test'), *args], capture_output=True, text=True)
     if run.returncode:
         raise SystemExit(run.stderr.strip()[-2000:])
-print(f'autorun updates: the newest card release of {repo} is offered among Carafe\'s, drafts, prereleases, '
+print(f'autorun updates: the newest published card release of {repo} is offered, wherever the list has it, '
+      'among Carafe\'s, drafts, prereleases, '
       'foreign archives and long notes; none, no digest, two archives neither named autorun.zip and broken lists are not; '
       'the build\'s own commit is not offered again')
