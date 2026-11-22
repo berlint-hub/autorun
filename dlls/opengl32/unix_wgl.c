@@ -1412,6 +1412,16 @@ NTSTATUS get_pixel_formats( void *args )
     return STATUS_SUCCESS;
 }
 
+/* The calls a 32-bit program's opengl32 kept in its batch (wgl.c, defer_call):
+ * each a header (the call, the size of the whole entry, a multiple of 8) and
+ * its parameters as the call takes them, run in order in this one unix call
+ * instead of one each across the WoW64 boundary. A 64-bit program's calls are
+ * never kept. */
+NTSTATUS flush_calls( void *args )
+{
+    return STATUS_NOT_IMPLEMENTED;
+}
+
 #ifdef _WIN64
 
 static pthread_mutex_t wgl_lock = PTHREAD_MUTEX_INITIALIZER;
@@ -2134,6 +2144,49 @@ NTSTATUS wow64_process_detach( void *args )
 
     if ((status = process_detach( NULL ))) return status;
 
+    return STATUS_SUCCESS;
+}
+
+/* One entry of a batch, checked: a whole number of 8-byte words inside the
+ * batch, and a call of the table that is not this one. */
+static const void *batched_call( const unsigned char *data, unsigned int size, unsigned int *offset,
+                                 unsigned int *func )
+{
+    const unsigned int *header = (const unsigned int *)(data + *offset);
+    unsigned int length;
+
+    if (size - *offset < 8) return NULL;
+    length = header[1];
+    if (length < 8 || length % 8 || length > size - *offset) return NULL;
+    if ((*func = header[0]) >= funcs_count || *func == unix_flush_calls) return NULL;
+    *offset += length;
+    return header + 2;
+}
+
+NTSTATUS wow64_flush_calls( void *args )
+{
+    struct
+    {
+        PTR32 teb;
+        PTR32 data;
+        UINT32 size;
+    } *params = args;
+    const unsigned char *data = ULongToPtr( params->data );
+    unsigned int offset = 0, func;
+    const void *call;
+    NTSTATUS status;
+
+    if (params->size % 8) return STATUS_INVALID_PARAMETER;
+    while (offset < params->size)
+    {
+        if (!(call = batched_call( data, params->size, &offset, &func )))
+        {
+            ERR( "Invalid batched call at %#x of %#x\n", offset, params->size );
+            return STATUS_INVALID_PARAMETER;
+        }
+        if ((status = __wine_unix_call_wow64_funcs[func]( (void *)call )))
+            WARN( "Batched call %u returned %#x\n", func, (int)status );
+    }
     return STATUS_SUCCESS;
 }
 

@@ -25776,6 +25776,13 @@ struct get_pixel_formats_params
     unsigned int num_onscreen_formats;
 };
 
+struct flush_calls_params
+{
+    TEB *teb;
+    void *data;
+    unsigned int size;
+};
+
 enum unix_funcs
 {
     unix_process_attach,
@@ -28872,6 +28879,7 @@ enum unix_funcs
     unix_wglSetPbufferAttribARB,
     unix_wglSetPixelFormatWINE,
     unix_wglSwapIntervalEXT,
+    unix_flush_calls,
     funcs_count
 };
 

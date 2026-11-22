@@ -80,4 +80,52 @@ extern GLuint *del_context_objects( enum object_type type, UINT n, GLuint *handl
 extern GLuint *map_context_objects( enum object_type type, UINT n, GLuint *handles );
 extern BOOL alloc_map_context_object( enum object_type type, GLuint *handle, BOOL extension );
 
+/* A 32-bit program's calls that only set the current context's state are kept
+ * in a batch of its thread's (make_opengl, %deferred_calls) and cross the
+ * WoW64 unix boundary together, which for a game such as Doom 3 is some 25000
+ * crossings a frame fewer: each is FEX's bridge, the runtime's unix call
+ * dispatcher and its kernel state, in translated and native code. Any other
+ * call sends the batch first, so that the host runs them in the program's
+ * order (UNIX_CALL), and so does the end of the thread. A 64-bit program's
+ * calls, and every call with WINE_NX_GL_BATCH=0, cross one by one. */
+#include "unixlib.h"
+
+/* The thread's batch, in the TEB beside the slots wgl.c uses. */
+#define WINE_GL_RESERVED_CALL_BATCH 7
+
+#ifndef _WIN64
+
+struct call_batch
+{
+    unsigned int used;      /* bytes of data in use */
+    unsigned int flushing;  /* the batch is being run: a call made meanwhile crosses at once */
+    unsigned char data[0x4000];
+};
+
+extern void flush_call_batch( struct call_batch *batch );
+extern NTSTATUS defer_call( enum unix_funcs func, void *params, unsigned int size,
+                            const void *const *field, unsigned int data_size );
+
+static inline void flush_calls(void)
+{
+    struct call_batch *batch = NtCurrentTeb()->glReserved1[WINE_GL_RESERVED_CALL_BATCH];
+    if (batch && batch->used) flush_call_batch( batch );
+}
+
+#undef UNIX_CALL
+#define UNIX_CALL( func, params ) (flush_calls(), WINE_UNIX_CALL( unix_ ## func, params ))
+#define UNIX_DEFER( func, params ) defer_call( unix_ ## func, params, sizeof(*(params)), NULL, 0 )
+/* With an array the call reads, which goes into the batch: field is the
+ * parameter pointing at it, size its size in bytes. */
+#define UNIX_DEFER_DATA( func, params, field, size ) \
+    defer_call( unix_ ## func, params, sizeof(*(params)), (const void *const *)&(params)->field, size )
+
+#else
+
+static inline void flush_calls(void) {}
+#define UNIX_DEFER( func, params ) UNIX_CALL( func, params )
+#define UNIX_DEFER_DATA( func, params, field, size ) UNIX_CALL( func, params )
+
+#endif
+
 #endif /* __WINE_OPENGL32_PRIVATE_H */

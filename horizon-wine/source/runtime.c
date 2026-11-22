@@ -768,6 +768,12 @@ int wine_nx_gl_old_extensions;
  * not start it at all (nxvk-patches/0001). nxvk's runtime only. */
 static int runtime_gl_thread;
 
+/* gl-batch=0 in a program's settings: a 32-bit program's OpenGL calls that
+ * only set state cross into the unix side one by one, as they did before
+ * opengl32 kept them in batches (dlls/opengl32/private.h), for a game the
+ * batches would not suit. On unless set off. */
+static int runtime_gl_batch_off;
+
 /* Whether a thread's long quick run of yields (Sleep(0), SwitchToThread, a
  * wait that timed out, a message poll that found nothing) sleeps a little each
  * instead of keeping its core busy (dlls/ntdll/unix/horizon_yield_backoff.h,
@@ -5634,6 +5640,7 @@ int main( int argc, char **argv )
         wine_nx_large_address_aware = 0;
         wine_nx_gl_old_extensions = 0;
         runtime_gl_thread = 0;
+        runtime_gl_batch_off = 0;
         if (target[1] != ':' &&
             launcher_program_settings_path( RUNTIME_DIR, target, settings_path, sizeof(settings_path) ) &&
             launcher_kv_load( &kv, settings_path ))
@@ -5645,6 +5652,7 @@ int main( int argc, char **argv )
             wine_nx_large_address_aware = settings.large_address_aware;
             wine_nx_gl_old_extensions = settings.gl_old_extensions;
             runtime_gl_thread = settings.gl_thread;
+            runtime_gl_batch_off = launcher_setting_state( &kv, "gl-batch" ) == 0;
             if (settings.mode_emulation) wine_nx_emulate_modeset = settings.mode_emulation > 0;
             {
                 int fpslocker = launcher_setting_state( &kv, "fpslocker" );
@@ -5824,6 +5832,13 @@ int main( int argc, char **argv )
         log_line( "[INIT] OpenGL thread (gl-thread) is nxvk's: this runtime leaves it as Mesa has it" );
 #endif
     }
+    /* Read by the 32-bit opengl32 when it loads (dlls/opengl32/wgl.c). */
+    if (runtime_gl_batch_off)
+    {
+        setenv( "WINE_NX_GL_BATCH", "0", 1 );
+        log_line( "[INIT] OpenGL call batches off (gl-batch=0): a 32-bit program's calls cross one by one" );
+    }
+    else unsetenv( "WINE_NX_GL_BATCH" );
     if (wine_nx_large_address_aware)
         log_line( "[INIT] large address aware (large-address-aware): a 32-bit program gets addresses up to 4 GB" );
     log_line( "[INIT] verbose traces %s (verbose.txt)", wine_nx_runtime_verbose ? "on" : "off" );

@@ -31021,6 +31021,7 @@ const unixlib_entry_t __wine_unix_call_funcs[] =
     ext_wglSetPbufferAttribARB,
     ext_wglSetPixelFormatWINE,
     ext_wglSwapIntervalEXT,
+    flush_calls,
 };
 
 C_ASSERT(ARRAYSIZE(__wine_unix_call_funcs) == funcs_count);
@@ -31030,6 +31031,7 @@ C_ASSERT(ARRAYSIZE(__wine_unix_call_funcs) == funcs_count);
 extern NTSTATUS wow64_thread_attach( void *args );
 extern NTSTATUS wow64_process_detach( void *args );
 extern NTSTATUS wow64_get_pixel_formats( void *args );
+extern NTSTATUS wow64_flush_calls( void *args );
 
 static NTSTATUS wow64_wgl_wglDeleteContext( void *args )
 {
@@ -84668,6 +84670,7 @@ const unixlib_entry_t __wine_unix_call_wow64_funcs[] =
     wow64_ext_wglSetPbufferAttribARB,
     wow64_ext_wglSetPixelFormatWINE,
     wow64_ext_wglSwapIntervalEXT,
+    wow64_flush_calls,
 };
 
 C_ASSERT(ARRAYSIZE(__wine_unix_call_wow64_funcs) == funcs_count);
