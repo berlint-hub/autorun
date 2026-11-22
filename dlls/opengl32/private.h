@@ -78,5 +78,6 @@ extern GLuint put_context_object_range( enum object_type type, UINT n, GLuint ba
 extern BOOL alloc_context_objects( enum object_type type, UINT n, const GLuint *handles, BOOL extension );
 extern GLuint *del_context_objects( enum object_type type, UINT n, GLuint *handles );
 extern GLuint *map_context_objects( enum object_type type, UINT n, GLuint *handles );
+extern BOOL alloc_map_context_object( enum object_type type, GLuint *handle, BOOL extension );
 
 #endif /* __WINE_OPENGL32_PRIVATE_H */

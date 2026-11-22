@@ -837,9 +837,13 @@ sub generate_win_thunk($$)
                 my $return = is_void_func($func) ? "" : " args.ret";
                 my $alloc = allocate_object_names( $name, $map_type );
 
-                if ($len eq "1")
+                if ($len eq "1" && $alloc)
                 {
-                    $checks .= "    if (!alloc_context_objects( $map_type, 1, &$pname, $alloc )) return$return;\n" if $alloc;
+                    $checks .= "    if (!alloc_map_context_object( $map_type, &$pname, $alloc )) return$return;\n";
+                    $map_args .= "    args.$pname = $pname;\n";
+                }
+                elsif ($len eq "1")
+                {
                     $map_args .= "    args.$pname = *map_context_objects( $map_type, 1, &$pname );\n";
                 }
                 else

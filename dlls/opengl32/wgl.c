@@ -47,6 +47,9 @@ static const MAT2 identity = { {0,1},{0,0},{0,0},{0,1} };
 #define WINE_GL_RESERVED_FORMATS_PTR      3
 #define WINE_GL_RESERVED_FORMATS_NUM      4
 #define WINE_GL_RESERVED_FORMATS_ONSCREEN 5
+/* The current context once set_context_attribute has given up tracking its
+ * state (every bit of used set, which no call clears): see there. */
+#define WINE_GL_RESERVED_UNTRACKED_RC     6
 
 static CRITICAL_SECTION wgl_cs;
 static CRITICAL_SECTION_DEBUG wgl_cs_debug = {
@@ -948,6 +951,39 @@ GLuint *map_context_objects( enum object_type type, UINT n, GLuint *handles )
     return handles;
 }
 
+/* alloc_context_objects and then map_context_objects for one name, as the
+ * thunks of the binds and most other calls that take an object do: when the
+ * name has its object, which is nearly always, the current context is found
+ * and its table entered once instead of twice. For a 32-bit program on the
+ * Switch each is translated x86 code with two interlocked exchanges, on every
+ * glBindTexture, glBindBufferARB and glBindProgramARB of a frame. A name
+ * without an object goes through the two calls, as before. */
+BOOL alloc_map_context_object( enum object_type type, GLuint *handle, BOOL extension )
+{
+    struct object_table *table;
+    struct context *ctx;
+    GLuint host_id;
+
+    if (!(ctx = get_current_context())) return TRUE;
+    if (!(table = get_object_table( ctx, type, FALSE ))) return TRUE;
+    /* alloc_context_objects refuses these before it looks at the name. */
+    if (type == OBJ_TYPE_DISPLAY_LIST && is_core_context( &ctx->base )) return FALSE;
+    if (!*handle) return TRUE;
+
+    LOCK_OBJECT_TABLE( table, FALSE )
+    host_id = get_object( table, *handle, TRUE );
+    UNLOCK_OBJECT_TABLE( table, FALSE )
+    if (host_id)
+    {
+        *handle = host_id;
+        return TRUE;
+    }
+
+    if (!alloc_context_objects( type, 1, handle, extension )) return FALSE;
+    map_context_objects( type, 1, handle );
+    return TRUE;
+}
+
 static GLuint get_pname_object_type( GLenum pname )
 {
     switch (pname)
@@ -1296,12 +1332,28 @@ static int compare_context_attributes( const void *v1, const void *v2 )
     return (int)a1->name - (int)a2->name;
 };
 
-void set_context_attribute( GLenum name, const void *value, size_t size )
+static const struct context_attribute_desc *find_context_attribute( GLenum name )
 {
     struct context_attribute_desc key = { .name = name };
+
+    return bsearch( &key, context_attributes, ARRAY_SIZE(context_attributes),
+                    sizeof(*context_attributes), compare_context_attributes );
+}
+
+void set_context_attribute( GLenum name, const void *value, size_t size )
+{
     const struct context_attribute_desc *desc;
+    TEB *teb = NtCurrentTeb();
     struct context *ctx;
 
+    /* Nearly every OpenGL call ends here with an attribute wglCopyContext
+     * cannot copy, which sets all of the context's used bits for good: after
+     * the first, another changes nothing, but finding the context took a
+     * lookup in its table each time, in translated x86 code for a 32-bit
+     * program on the Switch (about 1.8% of Doom 3's). A context's handle
+     * carries its slot's generation, so the one remembered here names no other
+     * context, and it is the current one only while it is current. */
+    if (name == -1 && teb->glCurrentRC && teb->glReserved1[WINE_GL_RESERVED_UNTRACKED_RC] == teb->glCurrentRC) return;
     if (!(ctx = get_current_context())) return;
 
     if (name == GL_FRAMEBUFFER)
@@ -1310,8 +1362,7 @@ void set_context_attribute( GLenum name, const void *value, size_t size )
         name = GL_DRAW_FRAMEBUFFER;
     }
 
-    if (name != -1 && (desc = bsearch( &key, context_attributes, ARRAY_SIZE(context_attributes),
-                                       sizeof(*context_attributes), compare_context_attributes )))
+    if (name != -1 && (desc = find_context_attribute( name )))
     {
         if (size && size != desc->size) ERR( "Invalid state attrib %#x parameter size %#Ix\n", name, size );
         else
@@ -1324,6 +1375,7 @@ void set_context_attribute( GLenum name, const void *value, size_t size )
     {
         if (ctx->used != -1) WARN( "Unsupported attribute on context %p\n", ctx );
         ctx->used |= -1;
+        teb->glReserved1[WINE_GL_RESERVED_UNTRACKED_RC] = teb->glCurrentRC;
     }
 }
 
