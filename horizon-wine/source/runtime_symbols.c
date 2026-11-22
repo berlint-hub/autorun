@@ -3,12 +3,16 @@
  * report. The names come from the symbol file the packager writes beside the
  * NRO (tools/runtime_symbols.py), read by binary search straight from the card
  * with a descriptor opened at start: a fault handler cannot count on the heap,
- * and a lookup that finds the file busy gives the bare offset instead.
+ * and a lookup that finds the file busy gives the bare offset instead. The
+ * profiler, which names a hundred sites every report, has the records read
+ * into memory once (wine_nx_runtime_symbols_keep), and every lookup from then
+ * on searches them there and reads only the name.
  */
 #include <fcntl.h>
 #include <pthread.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 #include "runtime_symbols.h"
@@ -19,6 +23,9 @@ static int symbols_fd = -1;
 static uint32_t symbols_count, symbols_names;
 static uintptr_t symbols_base;
 static pthread_mutex_t symbols_mutex = PTHREAD_MUTEX_INITIALIZER;
+/* Every record, once wine_nx_runtime_symbols_keep has read them: written
+ * before it is published, never freed. */
+static const uint32_t *symbols_records;
 
 static int read_at( int fd, off_t offset, void *buffer, size_t size )
 {
@@ -46,8 +53,22 @@ int wine_nx_runtime_symbols_open( const char *path, uintptr_t base )
 /* The function at or below offset, as its record. */
 static int find( uint32_t offset, uint32_t record[3] )
 {
+    const uint32_t *records = __atomic_load_n( &symbols_records, __ATOMIC_ACQUIRE );
     uint32_t low = 0, high = symbols_count;
 
+    if (records)
+    {
+        while (low < high)
+        {
+            uint32_t middle = low + (high - low) / 2;
+
+            if (records[middle * 3] <= offset) low = middle + 1;
+            else high = middle;
+        }
+        if (!low) return 0;
+        memcpy( record, records + (low - 1) * 3, 12 );
+        return 1;
+    }
     while (low < high)
     {
         uint32_t middle = low + (high - low) / 2, entry[3];
@@ -88,4 +109,24 @@ int wine_nx_runtime_symbol( uintptr_t address, char *out, size_t size )
     }
     if (!found) snprintf( out, size, "runtime+%#x", offset );
     return found;
+}
+
+int wine_nx_runtime_symbols_keep( void )
+{
+    uint32_t *records;
+    int kept;
+
+    if (__atomic_load_n( &symbols_records, __ATOMIC_ACQUIRE )) return 1;
+    if (symbols_fd < 0 || !symbols_count || symbols_count > 0x1000000) return 0;
+    if (!(records = malloc( (size_t)symbols_count * 12 ))) return 0;
+    pthread_mutex_lock( &symbols_mutex );
+    if ((kept = symbols_records != NULL)) free( records );
+    else if (read_at( symbols_fd, 16, records, (size_t)symbols_count * 12 ))
+    {
+        __atomic_store_n( &symbols_records, records, __ATOMIC_RELEASE );
+        kept = 1;
+    }
+    else free( records );
+    pthread_mutex_unlock( &symbols_mutex );
+    return kept;
 }

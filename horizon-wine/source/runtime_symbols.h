@@ -11,5 +11,9 @@ int wine_nx_runtime_symbols_open( const char *path, uintptr_t base );
  * "runtime+0xoffset" and 0 when no name is known, or "" when the address is
  * not the runtime's. */
 int wine_nx_runtime_symbol( uintptr_t address, char *out, size_t size );
+/* Reads the file's records into memory, once, so that a lookup reads only the
+ * name from the card: for the profiler, which names a hundred sites a report.
+ * Nonzero when they are in memory. */
+int wine_nx_runtime_symbols_keep( void );
 
 #endif

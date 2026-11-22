@@ -16,26 +16,50 @@ import runtime_symbols  # noqa: E402
 program = r'''
 int alpha(int x) { return x * 3; }
 static int beta(int y) { return y + alpha(y); }
-int main(void) { return beta(2); }
+int a_function_whose_name_is_longer_than_the_profiler_shows(int z) { return z - 1; }
+int main(void) { return beta(2) + a_function_whose_name_is_longer_than_the_profiler_shows(1); }
 '''
+# The profiler's names for the runtime's own sites (thread_profile.c), over
+# the same reader: the function, a long one cut, and the bare offset.
+profile = (root / 'horizon-wine/source/thread_profile.c').read_text()
+name_native = profile[profile.index('/* The runtime\'s own functions by name (source/runtime_symbols.c). */'):]
+name_native = name_native[:name_native.index('\n}\n') + 3]
 test = r'''
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include "runtime_symbols.h"
-int main(int argc, char **argv) {
-    unsigned long alpha = strtoul(argv[2], NULL, 16), beta = strtoul(argv[3], NULL, 16), base = 0x40000000;
+static uintptr_t runtime_base = 0x40000000, runtime_end = 0x40100000;
+''' + name_native + r'''
+static void lookups(unsigned long alpha, unsigned long beta, unsigned long base) {
     char out[160], want[64];
-    (void)argc;
-    assert(wine_nx_runtime_symbols_open(argv[1], base) > 0);
-    assert(!wine_nx_runtime_symbols_open(argv[1], base));  /* once */
     assert(wine_nx_runtime_symbol(base + alpha, out, sizeof out) && !strcmp(out, "alpha+0"));
     assert(wine_nx_runtime_symbol(base + alpha + 4, out, sizeof out) && !strcmp(out, "alpha+0x4"));
     assert(wine_nx_runtime_symbol(base + beta + 2, out, sizeof out) && !strcmp(out, "beta+0x2"));
     assert(!wine_nx_runtime_symbol(base - 4, out, sizeof out) && !out[0]);
     snprintf(want, sizeof want, "runtime+%#x", 0x10);
     assert(!wine_nx_runtime_symbol(base + 0x10, out, sizeof out) && !strcmp(out, want));
+}
+int main(int argc, char **argv) {
+    unsigned long alpha = strtoul(argv[2], NULL, 16), beta = strtoul(argv[3], NULL, 16), base = 0x40000000;
+    unsigned long longer = strtoul(argv[4], NULL, 16);
+    char out[160];
+    (void)argc;
+    assert(!wine_nx_runtime_symbols_keep());               /* nothing open yet */
+    assert(wine_nx_runtime_symbols_open(argv[1], base) > 0);
+    assert(!wine_nx_runtime_symbols_open(argv[1], base));  /* once */
+    lookups(alpha, beta, base);                            /* from the file */
+    assert(wine_nx_runtime_symbols_keep() && wine_nx_runtime_symbols_keep());
+    lookups(alpha, beta, base);                            /* from memory, the same */
+    name_native(alpha + 4, out, sizeof out);
+    assert(!strcmp(out, "alpha+0x4"));
+    name_native(longer + 8, out, sizeof out);
+    assert(!strcmp(out, "a_function_whose_name_is_longer_than~+0x8"));
+    name_native(0x10, out, sizeof out);                     /* no function there */
+    assert(!strcmp(out, "+0x10"));
+    name_native(0x200000, out, sizeof out);                 /* past the runtime */
+    assert(!strcmp(out, "+0x200000"));
     return 0;
 }
 '''
@@ -48,10 +72,11 @@ with tempfile.TemporaryDirectory(prefix='autorun-symbols-') as tmp:
     names = subprocess.run(['nm', str(tmp / 'p.elf')], capture_output=True, text=True, check=True).stdout
     alpha = re.search(r'^([0-9a-f]+) T alpha$', names, re.M).group(1)
     beta = re.search(r'^([0-9a-f]+) t beta$', names, re.M).group(1)
+    longer = re.search(r'^([0-9a-f]+) T a_function_whose_name_is_longer_than_the_profiler_shows$', names, re.M).group(1)
     subprocess.run(['cc', '-std=gnu11', '-Wall', '-Wextra', '-Werror', '-fsanitize=address,undefined',
                     '-I', str(root / 'horizon-wine/source'), str(tmp / 't.c'),
                     str(root / 'horizon-wine/source/runtime_symbols.c'), '-o', str(tmp / 't')], check=True)
-    subprocess.run([str(tmp / 't'), str(tmp / 'p.sym'), alpha, beta], check=True)
+    subprocess.run([str(tmp / 't'), str(tmp / 'p.sym'), alpha, beta, longer], check=True)
 # The exception handler (dlls/ntdll/unix/horizon.c). A page-table refresh
 # takes the GPU's buffers out for a moment like any heap: a write fault on one
 # is waited out, not handed to the program, where Vampire's thread spun in the
@@ -78,4 +103,5 @@ runtime = (root / 'horizon-wine/source/runtime.c').read_text()
 assert 'devoptab_list[STD_ERR] = &native_stderr_device;' in runtime
 main = runtime[runtime.index('\nint main( int argc, char **argv )'):]
 assert main.index('consoleInit( NULL );') < main.index('runtime_native_stderr_hook();')
-print(f'runtime symbols: {count} functions written; names, offsets, unknown and foreign addresses read back')
+print(f'runtime symbols: {count} functions written; names, offsets, unknown and foreign addresses read back, '
+      'from the file and from memory; the profiler names native sites')
