@@ -615,7 +615,11 @@ enum horizon_dlls_result horizon_dlls_plan( const char *root, struct horizon_dll
 
     memset( plan, 0, sizeof(*plan) );
     /* What has to be read to be known: everything when verifying, and a file
-     * the card has with no record of where it came from. */
+     * the card has with no record of where it came from. A file with a record
+     * is not read, so it is not asked about here either: the check as the
+     * launcher opens, after every game, asked the card about each of its 1611
+     * files twice, more than 3000 stats on an SD card, and the first of them
+     * only to add up what would be read. */
     for (i = 0; i < remote->count; i++)
     {
         struct horizon_dll_file *f = &remote->files[i];
@@ -625,8 +629,8 @@ enum horizon_dlls_result horizon_dlls_plan( const char *root, struct horizon_dll
 
         f->state = HORIZON_DLL_NEW;
         if (!join( path, sizeof(path), root, horizon_dlls_folders[f->folder], f->name )) return HORIZON_DLLS_INVALID;
-        if (!stat( path, &st ) && S_ISREG( st.st_mode ) && (unsigned long long)st.st_size == f->size &&
-            (verify || !known))
+        if (known && !verify) continue;
+        if (!stat( path, &st ) && S_ISREG( st.st_mode ) && (unsigned long long)st.st_size == f->size)
             to_hash += f->size;
     }
     for (i = 0; i < remote->count; i++)

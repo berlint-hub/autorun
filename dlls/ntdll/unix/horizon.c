@@ -23042,8 +23042,17 @@ Result __wrap_svcCreateThread( Handle *handle, ThreadFunc entry, void *arg, void
     }
     if (R_FAILED(rc))
     {
+        /* The runtime's placeholder threads fill every slot the process has
+         * (runtime.c), and the creation after the last is refused on purpose;
+         * its [TLS] line says so. Logged here, "create failed" stood in every
+         * program's log as if something had gone wrong. */
+        extern int wine_nx_tls_filling __attribute__((weak));
         extern void carafeErrorThreadRefused( void ) __attribute__((weak));
         u64 resource = 0;
+
+        if (&wine_nx_tls_filling && __atomic_load_n( &wine_nx_tls_filling, __ATOMIC_ACQUIRE ) &&
+            !__atomic_load_n( &horizon_lifecycle.tebs, __ATOMIC_RELAXED ))
+            return rc;
         s64 used = -1, limit = -1;
         char message[160];
 

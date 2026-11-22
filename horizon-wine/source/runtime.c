@@ -4513,6 +4513,7 @@ void wine_nx_leave_process( const char *why )
 #define TLS_PLACEHOLDERS_MAX 96   /* Horizon's thread limit for an application */
 
 static Thread tls_threads[TLS_PLACEHOLDERS_MAX];
+int wine_nx_tls_filling;
 static unsigned long long tls_page[TLS_PLACEHOLDERS_MAX];
 static unsigned char tls_keep[TLS_PLACEHOLDERS_MAX];
 static unsigned int tls_count;
@@ -4587,6 +4588,9 @@ static void hold_thread_local_pages( void )
     unsigned int i, j, kept = 0, found = 0, dropped;
     Result rc = 0;
 
+    /* The creation the loop ends at is refused on purpose: the [TLS] line
+     * below says so, and __wrap_svcCreateThread does not log it as a failure. */
+    __atomic_store_n( &wine_nx_tls_filling, 1, __ATOMIC_RELEASE );
     for (i = 0; i < TLS_PLACEHOLDERS_MAX; i++)
     {
         /* 0x3b, the lowest priority an application may give a thread on cores
@@ -4602,6 +4606,7 @@ static void hold_thread_local_pages( void )
         }
         while (!__atomic_load_n( &tls_page[i], __ATOMIC_ACQUIRE )) svcSleepThread( 100000 );
     }
+    __atomic_store_n( &wine_nx_tls_filling, 0, __ATOMIC_RELEASE );
     tls_count = i;
     for (i = 0; i < tls_count; i++)
     {
