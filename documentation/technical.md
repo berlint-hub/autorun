@@ -309,7 +309,10 @@ experimental one (`carafe/dlls`), whose series was carried to FEX-2611.1 with
 it. Three things in it differ from a plain port. Its WoW64
 frontend keeps FEX-2609's way of suspending a thread (the interrupt fault page
 each block writes, `NeedsPendingInterruptFaultCheck`): FEX-2611 moved WoW64 to
-the CPU area's doorbell, which this Wine completes for ARM64EC only. And FEX's
+the CPU area's doorbell, which this Wine completes for ARM64EC only. Its
+translated code checks the doorbell only in the ARM64EC module: nothing points
+WoW64's at a CPU area, so it stays zero, and the load and branch it took at
+every block and loop were about 2% of Doom 3's translated time. And FEX's
 own unix calls numbered 7 and on (FEX-2611's `GetPID` and
 `CheckSupportsTPIDRRO_CPU`) are answered in the module, since those numbers are
 the runtime's (`WINE_NX_FEX_QUERY` and on). And FEX-2611's RDRAND fallback for

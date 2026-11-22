@@ -517,7 +517,7 @@ index c2b1d8e..22cd676 100644
      b_OrRestart(MapCC(Op->Cond), TrueTargetLabel);
    } else {
 diff --git a/FEXCore/Source/Interface/Core/JIT/JIT.cpp b/FEXCore/Source/Interface/Core/JIT/JIT.cpp
-index 435afed..68d6f06 100644
+index 435afed..9523a71 100644
 --- a/FEXCore/Source/Interface/Core/JIT/JIT.cpp
 +++ b/FEXCore/Source/Interface/Core/JIT/JIT.cpp
 @@ -62,7 +62,18 @@ static std::optional<uint64_t> RDRANDFallback(uint64_t Reseed) {
@@ -585,7 +585,19 @@ index 435afed..68d6f06 100644
      ARMEmitter::Emitter::ClearICache(reinterpret_cast<void*>(JumpThunkStartAddress), 4);
  
      Thread->LookupCache->AddBlockLink(GuestRip, Record, IndirectBlockDelinker, lk);
-@@ -844,7 +858,15 @@ CodeBuffer::CodeBufferAllocation Arm64JITCore::AllocateCodeBufferInSharedCache(s
+@@ -790,7 +804,10 @@ void Arm64JITCore::EmitSuspendInterruptCheck() {
+     }
+   }
+ 
+-#ifdef _WIN32
++#if defined(_WIN32) && !(defined(FEX_HORIZON) && !defined(ARCHITECTURE_arm64ec))
++  // On Horizon, WOW64 is suspended through the fault page above alone: only
++  // ARM64EC points its CPU area's doorbell at the frame's, so for WOW64 it
++  // stays zero, and checking it would cost every block and loop a load.
+   static constexpr uint16_t SuspendMagic {0xCAFE};
+ 
+   ldr(TMP2.W(), STATE_PTR(CpuStateFrame, SuspendDoorbell));
+@@ -844,7 +861,15 @@ CodeBuffer::CodeBufferAllocation Arm64JITCore::AllocateCodeBufferInSharedCache(s
      if (AllocatedInfo.BufferAllocationOffset == nullptr) {
        // If it didn't fit then clear the buffer and try again.
        // This has the possibility of migrating the SharedCodeBuffer. See above in `Arm64JITCore::ClearCache()`
@@ -601,7 +613,7 @@ index 435afed..68d6f06 100644
        continue;
      }
    }
-@@ -1133,10 +1155,10 @@ CPUBackend::CompiledCode Arm64JITCore::EmitJITCode(uint64_t Entry, uint64_t Size
+@@ -1133,10 +1158,10 @@ CPUBackend::CompiledCode Arm64JITCore::EmitJITCode(uint64_t Entry, uint64_t Size
        EntryPoint.second += Delta;
      }
      CodeBegin += Delta;
@@ -614,7 +626,7 @@ index 435afed..68d6f06 100644
    }
  
    TempCodeBufferAllocator.DelayedDisownBuffer();
-@@ -1181,13 +1203,13 @@ CPUBackend::CompiledCode Arm64JITCore::LoadCachedCode(std::span<const uint8_t> H
+@@ -1181,13 +1206,13 @@ CPUBackend::CompiledCode Arm64JITCore::LoadCachedCode(std::span<const uint8_t> H
    auto AllocatedInfo = AllocateCodeBufferInSharedCache(HostBytes.size());
  
    uint8_t* Dest = AllocatedInfo.BufferAllocationOffset;
