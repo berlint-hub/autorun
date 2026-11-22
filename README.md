@@ -126,7 +126,14 @@ games, settings and artwork stay. Every push to `main` releases its build as
 from this repository without the archive going through a computer: both
 runtimes (the nxvk one too) and their symbol files are replaced, and the
 Windows DLLs come from the DLL repository at the next start. A release of the
-build the card already runs is not offered. **Settings -> System -> Windows DLLs**
+build the card already runs is not offered.
+
+An update from a release up to `autorun-232` stopped on the symbol file that
+runtime keeps open, and Autorun then says **Recovery failed** at every start.
+The card still holds the build it had: open `switch/wine/updates/previous.nro`
+from the Homebrew Menu, which finishes the recovery, or delete the
+`switch/wine/updates` folder on a computer. The update from there to a later
+release goes through. **Settings -> System -> Windows DLLs**
 downloads only the DLLs that changed, and **Verify files** checks the card's
 copies.
 

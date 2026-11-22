@@ -1,13 +1,40 @@
 #include <assert.h>
 #include "../source/autorun_install.c"
 
-static int fail_publish;
+static int fail_publish, fail_restore;
+/* A file that is open, as the running runtime's symbol file is: Horizon
+ * neither deletes it nor puts another file in its place. */
+static const char *held;
+
+static int ends_with(const char *path, const char *suffix)
+{
+    size_t length = strlen(path), size = strlen(suffix);
+    return length >= size && !strcmp(path + length - size, suffix);
+}
+
+static int is_held(const char *path)
+{
+    return held && ends_with(path, held);
+}
+
 int __real_rename(const char *from, const char *to);
 int __wrap_rename(const char *from, const char *to)
 {
     if (fail_publish && strstr(to, "/drive_c/windows/system32/ntdll.dll"))
     { fail_publish = 0; errno = EIO; return -1; }
+    if (is_held(from) || is_held(to)) { errno = EBUSY; return -1; }
+    /* Undoing the update stops once, as a card can, at a file it had
+     * replaced: the next try finishes it. */
+    if (fail_restore && ends_with(from, "/restore.part") && ends_with(to, "/wine-nx-runtime-nxvk.nro"))
+    { fail_restore = 0; errno = EIO; return -1; }
     return __real_rename(from, to);
+}
+
+int __real_unlink(const char *path);
+int __wrap_unlink(const char *path)
+{
+    if (is_held(path)) { errno = EBUSY; return -1; }
+    return __real_unlink(path);
 }
 
 static void test_managed(void)
@@ -17,7 +44,7 @@ static void test_managed(void)
         "drive_c/windows/system32/ntdll.dll", "drive_c/windows/syswow64/kernel32.dll",
         "share/wine/nls/locale.nls", "share/wine/fonts/tahoma.ttf",
         "licenses/Wine-LGPL.txt", "licenses/nxvk/COPYING", "wine-nx-runtime-nxvk.nro",
-        "wine-nx-runtime.sym", "wine-nx-runtime-nxvk.sym", "README.txt", "game-fixes/bundled.json",
+        "wine-nx-runtime.nro.sym", "wine-nx-runtime-nxvk.nro.sym", "README.txt", "game-fixes/bundled.json",
         "drive_c/windows/autorun-setup.exe"
     };
     const char *keep[] = {
@@ -25,7 +52,7 @@ static void test_managed(void)
         "drive_c/windows/custom.ini", "drive_c/windows/system32/ntdll.dll/child",
         "../wine-nx-runtime.nro", "drive_c/windows/system32/../ntdll.dll",
         "config/settings.json", "config/keys.txt", "game-fixes/index.json", "licenses/../config/keys.txt",
-        "wine-nx-runtime-other.nro"
+        "wine-nx-runtime-other.nro", "wine-nx-runtime.sym", "wine-nx-runtime-nxvk.sym"
     };
     for (unsigned i = 0; i < sizeof(replace) / sizeof(*replace); i++) assert(managed(replace[i]));
     for (unsigned i = 0; i < sizeof(keep) / sizeof(*keep); i++) assert(!managed(keep[i]));
@@ -73,9 +100,31 @@ int main(int argc, char **argv)
         assert(autorun_install_recover(argv[1], 0) == 0);
         return 0;
     }
-    fail_publish = atoi(argv[3]);
+    /* 3: a file the update replaces is open, as the running runtime's symbol
+     * file would be had the launcher not closed it (and as a runtime until
+     * 22524fc kept wine-nx-runtime.sym): the update fails and is undone
+     * around it. 4: undoing it also stops once; the next start's recovery
+     * finishes it, with the file still open. */
+    if (atoi(argv[3]) == 3 || atoi(argv[3]) == 4)
+    {
+        held = "/wine-nx-runtime.nro.sym";
+        fail_restore = atoi(argv[3]) == 4;
+        enum autorun_install_result result = autorun_install_archive(argv[1], argv[2], "bundle-test", 1, NULL, NULL);
+        if (atoi(argv[3]) == 4)
+        {
+            assert(result == AUTORUN_INSTALL_RECOVERY);
+            assert(autorun_install_recover(argv[1], 0) == 2);
+        }
+        else assert(result == AUTORUN_INSTALL_IO);
+        assert(autorun_install_recover(argv[1], 0) == 0);
+        return 0;
+    }
+    /* 5: the same open file, which the archive does not bring (it brings
+     * wine-nx-runtime.nro.sym): the update goes ahead. */
+    if (atoi(argv[3]) == 5) held = "/wine-nx-runtime.sym";
+    else fail_publish = atoi(argv[3]);
     enum autorun_install_result result = autorun_install_archive(argv[1], argv[2], "bundle-test", 1, NULL, NULL);
-    if (atoi(argv[3]))
+    if (atoi(argv[3]) == 1)
     {
         assert(result == AUTORUN_INSTALL_IO);
         assert(autorun_install_recover(argv[1], 0) == 0);

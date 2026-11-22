@@ -34,7 +34,7 @@ with tempfile.TemporaryDirectory(prefix='autorun-runtime-update-') as temporary:
     if deps.is_dir():
         command += ['-I' + str(deps / 'include'), '-L' + str(deps / 'lib/aarch64-linux-gnu'),
                     '-Wl,-rpath,' + str(deps / 'lib/aarch64-linux-gnu')]
-    command += [str(horizon_wine / 'tests/autorun_install.c'), '-lminizip', '-lz', '-Wl,--wrap=rename', '-o', str(executable)]
+    command += [str(horizon_wine / 'tests/autorun_install.c'), '-lminizip', '-lz', '-Wl,--wrap=rename', '-Wl,--wrap=unlink', '-o', str(executable)]
     subprocess.run(command, check=True)
     environment = dict(os.environ, ASAN_OPTIONS='detect_leaks=1:halt_on_error=1', UBSAN_OPTIONS='halt_on_error=1')
     archive_path = temporary / 'full-update.zip'
@@ -56,9 +56,9 @@ with tempfile.TemporaryDirectory(prefix='autorun-runtime-update-') as temporary:
     # The card archive (tools/package-autorun.py) as the build workflow
     # releases it: the runtimes and their files, and no Windows modules, which
     # the DLL repository brings. The card's modules stay as they are.
-    card = ['wine-nx-runtime.nro', 'wine-nx-runtime-nxvk.nro', 'wine-nx-runtime.sym', 'wine-nx-runtime-nxvk.sym',
-            'README.txt', 'game-fixes/bundled.json', 'drive_c/windows/autorun-setup.exe', 'licenses/nxvk/COPYING',
-            'build-manifest.json']
+    card = ['wine-nx-runtime.nro', 'wine-nx-runtime-nxvk.nro', 'wine-nx-runtime.nro.sym',
+            'wine-nx-runtime-nxvk.nro.sym', 'README.txt', 'game-fixes/bundled.json',
+            'drive_c/windows/autorun-setup.exe', 'licenses/nxvk/COPYING', 'build-manifest.json']
     settings = ['config/settings.json', 'config/keys.txt']
     modules = ['drive_c/windows/system32/ntdll.dll', 'drive_c/windows/syswow64/kernel32.dll']
     card_path = temporary / 'card.zip'
@@ -91,5 +91,40 @@ with tempfile.TemporaryDirectory(prefix='autorun-runtime-update-') as temporary:
     subprocess.run([str(executable), str(root), str(half_path), '2'], check=True, env=environment)
     for name in ['wine-nx-runtime.nro', 'drive_c/windows/system32/ntdll.dll']:
         assert (root / name).read_bytes() == data(name, b'old'), name
+    # The card archive on a card whose runtime keeps its symbol file open,
+    # which Horizon then neither deletes nor replaces, as a runtime until
+    # 22524fc kept wine-nx-runtime.sym (the launcher now closes it for the
+    # update): the update fails, and undoing it leaves that file as it was
+    # rather than failing on it too, at once (3) or at the next start when
+    # undoing it stopped half way (4). Each time the card is as before and no
+    # transaction is left to block the runtime.
+    for mode in (3, 4):
+        root = temporary / f'held-{mode}'
+        for name in card:
+            path = root / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(data(name, b'old'))
+        subprocess.run([str(executable), str(root), str(card_path), str(mode)], check=True, env=environment)
+        for name in card:
+            assert (root / name).read_bytes() == data(name, b'old'), (mode, name)
+        assert not (root / 'updates/transaction').exists(), mode
+    # The card archive on a card of 22524fc or before, whose runtime keeps
+    # wine-nx-runtime.sym open: the archive's symbol files are
+    # wine-nx-runtime.nro.sym and wine-nx-runtime-nxvk.nro.sym, so the open
+    # file is not in the way and stays as it is (the new runtime removes it).
+    older = ['README.txt', 'build-manifest.json', 'wine-nx-runtime-nxvk.nro', 'wine-nx-runtime-nxvk.sym',
+             'wine-nx-runtime.nro', 'wine-nx-runtime.sym']
+    root = temporary / 'held-5'
+    for name in older:
+        path = root / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data(name, b'old'))
+    subprocess.run([str(executable), str(root), str(card_path), '5'], check=True, env=environment)
+    for name in card:
+        assert (root / name).read_bytes() == data(name, b'new'), name
+    assert (root / 'wine-nx-runtime.sym').read_bytes() == data('wine-nx-runtime.sym', b'old')
+    assert not (root / 'updates/transaction').exists()
     print('app update: NRO and DLLs refreshed; settings, registry and saves preserved; rollback restored originals; '
-          'the card archive without Windows modules installs both runtimes and their files, half a system is refused')
+          'the card archive without Windows modules installs both runtimes and their files, half a system is refused; '
+          'an open file the update cannot replace fails it and is left alone in undoing it, now or at the next '
+          'start, and the card archive brings its symbol files beside it')

@@ -92,12 +92,13 @@ static int managed( const char *path )
     char suffix[12];
     /* The card archive's own files, which an update replaces: the runtime
      * linked with nxvk beside the card's, both runtimes' symbol files (a
-     * stale one names the wrong functions), what is read about Autorun and
-     * its licenses, the fixes it knows offline and its setup program. A
+     * stale one names the wrong functions; the running runtime's is closed
+     * for the update, launcher_update.c), what is read about Autorun and its
+     * licenses, the fixes it knows offline and its setup program. A
      * program's settings (config/) are the card's and stay. */
     static const char *const files[] =
     {
-        "wine-nx-runtime-nxvk.nro", "wine-nx-runtime.sym", "wine-nx-runtime-nxvk.sym", "README.txt",
+        "wine-nx-runtime-nxvk.nro", "wine-nx-runtime.nro.sym", "wine-nx-runtime-nxvk.nro.sym", "README.txt",
         "game-fixes/bundled.json", "drive_c/windows/autorun-setup.exe",
     };
 
@@ -390,6 +391,13 @@ static int rollback( const char *root, const struct install_plan *p )
         if (!parents( root, e->path ) || !join( dest, sizeof(dest), root, e->path )) return 0;
         if (e->existed)
         {
+            uint64_t size;
+
+            /* A file the update never reached, or one an earlier try put
+             * back, stays as it is: it may be open (the symbol file of the
+             * runtime doing this), and Horizon replaces no open file. */
+            if (regular( dest, &size ) == 1 && size == e->old_size && file_crc( dest, e->old_size, &crc ) &&
+                crc == e->old_crc) continue;
             entry_path( source, sizeof(source), root, i, 1 );
             if (copy_file( source, temp, e->old_size, &crc, NULL, NULL, NULL, 0, 0 ) != 1 ||
                 crc != e->old_crc || !replace( temp, dest )) return 0;

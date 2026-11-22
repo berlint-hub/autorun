@@ -15,5 +15,10 @@ int wine_nx_runtime_symbol( uintptr_t address, char *out, size_t size );
  * name from the card: for the profiler, which names a hundred sites a report.
  * Nonzero when they are in memory. */
 int wine_nx_runtime_symbols_keep( void );
+/* Closes the file, which an update may then replace (Horizon replaces no open
+ * file); names are offsets meanwhile. Reopening takes the same file again, if
+ * it is still the one opened (an update that was undone); nonzero when open. */
+void wine_nx_runtime_symbols_close( void );
+int wine_nx_runtime_symbols_reopen( void );
 
 #endif
