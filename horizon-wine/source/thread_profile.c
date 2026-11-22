@@ -1316,6 +1316,27 @@ static int image_at( uint64_t address, void **base, char *name, size_t size )
 
 /* The runtime's own functions by name (source/runtime_symbols.c). */
 extern int wine_nx_runtime_symbol( uintptr_t address, char *out, size_t size ) __attribute__((weak));
+extern int wine_nx_runtime_symbols_keep( void ) __attribute__((weak));
+
+/* A site in the runtime's own code by its function's name where the symbol
+ * file has it: "+0x3e38a0" said nothing about where a main thread spent a
+ * fifth of its time without the build's .sym at hand. A long (C++) name is cut
+ * to its first NX_PROF_NAME characters and keeps its offset, so that a line
+ * of twelve still fits; without a name the offset stays as it was. */
+#define NX_PROF_NAME 36
+static void name_native( uint64_t offset, char *buf, size_t size )
+{
+    char full[200];
+    const char *plus;
+
+    if (wine_nx_runtime_symbol && offset < runtime_end - runtime_base &&
+        wine_nx_runtime_symbol( runtime_base + offset, full, sizeof(full) ) && (plus = strrchr( full, '+' )))
+    {
+        if (plus - full > NX_PROF_NAME) snprintf( buf, size, "%.*s~%s", NX_PROF_NAME, full, plus );
+        else snprintf( buf, size, "%s", full );
+    }
+    else snprintf( buf, size, "+%#llx", (unsigned long long)offset );
+}
 
 static void name_address( uint64_t address, char *buf, size_t size )
 {
@@ -1332,7 +1353,7 @@ static void name_site( uint32_t site, int guest, char *buf, size_t size )
 {
     if (site == NX_PROF_NO_SITE) snprintf( buf, size, "-" );
     else if (guest) name_address( site, buf, size );
-    else snprintf( buf, size, "+%#x", (unsigned int)site );
+    else name_native( site, buf, size );
 }
 
 /* Where every thread is standing, once nothing has moved for a while. A program
@@ -1527,10 +1548,13 @@ static void profile_report( const struct nx_prof_row *rows, unsigned int count )
 {
     static const char *const table_names[NX_PROF_TABLES] = { "x86", "pe", "native", "svc", "callers", "x86 callers",
                                                              "x86 frames" };
-    char line[NX_PROF_LINE + 24], name[96], outer[96];
+    char line[NX_PROF_LINE + 24], name[128], outer[128];
     unsigned int i, j, k, shown, top[12];
     int len;
 
+    /* The symbol file's records in memory, once: a report names some hundred
+     * sites, each a binary search of the file on the card otherwise. */
+    if (wine_nx_runtime_symbols_keep) wine_nx_runtime_symbols_keep();
     pthread_mutex_lock( &profile_mutex );
     for (i = 0; i < NX_PROF_TARGETS; i++)
     {
@@ -1559,10 +1583,12 @@ static void profile_report( const struct nx_prof_row *rows, unsigned int count )
                 const struct nx_prof_bucket *bucket = &table->buckets[top[j]];
 
                 if (k == NX_PROF_X86 || k == NX_PROF_IMAGE) name_address( bucket->key, name, sizeof(name) );
-                else if (k == NX_PROF_NATIVE) snprintf( name, sizeof(name), "+%#llx", (unsigned long long)bucket->key );
+                else if (k == NX_PROF_NATIVE) name_native( bucket->key, name, sizeof(name) );
                 else if (k == NX_PROF_SVC)
-                    snprintf( name, sizeof(name), "svc%#llx<+%#llx", (unsigned long long)(bucket->key >> 40),
-                              (unsigned long long)(bucket->key & 0xffffffffffull) );
+                {
+                    name_native( bucket->key & 0xffffffffffull, outer, sizeof(outer) );
+                    snprintf( name, sizeof(name), "svc%#llx<%s", (unsigned long long)(bucket->key >> 40), outer );
+                }
                 else
                 {
                     name_site( (uint32_t)(bucket->key >> 32), guest, name, sizeof(name) );

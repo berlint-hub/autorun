@@ -270,7 +270,10 @@ translations give their room back, at a small cost on every block entry;
 `purged=` counts the passes, blocks, megabytes and milliseconds. Freed code
 waits two seconds before it is reused.
 With the profiler on, `[THREADS]`, `[SERVER]` and `[PROF]` show where each busy
-thread spends its time. DLLs that fail to load are logged (`[NXLDR]`, and
+thread spends its time. Sites in the runtime's own code (the `native`, `svc`
+and `callers` lines) are named by function from the `.sym` beside the NRO, a
+long C++ name cut to 36 characters with its offset kept, and stay bare offsets
+(`+0x3e38a0`) without it. DLLs that fail to load are logged (`[NXLDR]`, and
 Wine's `err:` lines) even without verbose traces, and so are files a program
 could not open (`[FS]`, with how it asked), the first overlapped socket
 operations (`[ASYNC]`), user APCs (`[APC]`) and x86 faults (`[BOX64]`).
