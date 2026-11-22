@@ -90,8 +90,21 @@ static int managed( const char *path )
     unsigned int i;
     const char *ext;
     char suffix[12];
+    /* The card archive's own files, which an update replaces: the runtime
+     * linked with nxvk beside the card's, both runtimes' symbol files (a
+     * stale one names the wrong functions), what is read about Autorun and
+     * its licenses, the fixes it knows offline and its setup program. A
+     * program's settings (config/) are the card's and stay. */
+    static const char *const files[] =
+    {
+        "wine-nx-runtime-nxvk.nro", "wine-nx-runtime.sym", "wine-nx-runtime-nxvk.sym", "README.txt",
+        "game-fixes/bundled.json", "drive_c/windows/autorun-setup.exe",
+    };
+
     if (!plain_path( path )) return 0;
     if (!strcasecmp( path, INSTALL_NRO ) || !strcasecmp( path, "build-manifest.json" )) return 1;
+    for (i = 0; i < sizeof(files) / sizeof(files[0]); i++) if (!strcasecmp( path, files[i] )) return 1;
+    if (!strncasecmp( path, "licenses/", 9 )) return 1;
     if (!(ext = strrchr( path, '.' )) || strlen( ext ) > 8) return 0;
     snprintf( suffix, sizeof(suffix), "%s;", ext );
     for (i = 0; suffix[i]; i++) suffix[i] = tolower( (unsigned char)suffix[i] );
@@ -259,6 +272,15 @@ static int has_file( const struct install_plan *p, const char *path )
 {
     unsigned int i;
     for (i = 0; i < p->header.count; i++) if (!strcmp( p->entries[i].path, path )) return 1;
+    return 0;
+}
+
+static int has_system_modules( const struct install_plan *p )
+{
+    unsigned int i;
+    for (i = 0; i < p->header.count; i++)
+        if (!strncasecmp( p->entries[i].path, "drive_c/windows/system32/", 25 ) ||
+            !strncasecmp( p->entries[i].path, "drive_c/windows/syswow64/", 25 )) return 1;
     return 0;
 }
 
@@ -541,13 +563,19 @@ enum autorun_install_result autorun_install_archive( const char *root, const cha
 next_entry:
         if (i + 1 < global.number_entry && unzGoToNextFile( zip ) != UNZ_OK) goto done;
     }
-    if (!has_file( p, INSTALL_NRO ) || !has_file( p, "drive_c/windows/system32/ntdll.dll" ) ||
-        !has_file( p, "drive_c/windows/syswow64/ntdll.dll" ) ||
-        !has_file( p, "drive_c/windows/syswow64/kernel32.dll" ) ||
-        !has_file( p, "drive_c/windows/syswow64/kernelbase.dll" )) goto done;
-    if (require_amd64 && (!has_file( p, "drive_c/windows/system32/winebox64ec.dll" ) ||
-        !has_file( p, "drive_c/windows/system32/kernel32.dll" ) ||
-        !has_file( p, "drive_c/windows/system32/kernelbase.dll" ))) goto done;
+    if (!has_file( p, INSTALL_NRO )) goto done;
+    /* An archive with Windows modules brings all of the core ones, so the card
+     * is never left with a runtime and half its system. The card archive
+     * (tools/package-autorun.py) brings none: they are the DLL repository's,
+     * which the launcher's DLL check brings up to what the new runtime runs. */
+    if (has_system_modules( p ) &&
+        (!has_file( p, "drive_c/windows/system32/ntdll.dll" ) ||
+         !has_file( p, "drive_c/windows/syswow64/ntdll.dll" ) ||
+         !has_file( p, "drive_c/windows/syswow64/kernel32.dll" ) ||
+         !has_file( p, "drive_c/windows/syswow64/kernelbase.dll" ) ||
+         (require_amd64 && (!has_file( p, "drive_c/windows/system32/winebox64ec.dll" ) ||
+                            !has_file( p, "drive_c/windows/system32/kernel32.dll" ) ||
+                            !has_file( p, "drive_c/windows/system32/kernelbase.dll" ))))) goto done;
     if (!p->entries[nro_index].existed) goto done;
     {
         struct install_entry last = p->entries[nro_index];

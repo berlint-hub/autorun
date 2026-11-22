@@ -121,7 +121,12 @@ Without a network, download that repository (Code, Download ZIP) and unzip its
 ### Updating
 
 **Settings -> System -> Check for update** installs a newer release; your
-games, settings and artwork stay. **Settings -> System -> Windows DLLs**
+games, settings and artwork stay. Every push to `main` releases its build as
+`autorun-<run>-<commit>` (the build workflow), so the console updates itself
+from this repository without the archive going through a computer: both
+runtimes (the nxvk one too) and their symbol files are replaced, and the
+Windows DLLs come from the DLL repository at the next start. A release of the
+build the card already runs is not offered. **Settings -> System -> Windows DLLs**
 downloads only the DLLs that changed, and **Verify files** checks the card's
 copies.
 

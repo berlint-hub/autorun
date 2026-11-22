@@ -14,8 +14,18 @@
 #include "autorun_update.h"
 #include "json_reader.h"
 
-#define RELEASE_API "https://api.github.com/repos/danfromtico/autorun/releases/latest"
-#define DOWNLOAD_PREFIX "https://github.com/danfromtico/autorun/releases/download/"
+/* Where the card's archive is released: the repository this runtime is built
+ * from, whose build workflow (.github/workflows/build.yml) releases it after
+ * every push to main as autorun-<run>-<commit>, with autorun.zip, unless the
+ * build names another. The same repository releases Carafe's FEX and DXVK
+ * builds (carafe-dlls.yml), so its "latest" release need not be the card's:
+ * the newest release whose tag starts with RELEASE_TAG_PREFIX is. */
+#ifndef WINE_NX_UPDATE_REPO
+#define WINE_NX_UPDATE_REPO "berlint-hub/autorun"
+#endif
+#define RELEASE_TAG_PREFIX "autorun-"
+#define RELEASE_API "https://api.github.com/repos/" WINE_NX_UPDATE_REPO "/releases?per_page=30"
+#define DOWNLOAD_PREFIX "https://github.com/" WINE_NX_UPDATE_REPO "/releases/download/"
 #define METADATA_MAX (1024u * 1024u)
 #define ARCHIVE_MAX (1024u * 1024u * 1024u)
 
@@ -272,6 +282,31 @@ static int parse_release( const unsigned char *data, size_t size, struct autorun
     return 1;
 }
 
+/* The newest release of the card in the repository's list, which GitHub gives
+ * newest first: 1 when there is one, 0 when the list has none (Carafe's
+ * releases, drafts, prereleases and releases without one archive of the card
+ * are passed over), -1 when the list is not one. */
+static int parse_release_list( const unsigned char *data, size_t size, struct autorun_release *release )
+{
+    struct parser p = {data, data + size, 0};
+    const unsigned char *start;
+
+    if (!data || !size || !consume( &p, '[' )) return -1;
+    whitespace( &p );
+    if (p.p < p.end && *p.p == ']') return 0;
+    for (;;)
+    {
+        whitespace( &p );
+        start = p.p;
+        if (!skip_value( &p )) return -1;
+        if (parse_release( start, (size_t)(p.p - start), release ) &&
+            !strncmp( release->tag, RELEASE_TAG_PREFIX, sizeof(RELEASE_TAG_PREFIX) - 1 )) return 1;
+        whitespace( &p );
+        if (p.p < p.end && *p.p == ']') return 0;
+        if (p.p == p.end || *p.p++ != ',') return -1;
+    }
+}
+
 static enum autorun_update_result request_metadata( struct memory_buffer *body,
         autorun_update_progress callback, void *opaque )
 {
@@ -313,7 +348,15 @@ enum autorun_update_result autorun_update_check( struct autorun_release *release
 
     if (!release) return AUTORUN_UPDATE_INVALID;
     result = request_metadata( &body, callback, opaque );
-    if (result == AUTORUN_UPDATE_OK && !parse_release( body.data, body.size, release )) result = AUTORUN_UPDATE_INVALID;
+    if (result == AUTORUN_UPDATE_OK)
+    {
+        switch (parse_release_list( body.data, body.size, release ))
+        {
+        case 1: break;
+        case 0: result = AUTORUN_UPDATE_NOT_FOUND; break;
+        default: result = AUTORUN_UPDATE_INVALID; break;
+        }
+    }
     free( body.data );
     return result;
 }
@@ -426,7 +469,7 @@ const char *autorun_update_error( enum autorun_update_result result )
     case AUTORUN_UPDATE_OK: return "The update is ready.";
     case AUTORUN_UPDATE_CANCELLED: return "The update was cancelled.";
     case AUTORUN_UPDATE_NETWORK: return "Could not download the update from GitHub.";
-    case AUTORUN_UPDATE_NOT_FOUND: return "No official Autorun update was found.";
+    case AUTORUN_UPDATE_NOT_FOUND: return "No Autorun release was found on GitHub (" WINE_NX_UPDATE_REPO ").";
     case AUTORUN_UPDATE_INVALID: return "GitHub returned an invalid Autorun release.";
     case AUTORUN_UPDATE_IO: return "The update could not be written to the SD card.";
     case AUTORUN_UPDATE_HASH: return "The update failed SHA-256 verification.";

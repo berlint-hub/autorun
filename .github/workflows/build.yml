@@ -162,7 +162,7 @@ jobs:
         # and the rest still run.
         run: |
           failed=""
-          for check in check_arm64ec_box64_unix check_arm64ec_fpcsr check_autorun_runtime_update \
+          for check in check_arm64ec_box64_unix check_arm64ec_fpcsr check_autorun_runtime_update check_autorun_update_releases \
                        check_callback_lifetime check_caret check_config_json check_continue_context \
                        check_delete_on_close check_desktop_ancestry check_directshow_reg \
                        check_display_expose_cursor check_download_hosts check_dsound_resample \
@@ -524,6 +524,43 @@ jobs:
           path: horizon-wine/build-autorun/autorun-*.zip
           if-no-files-found: error
           retention-days: 30
+
+      - name: Release the card for the launcher's updater
+        # A card updates itself from this repository's releases (the launcher's
+        # Updates, source/autorun_update.c), without the archive going through
+        # a computer: every push to main releases its card archive as
+        # autorun-<run>-<commit> with autorun.zip, made the latest release
+        # (Carafe's FEX and DXVK releases are made with --latest=false). The
+        # updater takes the newest release whose tag starts with autorun- and
+        # does not offer the one of the commit a card already runs. The newest
+        # five stay; older ones and their tags are deleted.
+        if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          set -- horizon-wine/build-autorun/autorun-*.zip
+          [ "$#" -eq 1 ] && [ -f "$1" ] || { echo "::error::expected one card archive, found: $*"; exit 1; }
+          tag="autorun-${{ github.run_number }}-$(git rev-parse --short=7 HEAD)"
+          out="$RUNNER_TEMP/release"
+          mkdir -p "$out"
+          cp "$1" "$out/autorun.zip"
+          # What the launcher shows as "What's new": this push's commit message,
+          # within what it holds (16 KB).
+          { echo "Built from ${GITHUB_SHA} by run ${{ github.run_number }}."; echo; git log -1 --format=%B; } |
+            python3 -c 'import sys; sys.stdout.write(sys.stdin.read()[:6000])' > "$out/notes.md"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" "$out/autorun.zip" --clobber
+          else
+            gh release create "$tag" "$out/autorun.zip" --target "$GITHUB_SHA" --title "Autorun $tag" \
+              --notes-file "$out/notes.md" --latest
+          fi
+          echo "::notice::released $tag"
+          gh release list --limit 100 --json tagName,createdAt \
+            --jq '[.[] | select(.tagName | startswith("autorun-"))] | sort_by(.createdAt) | reverse | .[5:] | .[].tagName' |
+            while read -r old; do
+              gh release delete "$old" --yes --cleanup-tag && echo "removed $old" || echo "::warning::could not remove $old"
+            done
 
       - name: Upload the runtime's symbols
         # The NRO on the card has no symbols, so a [STALL] line's runtime
