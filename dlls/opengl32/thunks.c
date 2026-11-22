@@ -82,8 +82,8 @@ void WINAPI glBindTexture( GLenum target, GLuint texture )
     struct glBindTexture_params args = { .teb = NtCurrentTeb(), .target = target };
     NTSTATUS status;
     TRACE( "target %d, texture %d\n", target, texture );
-    if (!alloc_context_objects( OBJ_TYPE_TEXTURE, 1, &texture, FALSE )) return;
-    args.texture = *map_context_objects( OBJ_TYPE_TEXTURE, 1, &texture );
+    if (!alloc_map_context_object( OBJ_TYPE_TEXTURE, &texture, FALSE )) return;
+    args.texture = texture;
     if ((status = UNIX_CALL( glBindTexture, &args ))) WARN( "glBindTexture returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -1622,8 +1622,8 @@ void WINAPI glNewList( GLuint list, GLenum mode )
     struct glNewList_params args = { .teb = NtCurrentTeb(), .mode = mode };
     NTSTATUS status;
     TRACE( "list %d, mode %d\n", list, mode );
-    if (!alloc_context_objects( OBJ_TYPE_DISPLAY_LIST, 1, &list, FALSE )) return;
-    args.list = *map_context_objects( OBJ_TYPE_DISPLAY_LIST, 1, &list );
+    if (!alloc_map_context_object( OBJ_TYPE_DISPLAY_LIST, &list, FALSE )) return;
+    args.list = list;
     if ((status = UNIX_CALL( glNewList, &args ))) WARN( "glNewList returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -3480,8 +3480,8 @@ static void WINAPI glBindBuffer( GLenum target, GLuint buffer )
     struct glBindBuffer_params args = { .teb = NtCurrentTeb(), .target = target };
     NTSTATUS status;
     TRACE( "target %d, buffer %d\n", target, buffer );
-    if (!alloc_context_objects( OBJ_TYPE_BUFFER, 1, &buffer, FALSE )) return;
-    args.buffer = *map_context_objects( OBJ_TYPE_BUFFER, 1, &buffer );
+    if (!alloc_map_context_object( OBJ_TYPE_BUFFER, &buffer, FALSE )) return;
+    args.buffer = buffer;
     if ((status = UNIX_CALL( glBindBuffer, &args ))) WARN( "glBindBuffer returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -3491,8 +3491,8 @@ static void WINAPI glBindBufferARB( GLenum target, GLuint buffer )
     struct glBindBufferARB_params args = { .teb = NtCurrentTeb(), .target = target };
     NTSTATUS status;
     TRACE( "target %d, buffer %d\n", target, buffer );
-    if (!alloc_context_objects( OBJ_TYPE_BUFFER, 1, &buffer, TRUE )) return;
-    args.buffer = *map_context_objects( OBJ_TYPE_BUFFER, 1, &buffer );
+    if (!alloc_map_context_object( OBJ_TYPE_BUFFER, &buffer, TRUE )) return;
+    args.buffer = buffer;
     if ((status = UNIX_CALL( glBindBufferARB, &args ))) WARN( "glBindBufferARB returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -3502,8 +3502,8 @@ static void WINAPI glBindBufferBase( GLenum target, GLuint index, GLuint buffer 
     struct glBindBufferBase_params args = { .teb = NtCurrentTeb(), .target = target, .index = index };
     NTSTATUS status;
     TRACE( "target %d, index %d, buffer %d\n", target, index, buffer );
-    if (!alloc_context_objects( OBJ_TYPE_BUFFER, 1, &buffer, FALSE )) return;
-    args.buffer = *map_context_objects( OBJ_TYPE_BUFFER, 1, &buffer );
+    if (!alloc_map_context_object( OBJ_TYPE_BUFFER, &buffer, FALSE )) return;
+    args.buffer = buffer;
     if ((status = UNIX_CALL( glBindBufferBase, &args ))) WARN( "glBindBufferBase returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -3513,8 +3513,8 @@ static void WINAPI glBindBufferBaseEXT( GLenum target, GLuint index, GLuint buff
     struct glBindBufferBaseEXT_params args = { .teb = NtCurrentTeb(), .target = target, .index = index };
     NTSTATUS status;
     TRACE( "target %d, index %d, buffer %d\n", target, index, buffer );
-    if (!alloc_context_objects( OBJ_TYPE_BUFFER, 1, &buffer, TRUE )) return;
-    args.buffer = *map_context_objects( OBJ_TYPE_BUFFER, 1, &buffer );
+    if (!alloc_map_context_object( OBJ_TYPE_BUFFER, &buffer, TRUE )) return;
+    args.buffer = buffer;
     if ((status = UNIX_CALL( glBindBufferBaseEXT, &args ))) WARN( "glBindBufferBaseEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -3524,8 +3524,8 @@ static void WINAPI glBindBufferBaseNV( GLenum target, GLuint index, GLuint buffe
     struct glBindBufferBaseNV_params args = { .teb = NtCurrentTeb(), .target = target, .index = index };
     NTSTATUS status;
     TRACE( "target %d, index %d, buffer %d\n", target, index, buffer );
-    if (!alloc_context_objects( OBJ_TYPE_BUFFER, 1, &buffer, TRUE )) return;
-    args.buffer = *map_context_objects( OBJ_TYPE_BUFFER, 1, &buffer );
+    if (!alloc_map_context_object( OBJ_TYPE_BUFFER, &buffer, TRUE )) return;
+    args.buffer = buffer;
     if ((status = UNIX_CALL( glBindBufferBaseNV, &args ))) WARN( "glBindBufferBaseNV returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -3535,8 +3535,8 @@ static void WINAPI glBindBufferOffsetEXT( GLenum target, GLuint index, GLuint bu
     struct glBindBufferOffsetEXT_params args = { .teb = NtCurrentTeb(), .target = target, .index = index, .offset = offset };
     NTSTATUS status;
     TRACE( "target %d, index %d, buffer %d, offset %Id\n", target, index, buffer, offset );
-    if (!alloc_context_objects( OBJ_TYPE_BUFFER, 1, &buffer, TRUE )) return;
-    args.buffer = *map_context_objects( OBJ_TYPE_BUFFER, 1, &buffer );
+    if (!alloc_map_context_object( OBJ_TYPE_BUFFER, &buffer, TRUE )) return;
+    args.buffer = buffer;
     if ((status = UNIX_CALL( glBindBufferOffsetEXT, &args ))) WARN( "glBindBufferOffsetEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -3546,8 +3546,8 @@ static void WINAPI glBindBufferOffsetNV( GLenum target, GLuint index, GLuint buf
     struct glBindBufferOffsetNV_params args = { .teb = NtCurrentTeb(), .target = target, .index = index, .offset = offset };
     NTSTATUS status;
     TRACE( "target %d, index %d, buffer %d, offset %Id\n", target, index, buffer, offset );
-    if (!alloc_context_objects( OBJ_TYPE_BUFFER, 1, &buffer, TRUE )) return;
-    args.buffer = *map_context_objects( OBJ_TYPE_BUFFER, 1, &buffer );
+    if (!alloc_map_context_object( OBJ_TYPE_BUFFER, &buffer, TRUE )) return;
+    args.buffer = buffer;
     if ((status = UNIX_CALL( glBindBufferOffsetNV, &args ))) WARN( "glBindBufferOffsetNV returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -3557,8 +3557,8 @@ static void WINAPI glBindBufferRange( GLenum target, GLuint index, GLuint buffer
     struct glBindBufferRange_params args = { .teb = NtCurrentTeb(), .target = target, .index = index, .offset = offset, .size = size };
     NTSTATUS status;
     TRACE( "target %d, index %d, buffer %d, offset %Id, size %Id\n", target, index, buffer, offset, size );
-    if (!alloc_context_objects( OBJ_TYPE_BUFFER, 1, &buffer, FALSE )) return;
-    args.buffer = *map_context_objects( OBJ_TYPE_BUFFER, 1, &buffer );
+    if (!alloc_map_context_object( OBJ_TYPE_BUFFER, &buffer, FALSE )) return;
+    args.buffer = buffer;
     if ((status = UNIX_CALL( glBindBufferRange, &args ))) WARN( "glBindBufferRange returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -3568,8 +3568,8 @@ static void WINAPI glBindBufferRangeEXT( GLenum target, GLuint index, GLuint buf
     struct glBindBufferRangeEXT_params args = { .teb = NtCurrentTeb(), .target = target, .index = index, .offset = offset, .size = size };
     NTSTATUS status;
     TRACE( "target %d, index %d, buffer %d, offset %Id, size %Id\n", target, index, buffer, offset, size );
-    if (!alloc_context_objects( OBJ_TYPE_BUFFER, 1, &buffer, TRUE )) return;
-    args.buffer = *map_context_objects( OBJ_TYPE_BUFFER, 1, &buffer );
+    if (!alloc_map_context_object( OBJ_TYPE_BUFFER, &buffer, TRUE )) return;
+    args.buffer = buffer;
     if ((status = UNIX_CALL( glBindBufferRangeEXT, &args ))) WARN( "glBindBufferRangeEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -3579,8 +3579,8 @@ static void WINAPI glBindBufferRangeNV( GLenum target, GLuint index, GLuint buff
     struct glBindBufferRangeNV_params args = { .teb = NtCurrentTeb(), .target = target, .index = index, .offset = offset, .size = size };
     NTSTATUS status;
     TRACE( "target %d, index %d, buffer %d, offset %Id, size %Id\n", target, index, buffer, offset, size );
-    if (!alloc_context_objects( OBJ_TYPE_BUFFER, 1, &buffer, TRUE )) return;
-    args.buffer = *map_context_objects( OBJ_TYPE_BUFFER, 1, &buffer );
+    if (!alloc_map_context_object( OBJ_TYPE_BUFFER, &buffer, TRUE )) return;
+    args.buffer = buffer;
     if ((status = UNIX_CALL( glBindBufferRangeNV, &args ))) WARN( "glBindBufferRangeNV returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -3648,8 +3648,8 @@ static void WINAPI glBindFragmentShaderATI( GLuint id )
     struct glBindFragmentShaderATI_params args = { .teb = NtCurrentTeb() };
     NTSTATUS status;
     TRACE( "id %d\n", id );
-    if (!alloc_context_objects( OBJ_TYPE_SHADER_ATI, 1, &id, TRUE )) return;
-    args.id = *map_context_objects( OBJ_TYPE_SHADER_ATI, 1, &id );
+    if (!alloc_map_context_object( OBJ_TYPE_SHADER_ATI, &id, TRUE )) return;
+    args.id = id;
     if ((status = UNIX_CALL( glBindFragmentShaderATI, &args ))) WARN( "glBindFragmentShaderATI returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -3659,8 +3659,8 @@ static void WINAPI glBindFramebuffer( GLenum target, GLuint framebuffer )
     struct glBindFramebuffer_params args = { .teb = NtCurrentTeb(), .target = target };
     NTSTATUS status;
     TRACE( "target %d, framebuffer %d\n", target, framebuffer );
-    if (!alloc_context_objects( OBJ_TYPE_FRAMEBUFFER, 1, &framebuffer, FALSE )) return;
-    args.framebuffer = *map_context_objects( OBJ_TYPE_FRAMEBUFFER, 1, &framebuffer );
+    if (!alloc_map_context_object( OBJ_TYPE_FRAMEBUFFER, &framebuffer, FALSE )) return;
+    args.framebuffer = framebuffer;
     if ((status = UNIX_CALL( glBindFramebuffer, &args ))) WARN( "glBindFramebuffer returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -3670,8 +3670,8 @@ static void WINAPI glBindFramebufferEXT( GLenum target, GLuint framebuffer )
     struct glBindFramebufferEXT_params args = { .teb = NtCurrentTeb(), .target = target };
     NTSTATUS status;
     TRACE( "target %d, framebuffer %d\n", target, framebuffer );
-    if (!alloc_context_objects( OBJ_TYPE_FRAMEBUFFER, 1, &framebuffer, TRUE )) return;
-    args.framebuffer = *map_context_objects( OBJ_TYPE_FRAMEBUFFER, 1, &framebuffer );
+    if (!alloc_map_context_object( OBJ_TYPE_FRAMEBUFFER, &framebuffer, TRUE )) return;
+    args.framebuffer = framebuffer;
     if ((status = UNIX_CALL( glBindFramebufferEXT, &args ))) WARN( "glBindFramebufferEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -3734,8 +3734,8 @@ static void WINAPI glBindMultiTextureEXT( GLenum texunit, GLenum target, GLuint 
     struct glBindMultiTextureEXT_params args = { .teb = NtCurrentTeb(), .texunit = texunit, .target = target };
     NTSTATUS status;
     TRACE( "texunit %d, target %d, texture %d\n", texunit, target, texture );
-    if (!alloc_context_objects( OBJ_TYPE_TEXTURE, 1, &texture, TRUE )) return;
-    args.texture = *map_context_objects( OBJ_TYPE_TEXTURE, 1, &texture );
+    if (!alloc_map_context_object( OBJ_TYPE_TEXTURE, &texture, TRUE )) return;
+    args.texture = texture;
     if ((status = UNIX_CALL( glBindMultiTextureEXT, &args ))) WARN( "glBindMultiTextureEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -3755,8 +3755,8 @@ static void WINAPI glBindProgramARB( GLenum target, GLuint program )
     struct glBindProgramARB_params args = { .teb = NtCurrentTeb(), .target = target };
     NTSTATUS status;
     TRACE( "target %d, program %d\n", target, program );
-    if (!alloc_context_objects( OBJ_TYPE_PROGRAM, 1, &program, TRUE )) return;
-    args.program = *map_context_objects( OBJ_TYPE_PROGRAM, 1, &program );
+    if (!alloc_map_context_object( OBJ_TYPE_PROGRAM, &program, TRUE )) return;
+    args.program = program;
     if ((status = UNIX_CALL( glBindProgramARB, &args ))) WARN( "glBindProgramARB returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -3766,8 +3766,8 @@ static void WINAPI glBindProgramNV( GLenum target, GLuint id )
     struct glBindProgramNV_params args = { .teb = NtCurrentTeb(), .target = target };
     NTSTATUS status;
     TRACE( "target %d, id %d\n", target, id );
-    if (!alloc_context_objects( OBJ_TYPE_PROGRAM, 1, &id, TRUE )) return;
-    args.id = *map_context_objects( OBJ_TYPE_PROGRAM, 1, &id );
+    if (!alloc_map_context_object( OBJ_TYPE_PROGRAM, &id, TRUE )) return;
+    args.id = id;
     if ((status = UNIX_CALL( glBindProgramNV, &args ))) WARN( "glBindProgramNV returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -3786,8 +3786,8 @@ static void WINAPI glBindRenderbuffer( GLenum target, GLuint renderbuffer )
     struct glBindRenderbuffer_params args = { .teb = NtCurrentTeb(), .target = target };
     NTSTATUS status;
     TRACE( "target %d, renderbuffer %d\n", target, renderbuffer );
-    if (!alloc_context_objects( OBJ_TYPE_RENDERBUFFER, 1, &renderbuffer, FALSE )) return;
-    args.renderbuffer = *map_context_objects( OBJ_TYPE_RENDERBUFFER, 1, &renderbuffer );
+    if (!alloc_map_context_object( OBJ_TYPE_RENDERBUFFER, &renderbuffer, FALSE )) return;
+    args.renderbuffer = renderbuffer;
     if ((status = UNIX_CALL( glBindRenderbuffer, &args ))) WARN( "glBindRenderbuffer returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -3797,8 +3797,8 @@ static void WINAPI glBindRenderbufferEXT( GLenum target, GLuint renderbuffer )
     struct glBindRenderbufferEXT_params args = { .teb = NtCurrentTeb(), .target = target };
     NTSTATUS status;
     TRACE( "target %d, renderbuffer %d\n", target, renderbuffer );
-    if (!alloc_context_objects( OBJ_TYPE_RENDERBUFFER, 1, &renderbuffer, TRUE )) return;
-    args.renderbuffer = *map_context_objects( OBJ_TYPE_RENDERBUFFER, 1, &renderbuffer );
+    if (!alloc_map_context_object( OBJ_TYPE_RENDERBUFFER, &renderbuffer, TRUE )) return;
+    args.renderbuffer = renderbuffer;
     if ((status = UNIX_CALL( glBindRenderbufferEXT, &args ))) WARN( "glBindRenderbufferEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -3808,8 +3808,8 @@ static void WINAPI glBindSampler( GLuint unit, GLuint sampler )
     struct glBindSampler_params args = { .teb = NtCurrentTeb(), .unit = unit };
     NTSTATUS status;
     TRACE( "unit %d, sampler %d\n", unit, sampler );
-    if (!alloc_context_objects( OBJ_TYPE_SAMPLER, 1, &sampler, FALSE )) return;
-    args.sampler = *map_context_objects( OBJ_TYPE_SAMPLER, 1, &sampler );
+    if (!alloc_map_context_object( OBJ_TYPE_SAMPLER, &sampler, FALSE )) return;
+    args.sampler = sampler;
     if ((status = UNIX_CALL( glBindSampler, &args ))) WARN( "glBindSampler returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -3853,8 +3853,8 @@ static void WINAPI glBindTextureEXT( GLenum target, GLuint texture )
     struct glBindTextureEXT_params args = { .teb = NtCurrentTeb(), .target = target };
     NTSTATUS status;
     TRACE( "target %d, texture %d\n", target, texture );
-    if (!alloc_context_objects( OBJ_TYPE_TEXTURE, 1, &texture, TRUE )) return;
-    args.texture = *map_context_objects( OBJ_TYPE_TEXTURE, 1, &texture );
+    if (!alloc_map_context_object( OBJ_TYPE_TEXTURE, &texture, TRUE )) return;
+    args.texture = texture;
     if ((status = UNIX_CALL( glBindTextureEXT, &args ))) WARN( "glBindTextureEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -3864,8 +3864,8 @@ static void WINAPI glBindTextureUnit( GLuint unit, GLuint texture )
     struct glBindTextureUnit_params args = { .teb = NtCurrentTeb(), .unit = unit };
     NTSTATUS status;
     TRACE( "unit %d, texture %d\n", unit, texture );
-    if (!alloc_context_objects( OBJ_TYPE_TEXTURE, 1, &texture, FALSE )) return;
-    args.texture = *map_context_objects( OBJ_TYPE_TEXTURE, 1, &texture );
+    if (!alloc_map_context_object( OBJ_TYPE_TEXTURE, &texture, FALSE )) return;
+    args.texture = texture;
     if ((status = UNIX_CALL( glBindTextureUnit, &args ))) WARN( "glBindTextureUnit returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -3958,8 +3958,8 @@ static void WINAPI glBindVertexShaderEXT( GLuint id )
     struct glBindVertexShaderEXT_params args = { .teb = NtCurrentTeb() };
     NTSTATUS status;
     TRACE( "id %d\n", id );
-    if (!alloc_context_objects( OBJ_TYPE_SHADER_EXT, 1, &id, TRUE )) return;
-    args.id = *map_context_objects( OBJ_TYPE_SHADER_EXT, 1, &id );
+    if (!alloc_map_context_object( OBJ_TYPE_SHADER_EXT, &id, TRUE )) return;
+    args.id = id;
     if ((status = UNIX_CALL( glBindVertexShaderEXT, &args ))) WARN( "glBindVertexShaderEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -4529,8 +4529,8 @@ static GLenum WINAPI glCheckNamedFramebufferStatusEXT( GLuint framebuffer, GLenu
     struct glCheckNamedFramebufferStatusEXT_params args = { .teb = NtCurrentTeb(), .target = target };
     NTSTATUS status;
     TRACE( "framebuffer %d, target %d\n", framebuffer, target );
-    if (!alloc_context_objects( OBJ_TYPE_FRAMEBUFFER, 1, &framebuffer, TRUE )) return args.ret;
-    args.framebuffer = *map_context_objects( OBJ_TYPE_FRAMEBUFFER, 1, &framebuffer );
+    if (!alloc_map_context_object( OBJ_TYPE_FRAMEBUFFER, &framebuffer, TRUE )) return args.ret;
+    args.framebuffer = framebuffer;
     if ((status = UNIX_CALL( glCheckNamedFramebufferStatusEXT, &args ))) WARN( "glCheckNamedFramebufferStatusEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
     return args.ret;
@@ -4713,8 +4713,8 @@ static void WINAPI glClearNamedBufferDataEXT( GLuint buffer, GLenum internalform
     struct glClearNamedBufferDataEXT_params args = { .teb = NtCurrentTeb(), .internalformat = internalformat, .format = format, .type = type, .data = data };
     NTSTATUS status;
     TRACE( "buffer %d, internalformat %d, format %d, type %d, data %p\n", buffer, internalformat, format, type, data );
-    if (!alloc_context_objects( OBJ_TYPE_BUFFER, 1, &buffer, TRUE )) return;
-    args.buffer = *map_context_objects( OBJ_TYPE_BUFFER, 1, &buffer );
+    if (!alloc_map_context_object( OBJ_TYPE_BUFFER, &buffer, TRUE )) return;
+    args.buffer = buffer;
     if ((status = UNIX_CALL( glClearNamedBufferDataEXT, &args ))) WARN( "glClearNamedBufferDataEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -4734,8 +4734,8 @@ static void WINAPI glClearNamedBufferSubDataEXT( GLuint buffer, GLenum internalf
     struct glClearNamedBufferSubDataEXT_params args = { .teb = NtCurrentTeb(), .internalformat = internalformat, .offset = offset, .size = size, .format = format, .type = type, .data = data };
     NTSTATUS status;
     TRACE( "buffer %d, internalformat %d, offset %Id, size %Id, format %d, type %d, data %p\n", buffer, internalformat, offset, size, format, type, data );
-    if (!alloc_context_objects( OBJ_TYPE_BUFFER, 1, &buffer, TRUE )) return;
-    args.buffer = *map_context_objects( OBJ_TYPE_BUFFER, 1, &buffer );
+    if (!alloc_map_context_object( OBJ_TYPE_BUFFER, &buffer, TRUE )) return;
+    args.buffer = buffer;
     if ((status = UNIX_CALL( glClearNamedBufferSubDataEXT, &args ))) WARN( "glClearNamedBufferSubDataEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -5534,8 +5534,8 @@ static void WINAPI glCompressedTextureImage1DEXT( GLuint texture, GLenum target,
     struct glCompressedTextureImage1DEXT_params args = { .teb = NtCurrentTeb(), .target = target, .level = level, .internalformat = internalformat, .width = width, .border = border, .imageSize = imageSize, .bits = bits };
     NTSTATUS status;
     TRACE( "texture %d, target %d, level %d, internalformat %d, width %d, border %d, imageSize %d, bits %p\n", texture, target, level, internalformat, width, border, imageSize, bits );
-    if (!alloc_context_objects( OBJ_TYPE_TEXTURE, 1, &texture, TRUE )) return;
-    args.texture = *map_context_objects( OBJ_TYPE_TEXTURE, 1, &texture );
+    if (!alloc_map_context_object( OBJ_TYPE_TEXTURE, &texture, TRUE )) return;
+    args.texture = texture;
     if ((status = UNIX_CALL( glCompressedTextureImage1DEXT, &args ))) WARN( "glCompressedTextureImage1DEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -5545,8 +5545,8 @@ static void WINAPI glCompressedTextureImage2DEXT( GLuint texture, GLenum target,
     struct glCompressedTextureImage2DEXT_params args = { .teb = NtCurrentTeb(), .target = target, .level = level, .internalformat = internalformat, .width = width, .height = height, .border = border, .imageSize = imageSize, .bits = bits };
     NTSTATUS status;
     TRACE( "texture %d, target %d, level %d, internalformat %d, width %d, height %d, border %d, imageSize %d, bits %p\n", texture, target, level, internalformat, width, height, border, imageSize, bits );
-    if (!alloc_context_objects( OBJ_TYPE_TEXTURE, 1, &texture, TRUE )) return;
-    args.texture = *map_context_objects( OBJ_TYPE_TEXTURE, 1, &texture );
+    if (!alloc_map_context_object( OBJ_TYPE_TEXTURE, &texture, TRUE )) return;
+    args.texture = texture;
     if ((status = UNIX_CALL( glCompressedTextureImage2DEXT, &args ))) WARN( "glCompressedTextureImage2DEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -5556,8 +5556,8 @@ static void WINAPI glCompressedTextureImage3DEXT( GLuint texture, GLenum target,
     struct glCompressedTextureImage3DEXT_params args = { .teb = NtCurrentTeb(), .target = target, .level = level, .internalformat = internalformat, .width = width, .height = height, .depth = depth, .border = border, .imageSize = imageSize, .bits = bits };
     NTSTATUS status;
     TRACE( "texture %d, target %d, level %d, internalformat %d, width %d, height %d, depth %d, border %d, imageSize %d, bits %p\n", texture, target, level, internalformat, width, height, depth, border, imageSize, bits );
-    if (!alloc_context_objects( OBJ_TYPE_TEXTURE, 1, &texture, TRUE )) return;
-    args.texture = *map_context_objects( OBJ_TYPE_TEXTURE, 1, &texture );
+    if (!alloc_map_context_object( OBJ_TYPE_TEXTURE, &texture, TRUE )) return;
+    args.texture = texture;
     if ((status = UNIX_CALL( glCompressedTextureImage3DEXT, &args ))) WARN( "glCompressedTextureImage3DEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -5577,8 +5577,8 @@ static void WINAPI glCompressedTextureSubImage1DEXT( GLuint texture, GLenum targ
     struct glCompressedTextureSubImage1DEXT_params args = { .teb = NtCurrentTeb(), .target = target, .level = level, .xoffset = xoffset, .width = width, .format = format, .imageSize = imageSize, .bits = bits };
     NTSTATUS status;
     TRACE( "texture %d, target %d, level %d, xoffset %d, width %d, format %d, imageSize %d, bits %p\n", texture, target, level, xoffset, width, format, imageSize, bits );
-    if (!alloc_context_objects( OBJ_TYPE_TEXTURE, 1, &texture, TRUE )) return;
-    args.texture = *map_context_objects( OBJ_TYPE_TEXTURE, 1, &texture );
+    if (!alloc_map_context_object( OBJ_TYPE_TEXTURE, &texture, TRUE )) return;
+    args.texture = texture;
     if ((status = UNIX_CALL( glCompressedTextureSubImage1DEXT, &args ))) WARN( "glCompressedTextureSubImage1DEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -5598,8 +5598,8 @@ static void WINAPI glCompressedTextureSubImage2DEXT( GLuint texture, GLenum targ
     struct glCompressedTextureSubImage2DEXT_params args = { .teb = NtCurrentTeb(), .target = target, .level = level, .xoffset = xoffset, .yoffset = yoffset, .width = width, .height = height, .format = format, .imageSize = imageSize, .bits = bits };
     NTSTATUS status;
     TRACE( "texture %d, target %d, level %d, xoffset %d, yoffset %d, width %d, height %d, format %d, imageSize %d, bits %p\n", texture, target, level, xoffset, yoffset, width, height, format, imageSize, bits );
-    if (!alloc_context_objects( OBJ_TYPE_TEXTURE, 1, &texture, TRUE )) return;
-    args.texture = *map_context_objects( OBJ_TYPE_TEXTURE, 1, &texture );
+    if (!alloc_map_context_object( OBJ_TYPE_TEXTURE, &texture, TRUE )) return;
+    args.texture = texture;
     if ((status = UNIX_CALL( glCompressedTextureSubImage2DEXT, &args ))) WARN( "glCompressedTextureSubImage2DEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -5619,8 +5619,8 @@ static void WINAPI glCompressedTextureSubImage3DEXT( GLuint texture, GLenum targ
     struct glCompressedTextureSubImage3DEXT_params args = { .teb = NtCurrentTeb(), .target = target, .level = level, .xoffset = xoffset, .yoffset = yoffset, .zoffset = zoffset, .width = width, .height = height, .depth = depth, .format = format, .imageSize = imageSize, .bits = bits };
     NTSTATUS status;
     TRACE( "texture %d, target %d, level %d, xoffset %d, yoffset %d, zoffset %d, width %d, height %d, depth %d, format %d, imageSize %d, bits %p\n", texture, target, level, xoffset, yoffset, zoffset, width, height, depth, format, imageSize, bits );
-    if (!alloc_context_objects( OBJ_TYPE_TEXTURE, 1, &texture, TRUE )) return;
-    args.texture = *map_context_objects( OBJ_TYPE_TEXTURE, 1, &texture );
+    if (!alloc_map_context_object( OBJ_TYPE_TEXTURE, &texture, TRUE )) return;
+    args.texture = texture;
     if ((status = UNIX_CALL( glCompressedTextureSubImage3DEXT, &args ))) WARN( "glCompressedTextureSubImage3DEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -5933,10 +5933,10 @@ static void WINAPI glCopyPathNV( GLuint resultPath, GLuint srcPath )
     struct glCopyPathNV_params args = { .teb = NtCurrentTeb() };
     NTSTATUS status;
     TRACE( "resultPath %d, srcPath %d\n", resultPath, srcPath );
-    if (!alloc_context_objects( OBJ_TYPE_PATH, 1, &resultPath, TRUE )) return;
-    if (!alloc_context_objects( OBJ_TYPE_PATH, 1, &srcPath, TRUE )) return;
-    args.resultPath = *map_context_objects( OBJ_TYPE_PATH, 1, &resultPath );
-    args.srcPath = *map_context_objects( OBJ_TYPE_PATH, 1, &srcPath );
+    if (!alloc_map_context_object( OBJ_TYPE_PATH, &resultPath, TRUE )) return;
+    if (!alloc_map_context_object( OBJ_TYPE_PATH, &srcPath, TRUE )) return;
+    args.resultPath = resultPath;
+    args.srcPath = srcPath;
     if ((status = UNIX_CALL( glCopyPathNV, &args ))) WARN( "glCopyPathNV returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -6000,8 +6000,8 @@ static void WINAPI glCopyTextureImage1DEXT( GLuint texture, GLenum target, GLint
     struct glCopyTextureImage1DEXT_params args = { .teb = NtCurrentTeb(), .target = target, .level = level, .internalformat = internalformat, .x = x, .y = y, .width = width, .border = border };
     NTSTATUS status;
     TRACE( "texture %d, target %d, level %d, internalformat %d, x %d, y %d, width %d, border %d\n", texture, target, level, internalformat, x, y, width, border );
-    if (!alloc_context_objects( OBJ_TYPE_TEXTURE, 1, &texture, TRUE )) return;
-    args.texture = *map_context_objects( OBJ_TYPE_TEXTURE, 1, &texture );
+    if (!alloc_map_context_object( OBJ_TYPE_TEXTURE, &texture, TRUE )) return;
+    args.texture = texture;
     if ((status = UNIX_CALL( glCopyTextureImage1DEXT, &args ))) WARN( "glCopyTextureImage1DEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -6011,8 +6011,8 @@ static void WINAPI glCopyTextureImage2DEXT( GLuint texture, GLenum target, GLint
     struct glCopyTextureImage2DEXT_params args = { .teb = NtCurrentTeb(), .target = target, .level = level, .internalformat = internalformat, .x = x, .y = y, .width = width, .height = height, .border = border };
     NTSTATUS status;
     TRACE( "texture %d, target %d, level %d, internalformat %d, x %d, y %d, width %d, height %d, border %d\n", texture, target, level, internalformat, x, y, width, height, border );
-    if (!alloc_context_objects( OBJ_TYPE_TEXTURE, 1, &texture, TRUE )) return;
-    args.texture = *map_context_objects( OBJ_TYPE_TEXTURE, 1, &texture );
+    if (!alloc_map_context_object( OBJ_TYPE_TEXTURE, &texture, TRUE )) return;
+    args.texture = texture;
     if ((status = UNIX_CALL( glCopyTextureImage2DEXT, &args ))) WARN( "glCopyTextureImage2DEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -6032,8 +6032,8 @@ static void WINAPI glCopyTextureSubImage1DEXT( GLuint texture, GLenum target, GL
     struct glCopyTextureSubImage1DEXT_params args = { .teb = NtCurrentTeb(), .target = target, .level = level, .xoffset = xoffset, .x = x, .y = y, .width = width };
     NTSTATUS status;
     TRACE( "texture %d, target %d, level %d, xoffset %d, x %d, y %d, width %d\n", texture, target, level, xoffset, x, y, width );
-    if (!alloc_context_objects( OBJ_TYPE_TEXTURE, 1, &texture, TRUE )) return;
-    args.texture = *map_context_objects( OBJ_TYPE_TEXTURE, 1, &texture );
+    if (!alloc_map_context_object( OBJ_TYPE_TEXTURE, &texture, TRUE )) return;
+    args.texture = texture;
     if ((status = UNIX_CALL( glCopyTextureSubImage1DEXT, &args ))) WARN( "glCopyTextureSubImage1DEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -6053,8 +6053,8 @@ static void WINAPI glCopyTextureSubImage2DEXT( GLuint texture, GLenum target, GL
     struct glCopyTextureSubImage2DEXT_params args = { .teb = NtCurrentTeb(), .target = target, .level = level, .xoffset = xoffset, .yoffset = yoffset, .x = x, .y = y, .width = width, .height = height };
     NTSTATUS status;
     TRACE( "texture %d, target %d, level %d, xoffset %d, yoffset %d, x %d, y %d, width %d, height %d\n", texture, target, level, xoffset, yoffset, x, y, width, height );
-    if (!alloc_context_objects( OBJ_TYPE_TEXTURE, 1, &texture, TRUE )) return;
-    args.texture = *map_context_objects( OBJ_TYPE_TEXTURE, 1, &texture );
+    if (!alloc_map_context_object( OBJ_TYPE_TEXTURE, &texture, TRUE )) return;
+    args.texture = texture;
     if ((status = UNIX_CALL( glCopyTextureSubImage2DEXT, &args ))) WARN( "glCopyTextureSubImage2DEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -6074,8 +6074,8 @@ static void WINAPI glCopyTextureSubImage3DEXT( GLuint texture, GLenum target, GL
     struct glCopyTextureSubImage3DEXT_params args = { .teb = NtCurrentTeb(), .target = target, .level = level, .xoffset = xoffset, .yoffset = yoffset, .zoffset = zoffset, .x = x, .y = y, .width = width, .height = height };
     NTSTATUS status;
     TRACE( "texture %d, target %d, level %d, xoffset %d, yoffset %d, zoffset %d, x %d, y %d, width %d, height %d\n", texture, target, level, xoffset, yoffset, zoffset, x, y, width, height );
-    if (!alloc_context_objects( OBJ_TYPE_TEXTURE, 1, &texture, TRUE )) return;
-    args.texture = *map_context_objects( OBJ_TYPE_TEXTURE, 1, &texture );
+    if (!alloc_map_context_object( OBJ_TYPE_TEXTURE, &texture, TRUE )) return;
+    args.texture = texture;
     if ((status = UNIX_CALL( glCopyTextureSubImage3DEXT, &args ))) WARN( "glCopyTextureSubImage3DEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -6085,8 +6085,8 @@ static void WINAPI glCoverFillPathInstancedNV( GLsizei numPaths, GLenum pathName
     struct glCoverFillPathInstancedNV_params args = { .teb = NtCurrentTeb(), .numPaths = numPaths, .pathNameType = pathNameType, .paths = paths, .coverMode = coverMode, .transformType = transformType, .transformValues = transformValues };
     NTSTATUS status;
     TRACE( "numPaths %d, pathNameType %d, paths %p, pathBase %d, coverMode %d, transformType %d, transformValues %p\n", numPaths, pathNameType, paths, pathBase, coverMode, transformType, transformValues );
-    if (!alloc_context_objects( OBJ_TYPE_PATH, 1, &pathBase, TRUE )) return;
-    args.pathBase = *map_context_objects( OBJ_TYPE_PATH, 1, &pathBase );
+    if (!alloc_map_context_object( OBJ_TYPE_PATH, &pathBase, TRUE )) return;
+    args.pathBase = pathBase;
     if ((status = UNIX_CALL( glCoverFillPathInstancedNV, &args ))) WARN( "glCoverFillPathInstancedNV returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -6096,8 +6096,8 @@ static void WINAPI glCoverFillPathNV( GLuint path, GLenum coverMode )
     struct glCoverFillPathNV_params args = { .teb = NtCurrentTeb(), .coverMode = coverMode };
     NTSTATUS status;
     TRACE( "path %d, coverMode %d\n", path, coverMode );
-    if (!alloc_context_objects( OBJ_TYPE_PATH, 1, &path, TRUE )) return;
-    args.path = *map_context_objects( OBJ_TYPE_PATH, 1, &path );
+    if (!alloc_map_context_object( OBJ_TYPE_PATH, &path, TRUE )) return;
+    args.path = path;
     if ((status = UNIX_CALL( glCoverFillPathNV, &args ))) WARN( "glCoverFillPathNV returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -6107,8 +6107,8 @@ static void WINAPI glCoverStrokePathInstancedNV( GLsizei numPaths, GLenum pathNa
     struct glCoverStrokePathInstancedNV_params args = { .teb = NtCurrentTeb(), .numPaths = numPaths, .pathNameType = pathNameType, .paths = paths, .coverMode = coverMode, .transformType = transformType, .transformValues = transformValues };
     NTSTATUS status;
     TRACE( "numPaths %d, pathNameType %d, paths %p, pathBase %d, coverMode %d, transformType %d, transformValues %p\n", numPaths, pathNameType, paths, pathBase, coverMode, transformType, transformValues );
-    if (!alloc_context_objects( OBJ_TYPE_PATH, 1, &pathBase, TRUE )) return;
-    args.pathBase = *map_context_objects( OBJ_TYPE_PATH, 1, &pathBase );
+    if (!alloc_map_context_object( OBJ_TYPE_PATH, &pathBase, TRUE )) return;
+    args.pathBase = pathBase;
     if ((status = UNIX_CALL( glCoverStrokePathInstancedNV, &args ))) WARN( "glCoverStrokePathInstancedNV returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -6118,8 +6118,8 @@ static void WINAPI glCoverStrokePathNV( GLuint path, GLenum coverMode )
     struct glCoverStrokePathNV_params args = { .teb = NtCurrentTeb(), .coverMode = coverMode };
     NTSTATUS status;
     TRACE( "path %d, coverMode %d\n", path, coverMode );
-    if (!alloc_context_objects( OBJ_TYPE_PATH, 1, &path, TRUE )) return;
-    args.path = *map_context_objects( OBJ_TYPE_PATH, 1, &path );
+    if (!alloc_map_context_object( OBJ_TYPE_PATH, &path, TRUE )) return;
+    args.path = path;
     if ((status = UNIX_CALL( glCoverStrokePathNV, &args ))) WARN( "glCoverStrokePathNV returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -7988,8 +7988,8 @@ static void WINAPI glFlushMappedNamedBufferRangeEXT( GLuint buffer, GLintptr off
     struct glFlushMappedNamedBufferRangeEXT_params args = { .teb = NtCurrentTeb(), .offset = offset, .length = length };
     NTSTATUS status;
     TRACE( "buffer %d, offset %Id, length %Id\n", buffer, offset, length );
-    if (!alloc_context_objects( OBJ_TYPE_BUFFER, 1, &buffer, TRUE )) return;
-    args.buffer = *map_context_objects( OBJ_TYPE_BUFFER, 1, &buffer );
+    if (!alloc_map_context_object( OBJ_TYPE_BUFFER, &buffer, TRUE )) return;
+    args.buffer = buffer;
     if ((status = UNIX_CALL( glFlushMappedNamedBufferRangeEXT, &args ))) WARN( "glFlushMappedNamedBufferRangeEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -8359,8 +8359,8 @@ static void WINAPI glFramebufferDrawBufferEXT( GLuint framebuffer, GLenum mode )
     struct glFramebufferDrawBufferEXT_params args = { .teb = NtCurrentTeb(), .mode = mode };
     NTSTATUS status;
     TRACE( "framebuffer %d, mode %d\n", framebuffer, mode );
-    if (!alloc_context_objects( OBJ_TYPE_FRAMEBUFFER, 1, &framebuffer, TRUE )) return;
-    args.framebuffer = *map_context_objects( OBJ_TYPE_FRAMEBUFFER, 1, &framebuffer );
+    if (!alloc_map_context_object( OBJ_TYPE_FRAMEBUFFER, &framebuffer, TRUE )) return;
+    args.framebuffer = framebuffer;
     if ((status = UNIX_CALL( glFramebufferDrawBufferEXT, &args ))) WARN( "glFramebufferDrawBufferEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -8370,8 +8370,8 @@ static void WINAPI glFramebufferDrawBuffersEXT( GLuint framebuffer, GLsizei n, c
     struct glFramebufferDrawBuffersEXT_params args = { .teb = NtCurrentTeb(), .n = n, .bufs = bufs };
     NTSTATUS status;
     TRACE( "framebuffer %d, n %d, bufs %p\n", framebuffer, n, bufs );
-    if (!alloc_context_objects( OBJ_TYPE_FRAMEBUFFER, 1, &framebuffer, TRUE )) return;
-    args.framebuffer = *map_context_objects( OBJ_TYPE_FRAMEBUFFER, 1, &framebuffer );
+    if (!alloc_map_context_object( OBJ_TYPE_FRAMEBUFFER, &framebuffer, TRUE )) return;
+    args.framebuffer = framebuffer;
     if ((status = UNIX_CALL( glFramebufferDrawBuffersEXT, &args ))) WARN( "glFramebufferDrawBuffersEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -8408,8 +8408,8 @@ static void WINAPI glFramebufferReadBufferEXT( GLuint framebuffer, GLenum mode )
     struct glFramebufferReadBufferEXT_params args = { .teb = NtCurrentTeb(), .mode = mode };
     NTSTATUS status;
     TRACE( "framebuffer %d, mode %d\n", framebuffer, mode );
-    if (!alloc_context_objects( OBJ_TYPE_FRAMEBUFFER, 1, &framebuffer, TRUE )) return;
-    args.framebuffer = *map_context_objects( OBJ_TYPE_FRAMEBUFFER, 1, &framebuffer );
+    if (!alloc_map_context_object( OBJ_TYPE_FRAMEBUFFER, &framebuffer, TRUE )) return;
+    args.framebuffer = framebuffer;
     if ((status = UNIX_CALL( glFramebufferReadBufferEXT, &args ))) WARN( "glFramebufferReadBufferEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -8989,8 +8989,8 @@ static void WINAPI glGenerateTextureMipmapEXT( GLuint texture, GLenum target )
     struct glGenerateTextureMipmapEXT_params args = { .teb = NtCurrentTeb(), .target = target };
     NTSTATUS status;
     TRACE( "texture %d, target %d\n", texture, target );
-    if (!alloc_context_objects( OBJ_TYPE_TEXTURE, 1, &texture, TRUE )) return;
-    args.texture = *map_context_objects( OBJ_TYPE_TEXTURE, 1, &texture );
+    if (!alloc_map_context_object( OBJ_TYPE_TEXTURE, &texture, TRUE )) return;
+    args.texture = texture;
     if ((status = UNIX_CALL( glGenerateTextureMipmapEXT, &args ))) WARN( "glGenerateTextureMipmapEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -9449,8 +9449,8 @@ static void WINAPI glGetCompressedTextureImageEXT( GLuint texture, GLenum target
     struct glGetCompressedTextureImageEXT_params args = { .teb = NtCurrentTeb(), .target = target, .lod = lod, .img = img };
     NTSTATUS status;
     TRACE( "texture %d, target %d, lod %d, img %p\n", texture, target, lod, img );
-    if (!alloc_context_objects( OBJ_TYPE_TEXTURE, 1, &texture, TRUE )) return;
-    args.texture = *map_context_objects( OBJ_TYPE_TEXTURE, 1, &texture );
+    if (!alloc_map_context_object( OBJ_TYPE_TEXTURE, &texture, TRUE )) return;
+    args.texture = texture;
     if ((status = UNIX_CALL( glGetCompressedTextureImageEXT, &args ))) WARN( "glGetCompressedTextureImageEXT returned %#lx\n", status );
 }
 
@@ -9773,8 +9773,8 @@ static void WINAPI glGetFramebufferParameterivEXT( GLuint framebuffer, GLenum pn
     struct glGetFramebufferParameterivEXT_params args = { .teb = NtCurrentTeb(), .pname = pname, .params = params };
     NTSTATUS status;
     TRACE( "framebuffer %d, pname %d, params %p\n", framebuffer, pname, params );
-    if (!alloc_context_objects( OBJ_TYPE_FRAMEBUFFER, 1, &framebuffer, TRUE )) return;
-    args.framebuffer = *map_context_objects( OBJ_TYPE_FRAMEBUFFER, 1, &framebuffer );
+    if (!alloc_map_context_object( OBJ_TYPE_FRAMEBUFFER, &framebuffer, TRUE )) return;
+    args.framebuffer = framebuffer;
     if ((status = UNIX_CALL( glGetFramebufferParameterivEXT, &args ))) WARN( "glGetFramebufferParameterivEXT returned %#lx\n", status );
 }
 
@@ -10358,8 +10358,8 @@ static void WINAPI glGetNamedBufferParameterivEXT( GLuint buffer, GLenum pname, 
     struct glGetNamedBufferParameterivEXT_params args = { .teb = NtCurrentTeb(), .pname = pname, .params = params };
     NTSTATUS status;
     TRACE( "buffer %d, pname %d, params %p\n", buffer, pname, params );
-    if (!alloc_context_objects( OBJ_TYPE_BUFFER, 1, &buffer, TRUE )) return;
-    args.buffer = *map_context_objects( OBJ_TYPE_BUFFER, 1, &buffer );
+    if (!alloc_map_context_object( OBJ_TYPE_BUFFER, &buffer, TRUE )) return;
+    args.buffer = buffer;
     if ((status = UNIX_CALL( glGetNamedBufferParameterivEXT, &args ))) WARN( "glGetNamedBufferParameterivEXT returned %#lx\n", status );
 }
 
@@ -10386,8 +10386,8 @@ static void WINAPI glGetNamedBufferPointervEXT( GLuint buffer, GLenum pname, voi
     struct glGetNamedBufferPointervEXT_params args = { .teb = NtCurrentTeb(), .pname = pname, .params = params };
     NTSTATUS status;
     TRACE( "buffer %d, pname %d, params %p\n", buffer, pname, params );
-    if (!alloc_context_objects( OBJ_TYPE_BUFFER, 1, &buffer, TRUE )) return;
-    args.buffer = *map_context_objects( OBJ_TYPE_BUFFER, 1, &buffer );
+    if (!alloc_map_context_object( OBJ_TYPE_BUFFER, &buffer, TRUE )) return;
+    args.buffer = buffer;
     if ((status = UNIX_CALL( glGetNamedBufferPointervEXT, &args ))) WARN( "glGetNamedBufferPointervEXT returned %#lx\n", status );
 }
 
@@ -10405,8 +10405,8 @@ static void WINAPI glGetNamedBufferSubDataEXT( GLuint buffer, GLintptr offset, G
     struct glGetNamedBufferSubDataEXT_params args = { .teb = NtCurrentTeb(), .offset = offset, .size = size, .data = data };
     NTSTATUS status;
     TRACE( "buffer %d, offset %Id, size %Id, data %p\n", buffer, offset, size, data );
-    if (!alloc_context_objects( OBJ_TYPE_BUFFER, 1, &buffer, TRUE )) return;
-    args.buffer = *map_context_objects( OBJ_TYPE_BUFFER, 1, &buffer );
+    if (!alloc_map_context_object( OBJ_TYPE_BUFFER, &buffer, TRUE )) return;
+    args.buffer = buffer;
     if ((status = UNIX_CALL( glGetNamedBufferSubDataEXT, &args ))) WARN( "glGetNamedBufferSubDataEXT returned %#lx\n", status );
 }
 
@@ -10433,8 +10433,8 @@ static void WINAPI glGetNamedFramebufferParameterivEXT( GLuint framebuffer, GLen
     struct glGetNamedFramebufferParameterivEXT_params args = { .teb = NtCurrentTeb(), .pname = pname, .params = params };
     NTSTATUS status;
     TRACE( "framebuffer %d, pname %d, params %p\n", framebuffer, pname, params );
-    if (!alloc_context_objects( OBJ_TYPE_FRAMEBUFFER, 1, &framebuffer, TRUE )) return;
-    args.framebuffer = *map_context_objects( OBJ_TYPE_FRAMEBUFFER, 1, &framebuffer );
+    if (!alloc_map_context_object( OBJ_TYPE_FRAMEBUFFER, &framebuffer, TRUE )) return;
+    args.framebuffer = framebuffer;
     if ((status = UNIX_CALL( glGetNamedFramebufferParameterivEXT, &args ))) WARN( "glGetNamedFramebufferParameterivEXT returned %#lx\n", status );
 }
 
@@ -10443,8 +10443,8 @@ static void WINAPI glGetNamedProgramLocalParameterIivEXT( GLuint program, GLenum
     struct glGetNamedProgramLocalParameterIivEXT_params args = { .teb = NtCurrentTeb(), .target = target, .index = index, .params = params };
     NTSTATUS status;
     TRACE( "program %d, target %d, index %d, params %p\n", program, target, index, params );
-    if (!alloc_context_objects( OBJ_TYPE_PROGRAM, 1, &program, TRUE )) return;
-    args.program = *map_context_objects( OBJ_TYPE_PROGRAM, 1, &program );
+    if (!alloc_map_context_object( OBJ_TYPE_PROGRAM, &program, TRUE )) return;
+    args.program = program;
     if ((status = UNIX_CALL( glGetNamedProgramLocalParameterIivEXT, &args ))) WARN( "glGetNamedProgramLocalParameterIivEXT returned %#lx\n", status );
 }
 
@@ -10453,8 +10453,8 @@ static void WINAPI glGetNamedProgramLocalParameterIuivEXT( GLuint program, GLenu
     struct glGetNamedProgramLocalParameterIuivEXT_params args = { .teb = NtCurrentTeb(), .target = target, .index = index, .params = params };
     NTSTATUS status;
     TRACE( "program %d, target %d, index %d, params %p\n", program, target, index, params );
-    if (!alloc_context_objects( OBJ_TYPE_PROGRAM, 1, &program, TRUE )) return;
-    args.program = *map_context_objects( OBJ_TYPE_PROGRAM, 1, &program );
+    if (!alloc_map_context_object( OBJ_TYPE_PROGRAM, &program, TRUE )) return;
+    args.program = program;
     if ((status = UNIX_CALL( glGetNamedProgramLocalParameterIuivEXT, &args ))) WARN( "glGetNamedProgramLocalParameterIuivEXT returned %#lx\n", status );
 }
 
@@ -10463,8 +10463,8 @@ static void WINAPI glGetNamedProgramLocalParameterdvEXT( GLuint program, GLenum 
     struct glGetNamedProgramLocalParameterdvEXT_params args = { .teb = NtCurrentTeb(), .target = target, .index = index, .params = params };
     NTSTATUS status;
     TRACE( "program %d, target %d, index %d, params %p\n", program, target, index, params );
-    if (!alloc_context_objects( OBJ_TYPE_PROGRAM, 1, &program, TRUE )) return;
-    args.program = *map_context_objects( OBJ_TYPE_PROGRAM, 1, &program );
+    if (!alloc_map_context_object( OBJ_TYPE_PROGRAM, &program, TRUE )) return;
+    args.program = program;
     if ((status = UNIX_CALL( glGetNamedProgramLocalParameterdvEXT, &args ))) WARN( "glGetNamedProgramLocalParameterdvEXT returned %#lx\n", status );
 }
 
@@ -10473,8 +10473,8 @@ static void WINAPI glGetNamedProgramLocalParameterfvEXT( GLuint program, GLenum 
     struct glGetNamedProgramLocalParameterfvEXT_params args = { .teb = NtCurrentTeb(), .target = target, .index = index, .params = params };
     NTSTATUS status;
     TRACE( "program %d, target %d, index %d, params %p\n", program, target, index, params );
-    if (!alloc_context_objects( OBJ_TYPE_PROGRAM, 1, &program, TRUE )) return;
-    args.program = *map_context_objects( OBJ_TYPE_PROGRAM, 1, &program );
+    if (!alloc_map_context_object( OBJ_TYPE_PROGRAM, &program, TRUE )) return;
+    args.program = program;
     if ((status = UNIX_CALL( glGetNamedProgramLocalParameterfvEXT, &args ))) WARN( "glGetNamedProgramLocalParameterfvEXT returned %#lx\n", status );
 }
 
@@ -10483,8 +10483,8 @@ static void WINAPI glGetNamedProgramStringEXT( GLuint program, GLenum target, GL
     struct glGetNamedProgramStringEXT_params args = { .teb = NtCurrentTeb(), .target = target, .pname = pname, .string = string };
     NTSTATUS status;
     TRACE( "program %d, target %d, pname %d, string %p\n", program, target, pname, string );
-    if (!alloc_context_objects( OBJ_TYPE_PROGRAM, 1, &program, TRUE )) return;
-    args.program = *map_context_objects( OBJ_TYPE_PROGRAM, 1, &program );
+    if (!alloc_map_context_object( OBJ_TYPE_PROGRAM, &program, TRUE )) return;
+    args.program = program;
     if ((status = UNIX_CALL( glGetNamedProgramStringEXT, &args ))) WARN( "glGetNamedProgramStringEXT returned %#lx\n", status );
 }
 
@@ -10493,8 +10493,8 @@ static void WINAPI glGetNamedProgramivEXT( GLuint program, GLenum target, GLenum
     struct glGetNamedProgramivEXT_params args = { .teb = NtCurrentTeb(), .target = target, .pname = pname, .params = params };
     NTSTATUS status;
     TRACE( "program %d, target %d, pname %d, params %p\n", program, target, pname, params );
-    if (!alloc_context_objects( OBJ_TYPE_PROGRAM, 1, &program, TRUE )) return;
-    args.program = *map_context_objects( OBJ_TYPE_PROGRAM, 1, &program );
+    if (!alloc_map_context_object( OBJ_TYPE_PROGRAM, &program, TRUE )) return;
+    args.program = program;
     if ((status = UNIX_CALL( glGetNamedProgramivEXT, &args ))) WARN( "glGetNamedProgramivEXT returned %#lx\n", status );
 }
 
@@ -10512,8 +10512,8 @@ static void WINAPI glGetNamedRenderbufferParameterivEXT( GLuint renderbuffer, GL
     struct glGetNamedRenderbufferParameterivEXT_params args = { .teb = NtCurrentTeb(), .pname = pname, .params = params };
     NTSTATUS status;
     TRACE( "renderbuffer %d, pname %d, params %p\n", renderbuffer, pname, params );
-    if (!alloc_context_objects( OBJ_TYPE_RENDERBUFFER, 1, &renderbuffer, TRUE )) return;
-    args.renderbuffer = *map_context_objects( OBJ_TYPE_RENDERBUFFER, 1, &renderbuffer );
+    if (!alloc_map_context_object( OBJ_TYPE_RENDERBUFFER, &renderbuffer, TRUE )) return;
+    args.renderbuffer = renderbuffer;
     if ((status = UNIX_CALL( glGetNamedRenderbufferParameterivEXT, &args ))) WARN( "glGetNamedRenderbufferParameterivEXT returned %#lx\n", status );
 }
 
@@ -10646,8 +10646,8 @@ static void WINAPI glGetPathCommandsNV( GLuint path, GLubyte *commands )
     struct glGetPathCommandsNV_params args = { .teb = NtCurrentTeb(), .commands = commands };
     NTSTATUS status;
     TRACE( "path %d, commands %p\n", path, commands );
-    if (!alloc_context_objects( OBJ_TYPE_PATH, 1, &path, TRUE )) return;
-    args.path = *map_context_objects( OBJ_TYPE_PATH, 1, &path );
+    if (!alloc_map_context_object( OBJ_TYPE_PATH, &path, TRUE )) return;
+    args.path = path;
     if ((status = UNIX_CALL( glGetPathCommandsNV, &args ))) WARN( "glGetPathCommandsNV returned %#lx\n", status );
 }
 
@@ -10656,8 +10656,8 @@ static void WINAPI glGetPathCoordsNV( GLuint path, GLfloat *coords )
     struct glGetPathCoordsNV_params args = { .teb = NtCurrentTeb(), .coords = coords };
     NTSTATUS status;
     TRACE( "path %d, coords %p\n", path, coords );
-    if (!alloc_context_objects( OBJ_TYPE_PATH, 1, &path, TRUE )) return;
-    args.path = *map_context_objects( OBJ_TYPE_PATH, 1, &path );
+    if (!alloc_map_context_object( OBJ_TYPE_PATH, &path, TRUE )) return;
+    args.path = path;
     if ((status = UNIX_CALL( glGetPathCoordsNV, &args ))) WARN( "glGetPathCoordsNV returned %#lx\n", status );
 }
 
@@ -10666,8 +10666,8 @@ static void WINAPI glGetPathDashArrayNV( GLuint path, GLfloat *dashArray )
     struct glGetPathDashArrayNV_params args = { .teb = NtCurrentTeb(), .dashArray = dashArray };
     NTSTATUS status;
     TRACE( "path %d, dashArray %p\n", path, dashArray );
-    if (!alloc_context_objects( OBJ_TYPE_PATH, 1, &path, TRUE )) return;
-    args.path = *map_context_objects( OBJ_TYPE_PATH, 1, &path );
+    if (!alloc_map_context_object( OBJ_TYPE_PATH, &path, TRUE )) return;
+    args.path = path;
     if ((status = UNIX_CALL( glGetPathDashArrayNV, &args ))) WARN( "glGetPathDashArrayNV returned %#lx\n", status );
 }
 
@@ -10676,8 +10676,8 @@ static GLfloat WINAPI glGetPathLengthNV( GLuint path, GLsizei startSegment, GLsi
     struct glGetPathLengthNV_params args = { .teb = NtCurrentTeb(), .startSegment = startSegment, .numSegments = numSegments };
     NTSTATUS status;
     TRACE( "path %d, startSegment %d, numSegments %d\n", path, startSegment, numSegments );
-    if (!alloc_context_objects( OBJ_TYPE_PATH, 1, &path, TRUE )) return args.ret;
-    args.path = *map_context_objects( OBJ_TYPE_PATH, 1, &path );
+    if (!alloc_map_context_object( OBJ_TYPE_PATH, &path, TRUE )) return args.ret;
+    args.path = path;
     if ((status = UNIX_CALL( glGetPathLengthNV, &args ))) WARN( "glGetPathLengthNV returned %#lx\n", status );
     return args.ret;
 }
@@ -10687,8 +10687,8 @@ static void WINAPI glGetPathMetricRangeNV( GLbitfield metricQueryMask, GLuint fi
     struct glGetPathMetricRangeNV_params args = { .teb = NtCurrentTeb(), .metricQueryMask = metricQueryMask, .numPaths = numPaths, .stride = stride, .metrics = metrics };
     NTSTATUS status;
     TRACE( "metricQueryMask %d, firstPathName %d, numPaths %d, stride %d, metrics %p\n", metricQueryMask, firstPathName, numPaths, stride, metrics );
-    if (!alloc_context_objects( OBJ_TYPE_PATH, 1, &firstPathName, TRUE )) return;
-    args.firstPathName = *map_context_objects( OBJ_TYPE_PATH, 1, &firstPathName );
+    if (!alloc_map_context_object( OBJ_TYPE_PATH, &firstPathName, TRUE )) return;
+    args.firstPathName = firstPathName;
     if ((status = UNIX_CALL( glGetPathMetricRangeNV, &args ))) WARN( "glGetPathMetricRangeNV returned %#lx\n", status );
 }
 
@@ -10697,8 +10697,8 @@ static void WINAPI glGetPathMetricsNV( GLbitfield metricQueryMask, GLsizei numPa
     struct glGetPathMetricsNV_params args = { .teb = NtCurrentTeb(), .metricQueryMask = metricQueryMask, .numPaths = numPaths, .pathNameType = pathNameType, .paths = paths, .stride = stride, .metrics = metrics };
     NTSTATUS status;
     TRACE( "metricQueryMask %d, numPaths %d, pathNameType %d, paths %p, pathBase %d, stride %d, metrics %p\n", metricQueryMask, numPaths, pathNameType, paths, pathBase, stride, metrics );
-    if (!alloc_context_objects( OBJ_TYPE_PATH, 1, &pathBase, TRUE )) return;
-    args.pathBase = *map_context_objects( OBJ_TYPE_PATH, 1, &pathBase );
+    if (!alloc_map_context_object( OBJ_TYPE_PATH, &pathBase, TRUE )) return;
+    args.pathBase = pathBase;
     if ((status = UNIX_CALL( glGetPathMetricsNV, &args ))) WARN( "glGetPathMetricsNV returned %#lx\n", status );
 }
 
@@ -10707,8 +10707,8 @@ static void WINAPI glGetPathParameterfvNV( GLuint path, GLenum pname, GLfloat *v
     struct glGetPathParameterfvNV_params args = { .teb = NtCurrentTeb(), .pname = pname, .value = value };
     NTSTATUS status;
     TRACE( "path %d, pname %d, value %p\n", path, pname, value );
-    if (!alloc_context_objects( OBJ_TYPE_PATH, 1, &path, TRUE )) return;
-    args.path = *map_context_objects( OBJ_TYPE_PATH, 1, &path );
+    if (!alloc_map_context_object( OBJ_TYPE_PATH, &path, TRUE )) return;
+    args.path = path;
     if ((status = UNIX_CALL( glGetPathParameterfvNV, &args ))) WARN( "glGetPathParameterfvNV returned %#lx\n", status );
 }
 
@@ -10717,8 +10717,8 @@ static void WINAPI glGetPathParameterivNV( GLuint path, GLenum pname, GLint *val
     struct glGetPathParameterivNV_params args = { .teb = NtCurrentTeb(), .pname = pname, .value = value };
     NTSTATUS status;
     TRACE( "path %d, pname %d, value %p\n", path, pname, value );
-    if (!alloc_context_objects( OBJ_TYPE_PATH, 1, &path, TRUE )) return;
-    args.path = *map_context_objects( OBJ_TYPE_PATH, 1, &path );
+    if (!alloc_map_context_object( OBJ_TYPE_PATH, &path, TRUE )) return;
+    args.path = path;
     if ((status = UNIX_CALL( glGetPathParameterivNV, &args ))) WARN( "glGetPathParameterivNV returned %#lx\n", status );
 }
 
@@ -10727,8 +10727,8 @@ static void WINAPI glGetPathSpacingNV( GLenum pathListMode, GLsizei numPaths, GL
     struct glGetPathSpacingNV_params args = { .teb = NtCurrentTeb(), .pathListMode = pathListMode, .numPaths = numPaths, .pathNameType = pathNameType, .paths = paths, .advanceScale = advanceScale, .kerningScale = kerningScale, .transformType = transformType, .returnedSpacing = returnedSpacing };
     NTSTATUS status;
     TRACE( "pathListMode %d, numPaths %d, pathNameType %d, paths %p, pathBase %d, advanceScale %f, kerningScale %f, transformType %d, returnedSpacing %p\n", pathListMode, numPaths, pathNameType, paths, pathBase, advanceScale, kerningScale, transformType, returnedSpacing );
-    if (!alloc_context_objects( OBJ_TYPE_PATH, 1, &pathBase, TRUE )) return;
-    args.pathBase = *map_context_objects( OBJ_TYPE_PATH, 1, &pathBase );
+    if (!alloc_map_context_object( OBJ_TYPE_PATH, &pathBase, TRUE )) return;
+    args.pathBase = pathBase;
     if ((status = UNIX_CALL( glGetPathSpacingNV, &args ))) WARN( "glGetPathSpacingNV returned %#lx\n", status );
 }
 
@@ -11624,8 +11624,8 @@ static void WINAPI glGetTextureImageEXT( GLuint texture, GLenum target, GLint le
     struct glGetTextureImageEXT_params args = { .teb = NtCurrentTeb(), .target = target, .level = level, .format = format, .type = type, .pixels = pixels };
     NTSTATUS status;
     TRACE( "texture %d, target %d, level %d, format %d, type %d, pixels %p\n", texture, target, level, format, type, pixels );
-    if (!alloc_context_objects( OBJ_TYPE_TEXTURE, 1, &texture, TRUE )) return;
-    args.texture = *map_context_objects( OBJ_TYPE_TEXTURE, 1, &texture );
+    if (!alloc_map_context_object( OBJ_TYPE_TEXTURE, &texture, TRUE )) return;
+    args.texture = texture;
     if ((status = UNIX_CALL( glGetTextureImageEXT, &args ))) WARN( "glGetTextureImageEXT returned %#lx\n", status );
 }
 
@@ -11646,8 +11646,8 @@ static void WINAPI glGetTextureLevelParameterfvEXT( GLuint texture, GLenum targe
     NTSTATUS status;
     int integer;
     TRACE( "texture %d, target %d, level %d, pname %d, params %p\n", texture, target, level, pname, params );
-    if (!alloc_context_objects( OBJ_TYPE_TEXTURE, 1, &texture, TRUE )) return;
-    args.texture = *map_context_objects( OBJ_TYPE_TEXTURE, 1, &texture );
+    if (!alloc_map_context_object( OBJ_TYPE_TEXTURE, &texture, TRUE )) return;
+    args.texture = texture;
     if ((status = UNIX_CALL( glGetTextureLevelParameterfvEXT, &args ))) WARN( "glGetTextureLevelParameterfvEXT returned %#lx\n", status );
     else if (get_integer( pname, 0, *params, &integer )) *params = integer;
 }
@@ -11669,8 +11669,8 @@ static void WINAPI glGetTextureLevelParameterivEXT( GLuint texture, GLenum targe
     NTSTATUS status;
     int integer;
     TRACE( "texture %d, target %d, level %d, pname %d, params %p\n", texture, target, level, pname, params );
-    if (!alloc_context_objects( OBJ_TYPE_TEXTURE, 1, &texture, TRUE )) return;
-    args.texture = *map_context_objects( OBJ_TYPE_TEXTURE, 1, &texture );
+    if (!alloc_map_context_object( OBJ_TYPE_TEXTURE, &texture, TRUE )) return;
+    args.texture = texture;
     if ((status = UNIX_CALL( glGetTextureLevelParameterivEXT, &args ))) WARN( "glGetTextureLevelParameterivEXT returned %#lx\n", status );
     else if (get_integer( pname, 0, *params, &integer )) *params = integer;
 }
@@ -11689,8 +11689,8 @@ static void WINAPI glGetTextureParameterIivEXT( GLuint texture, GLenum target, G
     struct glGetTextureParameterIivEXT_params args = { .teb = NtCurrentTeb(), .target = target, .pname = pname, .params = params };
     NTSTATUS status;
     TRACE( "texture %d, target %d, pname %d, params %p\n", texture, target, pname, params );
-    if (!alloc_context_objects( OBJ_TYPE_TEXTURE, 1, &texture, TRUE )) return;
-    args.texture = *map_context_objects( OBJ_TYPE_TEXTURE, 1, &texture );
+    if (!alloc_map_context_object( OBJ_TYPE_TEXTURE, &texture, TRUE )) return;
+    args.texture = texture;
     if ((status = UNIX_CALL( glGetTextureParameterIivEXT, &args ))) WARN( "glGetTextureParameterIivEXT returned %#lx\n", status );
 }
 
@@ -11708,8 +11708,8 @@ static void WINAPI glGetTextureParameterIuivEXT( GLuint texture, GLenum target, 
     struct glGetTextureParameterIuivEXT_params args = { .teb = NtCurrentTeb(), .target = target, .pname = pname, .params = params };
     NTSTATUS status;
     TRACE( "texture %d, target %d, pname %d, params %p\n", texture, target, pname, params );
-    if (!alloc_context_objects( OBJ_TYPE_TEXTURE, 1, &texture, TRUE )) return;
-    args.texture = *map_context_objects( OBJ_TYPE_TEXTURE, 1, &texture );
+    if (!alloc_map_context_object( OBJ_TYPE_TEXTURE, &texture, TRUE )) return;
+    args.texture = texture;
     if ((status = UNIX_CALL( glGetTextureParameterIuivEXT, &args ))) WARN( "glGetTextureParameterIuivEXT returned %#lx\n", status );
 }
 
@@ -11727,8 +11727,8 @@ static void WINAPI glGetTextureParameterfvEXT( GLuint texture, GLenum target, GL
     struct glGetTextureParameterfvEXT_params args = { .teb = NtCurrentTeb(), .target = target, .pname = pname, .params = params };
     NTSTATUS status;
     TRACE( "texture %d, target %d, pname %d, params %p\n", texture, target, pname, params );
-    if (!alloc_context_objects( OBJ_TYPE_TEXTURE, 1, &texture, TRUE )) return;
-    args.texture = *map_context_objects( OBJ_TYPE_TEXTURE, 1, &texture );
+    if (!alloc_map_context_object( OBJ_TYPE_TEXTURE, &texture, TRUE )) return;
+    args.texture = texture;
     if ((status = UNIX_CALL( glGetTextureParameterfvEXT, &args ))) WARN( "glGetTextureParameterfvEXT returned %#lx\n", status );
 }
 
@@ -11746,8 +11746,8 @@ static void WINAPI glGetTextureParameterivEXT( GLuint texture, GLenum target, GL
     struct glGetTextureParameterivEXT_params args = { .teb = NtCurrentTeb(), .target = target, .pname = pname, .params = params };
     NTSTATUS status;
     TRACE( "texture %d, target %d, pname %d, params %p\n", texture, target, pname, params );
-    if (!alloc_context_objects( OBJ_TYPE_TEXTURE, 1, &texture, TRUE )) return;
-    args.texture = *map_context_objects( OBJ_TYPE_TEXTURE, 1, &texture );
+    if (!alloc_map_context_object( OBJ_TYPE_TEXTURE, &texture, TRUE )) return;
+    args.texture = texture;
     if ((status = UNIX_CALL( glGetTextureParameterivEXT, &args ))) WARN( "glGetTextureParameterivEXT returned %#lx\n", status );
 }
 
@@ -12947,8 +12947,8 @@ static void WINAPI glImportSemaphoreWin32HandleEXT( GLuint semaphore, GLenum han
     struct glImportSemaphoreWin32HandleEXT_params args = { .teb = NtCurrentTeb(), .handleType = handleType, .handle = handle };
     NTSTATUS status;
     TRACE( "semaphore %d, handleType %d, handle %p\n", semaphore, handleType, handle );
-    if (!alloc_context_objects( OBJ_TYPE_SEMAPHORE, 1, &semaphore, TRUE )) return;
-    args.semaphore = *map_context_objects( OBJ_TYPE_SEMAPHORE, 1, &semaphore );
+    if (!alloc_map_context_object( OBJ_TYPE_SEMAPHORE, &semaphore, TRUE )) return;
+    args.semaphore = semaphore;
     if ((status = UNIX_CALL( glImportSemaphoreWin32HandleEXT, &args ))) WARN( "glImportSemaphoreWin32HandleEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -12958,8 +12958,8 @@ static void WINAPI glImportSemaphoreWin32NameEXT( GLuint semaphore, GLenum handl
     struct glImportSemaphoreWin32NameEXT_params args = { .teb = NtCurrentTeb(), .handleType = handleType, .name = name };
     NTSTATUS status;
     TRACE( "semaphore %d, handleType %d, name %p\n", semaphore, handleType, name );
-    if (!alloc_context_objects( OBJ_TYPE_SEMAPHORE, 1, &semaphore, TRUE )) return;
-    args.semaphore = *map_context_objects( OBJ_TYPE_SEMAPHORE, 1, &semaphore );
+    if (!alloc_map_context_object( OBJ_TYPE_SEMAPHORE, &semaphore, TRUE )) return;
+    args.semaphore = semaphore;
     if ((status = UNIX_CALL( glImportSemaphoreWin32NameEXT, &args ))) WARN( "glImportSemaphoreWin32NameEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -13059,12 +13059,12 @@ static void WINAPI glInterpolatePathsNV( GLuint resultPath, GLuint pathA, GLuint
     struct glInterpolatePathsNV_params args = { .teb = NtCurrentTeb(), .weight = weight };
     NTSTATUS status;
     TRACE( "resultPath %d, pathA %d, pathB %d, weight %f\n", resultPath, pathA, pathB, weight );
-    if (!alloc_context_objects( OBJ_TYPE_PATH, 1, &resultPath, TRUE )) return;
-    if (!alloc_context_objects( OBJ_TYPE_PATH, 1, &pathA, TRUE )) return;
-    if (!alloc_context_objects( OBJ_TYPE_PATH, 1, &pathB, TRUE )) return;
-    args.resultPath = *map_context_objects( OBJ_TYPE_PATH, 1, &resultPath );
-    args.pathA = *map_context_objects( OBJ_TYPE_PATH, 1, &pathA );
-    args.pathB = *map_context_objects( OBJ_TYPE_PATH, 1, &pathB );
+    if (!alloc_map_context_object( OBJ_TYPE_PATH, &resultPath, TRUE )) return;
+    if (!alloc_map_context_object( OBJ_TYPE_PATH, &pathA, TRUE )) return;
+    if (!alloc_map_context_object( OBJ_TYPE_PATH, &pathB, TRUE )) return;
+    args.resultPath = resultPath;
+    args.pathA = pathA;
+    args.pathB = pathB;
     if ((status = UNIX_CALL( glInterpolatePathsNV, &args ))) WARN( "glInterpolatePathsNV returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -13330,8 +13330,8 @@ static GLboolean WINAPI glIsPathNV( GLuint path )
     struct glIsPathNV_params args = { .teb = NtCurrentTeb() };
     NTSTATUS status;
     TRACE( "path %d\n", path );
-    if (!alloc_context_objects( OBJ_TYPE_PATH, 1, &path, TRUE )) return args.ret;
-    args.path = *map_context_objects( OBJ_TYPE_PATH, 1, &path );
+    if (!alloc_map_context_object( OBJ_TYPE_PATH, &path, TRUE )) return args.ret;
+    args.path = path;
     if ((status = UNIX_CALL( glIsPathNV, &args ))) WARN( "glIsPathNV returned %#lx\n", status );
     return args.ret;
 }
@@ -13341,8 +13341,8 @@ static GLboolean WINAPI glIsPointInFillPathNV( GLuint path, GLuint mask, GLfloat
     struct glIsPointInFillPathNV_params args = { .teb = NtCurrentTeb(), .mask = mask, .x = x, .y = y };
     NTSTATUS status;
     TRACE( "path %d, mask %d, x %f, y %f\n", path, mask, x, y );
-    if (!alloc_context_objects( OBJ_TYPE_PATH, 1, &path, TRUE )) return args.ret;
-    args.path = *map_context_objects( OBJ_TYPE_PATH, 1, &path );
+    if (!alloc_map_context_object( OBJ_TYPE_PATH, &path, TRUE )) return args.ret;
+    args.path = path;
     if ((status = UNIX_CALL( glIsPointInFillPathNV, &args ))) WARN( "glIsPointInFillPathNV returned %#lx\n", status );
     return args.ret;
 }
@@ -13352,8 +13352,8 @@ static GLboolean WINAPI glIsPointInStrokePathNV( GLuint path, GLfloat x, GLfloat
     struct glIsPointInStrokePathNV_params args = { .teb = NtCurrentTeb(), .x = x, .y = y };
     NTSTATUS status;
     TRACE( "path %d, x %f, y %f\n", path, x, y );
-    if (!alloc_context_objects( OBJ_TYPE_PATH, 1, &path, TRUE )) return args.ret;
-    args.path = *map_context_objects( OBJ_TYPE_PATH, 1, &path );
+    if (!alloc_map_context_object( OBJ_TYPE_PATH, &path, TRUE )) return args.ret;
+    args.path = path;
     if ((status = UNIX_CALL( glIsPointInStrokePathNV, &args ))) WARN( "glIsPointInStrokePathNV returned %#lx\n", status );
     return args.ret;
 }
@@ -14086,8 +14086,8 @@ static void * WINAPI glMapNamedBufferEXT( GLuint buffer, GLenum access )
     struct glMapNamedBufferEXT_params args = { .teb = NtCurrentTeb(), .access = access };
     NTSTATUS status;
     TRACE( "buffer %d, access %d\n", buffer, access );
-    if (!alloc_context_objects( OBJ_TYPE_BUFFER, 1, &buffer, TRUE )) return args.ret;
-    args.buffer = *map_context_objects( OBJ_TYPE_BUFFER, 1, &buffer );
+    if (!alloc_map_context_object( OBJ_TYPE_BUFFER, &buffer, TRUE )) return args.ret;
+    args.buffer = buffer;
     if ((status = UNIX_CALL( glMapNamedBufferEXT, &args ))) WARN( "glMapNamedBufferEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
     return args.ret;
@@ -14109,8 +14109,8 @@ static void * WINAPI glMapNamedBufferRangeEXT( GLuint buffer, GLintptr offset, G
     struct glMapNamedBufferRangeEXT_params args = { .teb = NtCurrentTeb(), .offset = offset, .length = length, .access = access };
     NTSTATUS status;
     TRACE( "buffer %d, offset %Id, length %Id, access %d\n", buffer, offset, length, access );
-    if (!alloc_context_objects( OBJ_TYPE_BUFFER, 1, &buffer, TRUE )) return args.ret;
-    args.buffer = *map_context_objects( OBJ_TYPE_BUFFER, 1, &buffer );
+    if (!alloc_map_context_object( OBJ_TYPE_BUFFER, &buffer, TRUE )) return args.ret;
+    args.buffer = buffer;
     if ((status = UNIX_CALL( glMapNamedBufferRangeEXT, &args ))) WARN( "glMapNamedBufferRangeEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
     return args.ret;
@@ -14873,8 +14873,8 @@ static void WINAPI glMultiTexBufferEXT( GLenum texunit, GLenum target, GLenum in
     struct glMultiTexBufferEXT_params args = { .teb = NtCurrentTeb(), .texunit = texunit, .target = target, .internalformat = internalformat };
     NTSTATUS status;
     TRACE( "texunit %d, target %d, internalformat %d, buffer %d\n", texunit, target, internalformat, buffer );
-    if (!alloc_context_objects( OBJ_TYPE_BUFFER, 1, &buffer, TRUE )) return;
-    args.buffer = *map_context_objects( OBJ_TYPE_BUFFER, 1, &buffer );
+    if (!alloc_map_context_object( OBJ_TYPE_BUFFER, &buffer, TRUE )) return;
+    args.buffer = buffer;
     if ((status = UNIX_CALL( glMultiTexBufferEXT, &args ))) WARN( "glMultiTexBufferEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -16234,8 +16234,8 @@ static void WINAPI glMultiTexRenderbufferEXT( GLenum texunit, GLenum target, GLu
     struct glMultiTexRenderbufferEXT_params args = { .teb = NtCurrentTeb(), .texunit = texunit, .target = target };
     NTSTATUS status;
     TRACE( "texunit %d, target %d, renderbuffer %d\n", texunit, target, renderbuffer );
-    if (!alloc_context_objects( OBJ_TYPE_RENDERBUFFER, 1, &renderbuffer, TRUE )) return;
-    args.renderbuffer = *map_context_objects( OBJ_TYPE_RENDERBUFFER, 1, &renderbuffer );
+    if (!alloc_map_context_object( OBJ_TYPE_RENDERBUFFER, &renderbuffer, TRUE )) return;
+    args.renderbuffer = renderbuffer;
     if ((status = UNIX_CALL( glMultiTexRenderbufferEXT, &args ))) WARN( "glMultiTexRenderbufferEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -16425,8 +16425,8 @@ static void WINAPI glNamedBufferDataEXT( GLuint buffer, GLsizeiptr size, const v
     struct glNamedBufferDataEXT_params args = { .teb = NtCurrentTeb(), .size = size, .data = data, .usage = usage };
     NTSTATUS status;
     TRACE( "buffer %d, size %Id, data %p, usage %d\n", buffer, size, data, usage );
-    if (!alloc_context_objects( OBJ_TYPE_BUFFER, 1, &buffer, TRUE )) return;
-    args.buffer = *map_context_objects( OBJ_TYPE_BUFFER, 1, &buffer );
+    if (!alloc_map_context_object( OBJ_TYPE_BUFFER, &buffer, TRUE )) return;
+    args.buffer = buffer;
     if ((status = UNIX_CALL( glNamedBufferDataEXT, &args ))) WARN( "glNamedBufferDataEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -16477,8 +16477,8 @@ static void WINAPI glNamedBufferStorageEXT( GLuint buffer, GLsizeiptr size, cons
     struct glNamedBufferStorageEXT_params args = { .teb = NtCurrentTeb(), .size = size, .data = data, .flags = flags };
     NTSTATUS status;
     TRACE( "buffer %d, size %Id, data %p, flags %d\n", buffer, size, data, flags );
-    if (!alloc_context_objects( OBJ_TYPE_BUFFER, 1, &buffer, TRUE )) return;
-    args.buffer = *map_context_objects( OBJ_TYPE_BUFFER, 1, &buffer );
+    if (!alloc_map_context_object( OBJ_TYPE_BUFFER, &buffer, TRUE )) return;
+    args.buffer = buffer;
     if ((status = UNIX_CALL( glNamedBufferStorageEXT, &args ))) WARN( "glNamedBufferStorageEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -16509,8 +16509,8 @@ static void WINAPI glNamedBufferSubDataEXT( GLuint buffer, GLintptr offset, GLsi
     struct glNamedBufferSubDataEXT_params args = { .teb = NtCurrentTeb(), .offset = offset, .size = size, .data = data };
     NTSTATUS status;
     TRACE( "buffer %d, offset %Id, size %Id, data %p\n", buffer, offset, size, data );
-    if (!alloc_context_objects( OBJ_TYPE_BUFFER, 1, &buffer, TRUE )) return;
-    args.buffer = *map_context_objects( OBJ_TYPE_BUFFER, 1, &buffer );
+    if (!alloc_map_context_object( OBJ_TYPE_BUFFER, &buffer, TRUE )) return;
+    args.buffer = buffer;
     if ((status = UNIX_CALL( glNamedBufferSubDataEXT, &args ))) WARN( "glNamedBufferSubDataEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -16520,10 +16520,10 @@ static void WINAPI glNamedCopyBufferSubDataEXT( GLuint readBuffer, GLuint writeB
     struct glNamedCopyBufferSubDataEXT_params args = { .teb = NtCurrentTeb(), .readOffset = readOffset, .writeOffset = writeOffset, .size = size };
     NTSTATUS status;
     TRACE( "readBuffer %d, writeBuffer %d, readOffset %Id, writeOffset %Id, size %Id\n", readBuffer, writeBuffer, readOffset, writeOffset, size );
-    if (!alloc_context_objects( OBJ_TYPE_BUFFER, 1, &readBuffer, TRUE )) return;
-    if (!alloc_context_objects( OBJ_TYPE_BUFFER, 1, &writeBuffer, TRUE )) return;
-    args.readBuffer = *map_context_objects( OBJ_TYPE_BUFFER, 1, &readBuffer );
-    args.writeBuffer = *map_context_objects( OBJ_TYPE_BUFFER, 1, &writeBuffer );
+    if (!alloc_map_context_object( OBJ_TYPE_BUFFER, &readBuffer, TRUE )) return;
+    if (!alloc_map_context_object( OBJ_TYPE_BUFFER, &writeBuffer, TRUE )) return;
+    args.readBuffer = readBuffer;
+    args.writeBuffer = writeBuffer;
     if ((status = UNIX_CALL( glNamedCopyBufferSubDataEXT, &args ))) WARN( "glNamedCopyBufferSubDataEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -16563,8 +16563,8 @@ static void WINAPI glNamedFramebufferParameteriEXT( GLuint framebuffer, GLenum p
     struct glNamedFramebufferParameteriEXT_params args = { .teb = NtCurrentTeb(), .pname = pname, .param = param };
     NTSTATUS status;
     TRACE( "framebuffer %d, pname %d, param %d\n", framebuffer, pname, param );
-    if (!alloc_context_objects( OBJ_TYPE_FRAMEBUFFER, 1, &framebuffer, TRUE )) return;
-    args.framebuffer = *map_context_objects( OBJ_TYPE_FRAMEBUFFER, 1, &framebuffer );
+    if (!alloc_map_context_object( OBJ_TYPE_FRAMEBUFFER, &framebuffer, TRUE )) return;
+    args.framebuffer = framebuffer;
     if ((status = UNIX_CALL( glNamedFramebufferParameteriEXT, &args ))) WARN( "glNamedFramebufferParameteriEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -16595,10 +16595,10 @@ static void WINAPI glNamedFramebufferRenderbufferEXT( GLuint framebuffer, GLenum
     struct glNamedFramebufferRenderbufferEXT_params args = { .teb = NtCurrentTeb(), .attachment = attachment, .renderbuffertarget = renderbuffertarget };
     NTSTATUS status;
     TRACE( "framebuffer %d, attachment %d, renderbuffertarget %d, renderbuffer %d\n", framebuffer, attachment, renderbuffertarget, renderbuffer );
-    if (!alloc_context_objects( OBJ_TYPE_FRAMEBUFFER, 1, &framebuffer, TRUE )) return;
-    if (!alloc_context_objects( OBJ_TYPE_RENDERBUFFER, 1, &renderbuffer, TRUE )) return;
-    args.framebuffer = *map_context_objects( OBJ_TYPE_FRAMEBUFFER, 1, &framebuffer );
-    args.renderbuffer = *map_context_objects( OBJ_TYPE_RENDERBUFFER, 1, &renderbuffer );
+    if (!alloc_map_context_object( OBJ_TYPE_FRAMEBUFFER, &framebuffer, TRUE )) return;
+    if (!alloc_map_context_object( OBJ_TYPE_RENDERBUFFER, &renderbuffer, TRUE )) return;
+    args.framebuffer = framebuffer;
+    args.renderbuffer = renderbuffer;
     if ((status = UNIX_CALL( glNamedFramebufferRenderbufferEXT, &args ))) WARN( "glNamedFramebufferRenderbufferEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -16649,10 +16649,10 @@ static void WINAPI glNamedFramebufferTexture1DEXT( GLuint framebuffer, GLenum at
     struct glNamedFramebufferTexture1DEXT_params args = { .teb = NtCurrentTeb(), .attachment = attachment, .textarget = textarget, .level = level };
     NTSTATUS status;
     TRACE( "framebuffer %d, attachment %d, textarget %d, texture %d, level %d\n", framebuffer, attachment, textarget, texture, level );
-    if (!alloc_context_objects( OBJ_TYPE_FRAMEBUFFER, 1, &framebuffer, TRUE )) return;
-    if (!alloc_context_objects( OBJ_TYPE_TEXTURE, 1, &texture, TRUE )) return;
-    args.framebuffer = *map_context_objects( OBJ_TYPE_FRAMEBUFFER, 1, &framebuffer );
-    args.texture = *map_context_objects( OBJ_TYPE_TEXTURE, 1, &texture );
+    if (!alloc_map_context_object( OBJ_TYPE_FRAMEBUFFER, &framebuffer, TRUE )) return;
+    if (!alloc_map_context_object( OBJ_TYPE_TEXTURE, &texture, TRUE )) return;
+    args.framebuffer = framebuffer;
+    args.texture = texture;
     if ((status = UNIX_CALL( glNamedFramebufferTexture1DEXT, &args ))) WARN( "glNamedFramebufferTexture1DEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -16662,10 +16662,10 @@ static void WINAPI glNamedFramebufferTexture2DEXT( GLuint framebuffer, GLenum at
     struct glNamedFramebufferTexture2DEXT_params args = { .teb = NtCurrentTeb(), .attachment = attachment, .textarget = textarget, .level = level };
     NTSTATUS status;
     TRACE( "framebuffer %d, attachment %d, textarget %d, texture %d, level %d\n", framebuffer, attachment, textarget, texture, level );
-    if (!alloc_context_objects( OBJ_TYPE_FRAMEBUFFER, 1, &framebuffer, TRUE )) return;
-    if (!alloc_context_objects( OBJ_TYPE_TEXTURE, 1, &texture, TRUE )) return;
-    args.framebuffer = *map_context_objects( OBJ_TYPE_FRAMEBUFFER, 1, &framebuffer );
-    args.texture = *map_context_objects( OBJ_TYPE_TEXTURE, 1, &texture );
+    if (!alloc_map_context_object( OBJ_TYPE_FRAMEBUFFER, &framebuffer, TRUE )) return;
+    if (!alloc_map_context_object( OBJ_TYPE_TEXTURE, &texture, TRUE )) return;
+    args.framebuffer = framebuffer;
+    args.texture = texture;
     if ((status = UNIX_CALL( glNamedFramebufferTexture2DEXT, &args ))) WARN( "glNamedFramebufferTexture2DEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -16675,10 +16675,10 @@ static void WINAPI glNamedFramebufferTexture3DEXT( GLuint framebuffer, GLenum at
     struct glNamedFramebufferTexture3DEXT_params args = { .teb = NtCurrentTeb(), .attachment = attachment, .textarget = textarget, .level = level, .zoffset = zoffset };
     NTSTATUS status;
     TRACE( "framebuffer %d, attachment %d, textarget %d, texture %d, level %d, zoffset %d\n", framebuffer, attachment, textarget, texture, level, zoffset );
-    if (!alloc_context_objects( OBJ_TYPE_FRAMEBUFFER, 1, &framebuffer, TRUE )) return;
-    if (!alloc_context_objects( OBJ_TYPE_TEXTURE, 1, &texture, TRUE )) return;
-    args.framebuffer = *map_context_objects( OBJ_TYPE_FRAMEBUFFER, 1, &framebuffer );
-    args.texture = *map_context_objects( OBJ_TYPE_TEXTURE, 1, &texture );
+    if (!alloc_map_context_object( OBJ_TYPE_FRAMEBUFFER, &framebuffer, TRUE )) return;
+    if (!alloc_map_context_object( OBJ_TYPE_TEXTURE, &texture, TRUE )) return;
+    args.framebuffer = framebuffer;
+    args.texture = texture;
     if ((status = UNIX_CALL( glNamedFramebufferTexture3DEXT, &args ))) WARN( "glNamedFramebufferTexture3DEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -16688,10 +16688,10 @@ static void WINAPI glNamedFramebufferTextureEXT( GLuint framebuffer, GLenum atta
     struct glNamedFramebufferTextureEXT_params args = { .teb = NtCurrentTeb(), .attachment = attachment, .level = level };
     NTSTATUS status;
     TRACE( "framebuffer %d, attachment %d, texture %d, level %d\n", framebuffer, attachment, texture, level );
-    if (!alloc_context_objects( OBJ_TYPE_FRAMEBUFFER, 1, &framebuffer, TRUE )) return;
-    if (!alloc_context_objects( OBJ_TYPE_TEXTURE, 1, &texture, TRUE )) return;
-    args.framebuffer = *map_context_objects( OBJ_TYPE_FRAMEBUFFER, 1, &framebuffer );
-    args.texture = *map_context_objects( OBJ_TYPE_TEXTURE, 1, &texture );
+    if (!alloc_map_context_object( OBJ_TYPE_FRAMEBUFFER, &framebuffer, TRUE )) return;
+    if (!alloc_map_context_object( OBJ_TYPE_TEXTURE, &texture, TRUE )) return;
+    args.framebuffer = framebuffer;
+    args.texture = texture;
     if ((status = UNIX_CALL( glNamedFramebufferTextureEXT, &args ))) WARN( "glNamedFramebufferTextureEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -16701,10 +16701,10 @@ static void WINAPI glNamedFramebufferTextureFaceEXT( GLuint framebuffer, GLenum 
     struct glNamedFramebufferTextureFaceEXT_params args = { .teb = NtCurrentTeb(), .attachment = attachment, .level = level, .face = face };
     NTSTATUS status;
     TRACE( "framebuffer %d, attachment %d, texture %d, level %d, face %d\n", framebuffer, attachment, texture, level, face );
-    if (!alloc_context_objects( OBJ_TYPE_FRAMEBUFFER, 1, &framebuffer, TRUE )) return;
-    if (!alloc_context_objects( OBJ_TYPE_TEXTURE, 1, &texture, TRUE )) return;
-    args.framebuffer = *map_context_objects( OBJ_TYPE_FRAMEBUFFER, 1, &framebuffer );
-    args.texture = *map_context_objects( OBJ_TYPE_TEXTURE, 1, &texture );
+    if (!alloc_map_context_object( OBJ_TYPE_FRAMEBUFFER, &framebuffer, TRUE )) return;
+    if (!alloc_map_context_object( OBJ_TYPE_TEXTURE, &texture, TRUE )) return;
+    args.framebuffer = framebuffer;
+    args.texture = texture;
     if ((status = UNIX_CALL( glNamedFramebufferTextureFaceEXT, &args ))) WARN( "glNamedFramebufferTextureFaceEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -16725,10 +16725,10 @@ static void WINAPI glNamedFramebufferTextureLayerEXT( GLuint framebuffer, GLenum
     struct glNamedFramebufferTextureLayerEXT_params args = { .teb = NtCurrentTeb(), .attachment = attachment, .level = level, .layer = layer };
     NTSTATUS status;
     TRACE( "framebuffer %d, attachment %d, texture %d, level %d, layer %d\n", framebuffer, attachment, texture, level, layer );
-    if (!alloc_context_objects( OBJ_TYPE_FRAMEBUFFER, 1, &framebuffer, TRUE )) return;
-    if (!alloc_context_objects( OBJ_TYPE_TEXTURE, 1, &texture, TRUE )) return;
-    args.framebuffer = *map_context_objects( OBJ_TYPE_FRAMEBUFFER, 1, &framebuffer );
-    args.texture = *map_context_objects( OBJ_TYPE_TEXTURE, 1, &texture );
+    if (!alloc_map_context_object( OBJ_TYPE_FRAMEBUFFER, &framebuffer, TRUE )) return;
+    if (!alloc_map_context_object( OBJ_TYPE_TEXTURE, &texture, TRUE )) return;
+    args.framebuffer = framebuffer;
+    args.texture = texture;
     if ((status = UNIX_CALL( glNamedFramebufferTextureLayerEXT, &args ))) WARN( "glNamedFramebufferTextureLayerEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -16749,8 +16749,8 @@ static void WINAPI glNamedProgramLocalParameter4dEXT( GLuint program, GLenum tar
     struct glNamedProgramLocalParameter4dEXT_params args = { .teb = NtCurrentTeb(), .target = target, .index = index, .x = x, .y = y, .z = z, .w = w };
     NTSTATUS status;
     TRACE( "program %d, target %d, index %d, x %f, y %f, z %f, w %f\n", program, target, index, x, y, z, w );
-    if (!alloc_context_objects( OBJ_TYPE_PROGRAM, 1, &program, TRUE )) return;
-    args.program = *map_context_objects( OBJ_TYPE_PROGRAM, 1, &program );
+    if (!alloc_map_context_object( OBJ_TYPE_PROGRAM, &program, TRUE )) return;
+    args.program = program;
     if ((status = UNIX_CALL( glNamedProgramLocalParameter4dEXT, &args ))) WARN( "glNamedProgramLocalParameter4dEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -16760,8 +16760,8 @@ static void WINAPI glNamedProgramLocalParameter4dvEXT( GLuint program, GLenum ta
     struct glNamedProgramLocalParameter4dvEXT_params args = { .teb = NtCurrentTeb(), .target = target, .index = index, .params = params };
     NTSTATUS status;
     TRACE( "program %d, target %d, index %d, params %p\n", program, target, index, params );
-    if (!alloc_context_objects( OBJ_TYPE_PROGRAM, 1, &program, TRUE )) return;
-    args.program = *map_context_objects( OBJ_TYPE_PROGRAM, 1, &program );
+    if (!alloc_map_context_object( OBJ_TYPE_PROGRAM, &program, TRUE )) return;
+    args.program = program;
     if ((status = UNIX_CALL( glNamedProgramLocalParameter4dvEXT, &args ))) WARN( "glNamedProgramLocalParameter4dvEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -16771,8 +16771,8 @@ static void WINAPI glNamedProgramLocalParameter4fEXT( GLuint program, GLenum tar
     struct glNamedProgramLocalParameter4fEXT_params args = { .teb = NtCurrentTeb(), .target = target, .index = index, .x = x, .y = y, .z = z, .w = w };
     NTSTATUS status;
     TRACE( "program %d, target %d, index %d, x %f, y %f, z %f, w %f\n", program, target, index, x, y, z, w );
-    if (!alloc_context_objects( OBJ_TYPE_PROGRAM, 1, &program, TRUE )) return;
-    args.program = *map_context_objects( OBJ_TYPE_PROGRAM, 1, &program );
+    if (!alloc_map_context_object( OBJ_TYPE_PROGRAM, &program, TRUE )) return;
+    args.program = program;
     if ((status = UNIX_CALL( glNamedProgramLocalParameter4fEXT, &args ))) WARN( "glNamedProgramLocalParameter4fEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -16782,8 +16782,8 @@ static void WINAPI glNamedProgramLocalParameter4fvEXT( GLuint program, GLenum ta
     struct glNamedProgramLocalParameter4fvEXT_params args = { .teb = NtCurrentTeb(), .target = target, .index = index, .params = params };
     NTSTATUS status;
     TRACE( "program %d, target %d, index %d, params %p\n", program, target, index, params );
-    if (!alloc_context_objects( OBJ_TYPE_PROGRAM, 1, &program, TRUE )) return;
-    args.program = *map_context_objects( OBJ_TYPE_PROGRAM, 1, &program );
+    if (!alloc_map_context_object( OBJ_TYPE_PROGRAM, &program, TRUE )) return;
+    args.program = program;
     if ((status = UNIX_CALL( glNamedProgramLocalParameter4fvEXT, &args ))) WARN( "glNamedProgramLocalParameter4fvEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -16793,8 +16793,8 @@ static void WINAPI glNamedProgramLocalParameterI4iEXT( GLuint program, GLenum ta
     struct glNamedProgramLocalParameterI4iEXT_params args = { .teb = NtCurrentTeb(), .target = target, .index = index, .x = x, .y = y, .z = z, .w = w };
     NTSTATUS status;
     TRACE( "program %d, target %d, index %d, x %d, y %d, z %d, w %d\n", program, target, index, x, y, z, w );
-    if (!alloc_context_objects( OBJ_TYPE_PROGRAM, 1, &program, TRUE )) return;
-    args.program = *map_context_objects( OBJ_TYPE_PROGRAM, 1, &program );
+    if (!alloc_map_context_object( OBJ_TYPE_PROGRAM, &program, TRUE )) return;
+    args.program = program;
     if ((status = UNIX_CALL( glNamedProgramLocalParameterI4iEXT, &args ))) WARN( "glNamedProgramLocalParameterI4iEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -16804,8 +16804,8 @@ static void WINAPI glNamedProgramLocalParameterI4ivEXT( GLuint program, GLenum t
     struct glNamedProgramLocalParameterI4ivEXT_params args = { .teb = NtCurrentTeb(), .target = target, .index = index, .params = params };
     NTSTATUS status;
     TRACE( "program %d, target %d, index %d, params %p\n", program, target, index, params );
-    if (!alloc_context_objects( OBJ_TYPE_PROGRAM, 1, &program, TRUE )) return;
-    args.program = *map_context_objects( OBJ_TYPE_PROGRAM, 1, &program );
+    if (!alloc_map_context_object( OBJ_TYPE_PROGRAM, &program, TRUE )) return;
+    args.program = program;
     if ((status = UNIX_CALL( glNamedProgramLocalParameterI4ivEXT, &args ))) WARN( "glNamedProgramLocalParameterI4ivEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -16815,8 +16815,8 @@ static void WINAPI glNamedProgramLocalParameterI4uiEXT( GLuint program, GLenum t
     struct glNamedProgramLocalParameterI4uiEXT_params args = { .teb = NtCurrentTeb(), .target = target, .index = index, .x = x, .y = y, .z = z, .w = w };
     NTSTATUS status;
     TRACE( "program %d, target %d, index %d, x %d, y %d, z %d, w %d\n", program, target, index, x, y, z, w );
-    if (!alloc_context_objects( OBJ_TYPE_PROGRAM, 1, &program, TRUE )) return;
-    args.program = *map_context_objects( OBJ_TYPE_PROGRAM, 1, &program );
+    if (!alloc_map_context_object( OBJ_TYPE_PROGRAM, &program, TRUE )) return;
+    args.program = program;
     if ((status = UNIX_CALL( glNamedProgramLocalParameterI4uiEXT, &args ))) WARN( "glNamedProgramLocalParameterI4uiEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -16826,8 +16826,8 @@ static void WINAPI glNamedProgramLocalParameterI4uivEXT( GLuint program, GLenum 
     struct glNamedProgramLocalParameterI4uivEXT_params args = { .teb = NtCurrentTeb(), .target = target, .index = index, .params = params };
     NTSTATUS status;
     TRACE( "program %d, target %d, index %d, params %p\n", program, target, index, params );
-    if (!alloc_context_objects( OBJ_TYPE_PROGRAM, 1, &program, TRUE )) return;
-    args.program = *map_context_objects( OBJ_TYPE_PROGRAM, 1, &program );
+    if (!alloc_map_context_object( OBJ_TYPE_PROGRAM, &program, TRUE )) return;
+    args.program = program;
     if ((status = UNIX_CALL( glNamedProgramLocalParameterI4uivEXT, &args ))) WARN( "glNamedProgramLocalParameterI4uivEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -16837,8 +16837,8 @@ static void WINAPI glNamedProgramLocalParameters4fvEXT( GLuint program, GLenum t
     struct glNamedProgramLocalParameters4fvEXT_params args = { .teb = NtCurrentTeb(), .target = target, .index = index, .count = count, .params = params };
     NTSTATUS status;
     TRACE( "program %d, target %d, index %d, count %d, params %p\n", program, target, index, count, params );
-    if (!alloc_context_objects( OBJ_TYPE_PROGRAM, 1, &program, TRUE )) return;
-    args.program = *map_context_objects( OBJ_TYPE_PROGRAM, 1, &program );
+    if (!alloc_map_context_object( OBJ_TYPE_PROGRAM, &program, TRUE )) return;
+    args.program = program;
     if ((status = UNIX_CALL( glNamedProgramLocalParameters4fvEXT, &args ))) WARN( "glNamedProgramLocalParameters4fvEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -16848,8 +16848,8 @@ static void WINAPI glNamedProgramLocalParametersI4ivEXT( GLuint program, GLenum 
     struct glNamedProgramLocalParametersI4ivEXT_params args = { .teb = NtCurrentTeb(), .target = target, .index = index, .count = count, .params = params };
     NTSTATUS status;
     TRACE( "program %d, target %d, index %d, count %d, params %p\n", program, target, index, count, params );
-    if (!alloc_context_objects( OBJ_TYPE_PROGRAM, 1, &program, TRUE )) return;
-    args.program = *map_context_objects( OBJ_TYPE_PROGRAM, 1, &program );
+    if (!alloc_map_context_object( OBJ_TYPE_PROGRAM, &program, TRUE )) return;
+    args.program = program;
     if ((status = UNIX_CALL( glNamedProgramLocalParametersI4ivEXT, &args ))) WARN( "glNamedProgramLocalParametersI4ivEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -16859,8 +16859,8 @@ static void WINAPI glNamedProgramLocalParametersI4uivEXT( GLuint program, GLenum
     struct glNamedProgramLocalParametersI4uivEXT_params args = { .teb = NtCurrentTeb(), .target = target, .index = index, .count = count, .params = params };
     NTSTATUS status;
     TRACE( "program %d, target %d, index %d, count %d, params %p\n", program, target, index, count, params );
-    if (!alloc_context_objects( OBJ_TYPE_PROGRAM, 1, &program, TRUE )) return;
-    args.program = *map_context_objects( OBJ_TYPE_PROGRAM, 1, &program );
+    if (!alloc_map_context_object( OBJ_TYPE_PROGRAM, &program, TRUE )) return;
+    args.program = program;
     if ((status = UNIX_CALL( glNamedProgramLocalParametersI4uivEXT, &args ))) WARN( "glNamedProgramLocalParametersI4uivEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -16870,8 +16870,8 @@ static void WINAPI glNamedProgramStringEXT( GLuint program, GLenum target, GLenu
     struct glNamedProgramStringEXT_params args = { .teb = NtCurrentTeb(), .target = target, .format = format, .len = len, .string = string };
     NTSTATUS status;
     TRACE( "program %d, target %d, format %d, len %d, string %p\n", program, target, format, len, string );
-    if (!alloc_context_objects( OBJ_TYPE_PROGRAM, 1, &program, TRUE )) return;
-    args.program = *map_context_objects( OBJ_TYPE_PROGRAM, 1, &program );
+    if (!alloc_map_context_object( OBJ_TYPE_PROGRAM, &program, TRUE )) return;
+    args.program = program;
     if ((status = UNIX_CALL( glNamedProgramStringEXT, &args ))) WARN( "glNamedProgramStringEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -16891,8 +16891,8 @@ static void WINAPI glNamedRenderbufferStorageEXT( GLuint renderbuffer, GLenum in
     struct glNamedRenderbufferStorageEXT_params args = { .teb = NtCurrentTeb(), .internalformat = internalformat, .width = width, .height = height };
     NTSTATUS status;
     TRACE( "renderbuffer %d, internalformat %d, width %d, height %d\n", renderbuffer, internalformat, width, height );
-    if (!alloc_context_objects( OBJ_TYPE_RENDERBUFFER, 1, &renderbuffer, TRUE )) return;
-    args.renderbuffer = *map_context_objects( OBJ_TYPE_RENDERBUFFER, 1, &renderbuffer );
+    if (!alloc_map_context_object( OBJ_TYPE_RENDERBUFFER, &renderbuffer, TRUE )) return;
+    args.renderbuffer = renderbuffer;
     if ((status = UNIX_CALL( glNamedRenderbufferStorageEXT, &args ))) WARN( "glNamedRenderbufferStorageEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -16922,8 +16922,8 @@ static void WINAPI glNamedRenderbufferStorageMultisampleCoverageEXT( GLuint rend
     struct glNamedRenderbufferStorageMultisampleCoverageEXT_params args = { .teb = NtCurrentTeb(), .coverageSamples = coverageSamples, .colorSamples = colorSamples, .internalformat = internalformat, .width = width, .height = height };
     NTSTATUS status;
     TRACE( "renderbuffer %d, coverageSamples %d, colorSamples %d, internalformat %d, width %d, height %d\n", renderbuffer, coverageSamples, colorSamples, internalformat, width, height );
-    if (!alloc_context_objects( OBJ_TYPE_RENDERBUFFER, 1, &renderbuffer, TRUE )) return;
-    args.renderbuffer = *map_context_objects( OBJ_TYPE_RENDERBUFFER, 1, &renderbuffer );
+    if (!alloc_map_context_object( OBJ_TYPE_RENDERBUFFER, &renderbuffer, TRUE )) return;
+    args.renderbuffer = renderbuffer;
     if ((status = UNIX_CALL( glNamedRenderbufferStorageMultisampleCoverageEXT, &args ))) WARN( "glNamedRenderbufferStorageMultisampleCoverageEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -16933,8 +16933,8 @@ static void WINAPI glNamedRenderbufferStorageMultisampleEXT( GLuint renderbuffer
     struct glNamedRenderbufferStorageMultisampleEXT_params args = { .teb = NtCurrentTeb(), .samples = samples, .internalformat = internalformat, .width = width, .height = height };
     NTSTATUS status;
     TRACE( "renderbuffer %d, samples %d, internalformat %d, width %d, height %d\n", renderbuffer, samples, internalformat, width, height );
-    if (!alloc_context_objects( OBJ_TYPE_RENDERBUFFER, 1, &renderbuffer, TRUE )) return;
-    args.renderbuffer = *map_context_objects( OBJ_TYPE_RENDERBUFFER, 1, &renderbuffer );
+    if (!alloc_map_context_object( OBJ_TYPE_RENDERBUFFER, &renderbuffer, TRUE )) return;
+    args.renderbuffer = renderbuffer;
     if ((status = UNIX_CALL( glNamedRenderbufferStorageMultisampleEXT, &args ))) WARN( "glNamedRenderbufferStorageMultisampleEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -17317,8 +17317,8 @@ static void WINAPI glPathCommandsNV( GLuint path, GLsizei numCommands, const GLu
     struct glPathCommandsNV_params args = { .teb = NtCurrentTeb(), .numCommands = numCommands, .commands = commands, .numCoords = numCoords, .coordType = coordType, .coords = coords };
     NTSTATUS status;
     TRACE( "path %d, numCommands %d, commands %p, numCoords %d, coordType %d, coords %p\n", path, numCommands, commands, numCoords, coordType, coords );
-    if (!alloc_context_objects( OBJ_TYPE_PATH, 1, &path, TRUE )) return;
-    args.path = *map_context_objects( OBJ_TYPE_PATH, 1, &path );
+    if (!alloc_map_context_object( OBJ_TYPE_PATH, &path, TRUE )) return;
+    args.path = path;
     if ((status = UNIX_CALL( glPathCommandsNV, &args ))) WARN( "glPathCommandsNV returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -17328,8 +17328,8 @@ static void WINAPI glPathCoordsNV( GLuint path, GLsizei numCoords, GLenum coordT
     struct glPathCoordsNV_params args = { .teb = NtCurrentTeb(), .numCoords = numCoords, .coordType = coordType, .coords = coords };
     NTSTATUS status;
     TRACE( "path %d, numCoords %d, coordType %d, coords %p\n", path, numCoords, coordType, coords );
-    if (!alloc_context_objects( OBJ_TYPE_PATH, 1, &path, TRUE )) return;
-    args.path = *map_context_objects( OBJ_TYPE_PATH, 1, &path );
+    if (!alloc_map_context_object( OBJ_TYPE_PATH, &path, TRUE )) return;
+    args.path = path;
     if ((status = UNIX_CALL( glPathCoordsNV, &args ))) WARN( "glPathCoordsNV returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -17348,8 +17348,8 @@ static void WINAPI glPathDashArrayNV( GLuint path, GLsizei dashCount, const GLfl
     struct glPathDashArrayNV_params args = { .teb = NtCurrentTeb(), .dashCount = dashCount, .dashArray = dashArray };
     NTSTATUS status;
     TRACE( "path %d, dashCount %d, dashArray %p\n", path, dashCount, dashArray );
-    if (!alloc_context_objects( OBJ_TYPE_PATH, 1, &path, TRUE )) return;
-    args.path = *map_context_objects( OBJ_TYPE_PATH, 1, &path );
+    if (!alloc_map_context_object( OBJ_TYPE_PATH, &path, TRUE )) return;
+    args.path = path;
     if ((status = UNIX_CALL( glPathDashArrayNV, &args ))) WARN( "glPathDashArrayNV returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -17368,8 +17368,8 @@ static GLenum WINAPI glPathGlyphIndexArrayNV( GLuint firstPathName, GLenum fontT
     struct glPathGlyphIndexArrayNV_params args = { .teb = NtCurrentTeb(), .fontTarget = fontTarget, .fontName = fontName, .fontStyle = fontStyle, .firstGlyphIndex = firstGlyphIndex, .numGlyphs = numGlyphs, .pathParameterTemplate = pathParameterTemplate, .emScale = emScale };
     NTSTATUS status;
     TRACE( "firstPathName %d, fontTarget %d, fontName %p, fontStyle %d, firstGlyphIndex %d, numGlyphs %d, pathParameterTemplate %d, emScale %f\n", firstPathName, fontTarget, fontName, fontStyle, firstGlyphIndex, numGlyphs, pathParameterTemplate, emScale );
-    if (!alloc_context_objects( OBJ_TYPE_PATH, 1, &firstPathName, TRUE )) return args.ret;
-    args.firstPathName = *map_context_objects( OBJ_TYPE_PATH, 1, &firstPathName );
+    if (!alloc_map_context_object( OBJ_TYPE_PATH, &firstPathName, TRUE )) return args.ret;
+    args.firstPathName = firstPathName;
     if ((status = UNIX_CALL( glPathGlyphIndexArrayNV, &args ))) WARN( "glPathGlyphIndexArrayNV returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
     return args.ret;
@@ -17390,10 +17390,10 @@ static void WINAPI glPathGlyphRangeNV( GLuint firstPathName, GLenum fontTarget, 
     struct glPathGlyphRangeNV_params args = { .teb = NtCurrentTeb(), .fontTarget = fontTarget, .fontName = fontName, .fontStyle = fontStyle, .firstGlyph = firstGlyph, .numGlyphs = numGlyphs, .handleMissingGlyphs = handleMissingGlyphs, .emScale = emScale };
     NTSTATUS status;
     TRACE( "firstPathName %d, fontTarget %d, fontName %p, fontStyle %d, firstGlyph %d, numGlyphs %d, handleMissingGlyphs %d, pathParameterTemplate %d, emScale %f\n", firstPathName, fontTarget, fontName, fontStyle, firstGlyph, numGlyphs, handleMissingGlyphs, pathParameterTemplate, emScale );
-    if (!alloc_context_objects( OBJ_TYPE_PATH, 1, &firstPathName, TRUE )) return;
-    if (!alloc_context_objects( OBJ_TYPE_PATH, 1, &pathParameterTemplate, TRUE )) return;
-    args.firstPathName = *map_context_objects( OBJ_TYPE_PATH, 1, &firstPathName );
-    args.pathParameterTemplate = *map_context_objects( OBJ_TYPE_PATH, 1, &pathParameterTemplate );
+    if (!alloc_map_context_object( OBJ_TYPE_PATH, &firstPathName, TRUE )) return;
+    if (!alloc_map_context_object( OBJ_TYPE_PATH, &pathParameterTemplate, TRUE )) return;
+    args.firstPathName = firstPathName;
+    args.pathParameterTemplate = pathParameterTemplate;
     if ((status = UNIX_CALL( glPathGlyphRangeNV, &args ))) WARN( "glPathGlyphRangeNV returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -17403,10 +17403,10 @@ static void WINAPI glPathGlyphsNV( GLuint firstPathName, GLenum fontTarget, cons
     struct glPathGlyphsNV_params args = { .teb = NtCurrentTeb(), .fontTarget = fontTarget, .fontName = fontName, .fontStyle = fontStyle, .numGlyphs = numGlyphs, .type = type, .charcodes = charcodes, .handleMissingGlyphs = handleMissingGlyphs, .emScale = emScale };
     NTSTATUS status;
     TRACE( "firstPathName %d, fontTarget %d, fontName %p, fontStyle %d, numGlyphs %d, type %d, charcodes %p, handleMissingGlyphs %d, pathParameterTemplate %d, emScale %f\n", firstPathName, fontTarget, fontName, fontStyle, numGlyphs, type, charcodes, handleMissingGlyphs, pathParameterTemplate, emScale );
-    if (!alloc_context_objects( OBJ_TYPE_PATH, 1, &firstPathName, TRUE )) return;
-    if (!alloc_context_objects( OBJ_TYPE_PATH, 1, &pathParameterTemplate, TRUE )) return;
-    args.firstPathName = *map_context_objects( OBJ_TYPE_PATH, 1, &firstPathName );
-    args.pathParameterTemplate = *map_context_objects( OBJ_TYPE_PATH, 1, &pathParameterTemplate );
+    if (!alloc_map_context_object( OBJ_TYPE_PATH, &firstPathName, TRUE )) return;
+    if (!alloc_map_context_object( OBJ_TYPE_PATH, &pathParameterTemplate, TRUE )) return;
+    args.firstPathName = firstPathName;
+    args.pathParameterTemplate = pathParameterTemplate;
     if ((status = UNIX_CALL( glPathGlyphsNV, &args ))) WARN( "glPathGlyphsNV returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -17416,8 +17416,8 @@ static GLenum WINAPI glPathMemoryGlyphIndexArrayNV( GLuint firstPathName, GLenum
     struct glPathMemoryGlyphIndexArrayNV_params args = { .teb = NtCurrentTeb(), .fontTarget = fontTarget, .fontSize = fontSize, .fontData = fontData, .faceIndex = faceIndex, .firstGlyphIndex = firstGlyphIndex, .numGlyphs = numGlyphs, .pathParameterTemplate = pathParameterTemplate, .emScale = emScale };
     NTSTATUS status;
     TRACE( "firstPathName %d, fontTarget %d, fontSize %Id, fontData %p, faceIndex %d, firstGlyphIndex %d, numGlyphs %d, pathParameterTemplate %d, emScale %f\n", firstPathName, fontTarget, fontSize, fontData, faceIndex, firstGlyphIndex, numGlyphs, pathParameterTemplate, emScale );
-    if (!alloc_context_objects( OBJ_TYPE_PATH, 1, &firstPathName, TRUE )) return args.ret;
-    args.firstPathName = *map_context_objects( OBJ_TYPE_PATH, 1, &firstPathName );
+    if (!alloc_map_context_object( OBJ_TYPE_PATH, &firstPathName, TRUE )) return args.ret;
+    args.firstPathName = firstPathName;
     if ((status = UNIX_CALL( glPathMemoryGlyphIndexArrayNV, &args ))) WARN( "glPathMemoryGlyphIndexArrayNV returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
     return args.ret;
@@ -17428,8 +17428,8 @@ static void WINAPI glPathParameterfNV( GLuint path, GLenum pname, GLfloat value 
     struct glPathParameterfNV_params args = { .teb = NtCurrentTeb(), .pname = pname, .value = value };
     NTSTATUS status;
     TRACE( "path %d, pname %d, value %f\n", path, pname, value );
-    if (!alloc_context_objects( OBJ_TYPE_PATH, 1, &path, TRUE )) return;
-    args.path = *map_context_objects( OBJ_TYPE_PATH, 1, &path );
+    if (!alloc_map_context_object( OBJ_TYPE_PATH, &path, TRUE )) return;
+    args.path = path;
     if ((status = UNIX_CALL( glPathParameterfNV, &args ))) WARN( "glPathParameterfNV returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -17439,8 +17439,8 @@ static void WINAPI glPathParameterfvNV( GLuint path, GLenum pname, const GLfloat
     struct glPathParameterfvNV_params args = { .teb = NtCurrentTeb(), .pname = pname, .value = value };
     NTSTATUS status;
     TRACE( "path %d, pname %d, value %p\n", path, pname, value );
-    if (!alloc_context_objects( OBJ_TYPE_PATH, 1, &path, TRUE )) return;
-    args.path = *map_context_objects( OBJ_TYPE_PATH, 1, &path );
+    if (!alloc_map_context_object( OBJ_TYPE_PATH, &path, TRUE )) return;
+    args.path = path;
     if ((status = UNIX_CALL( glPathParameterfvNV, &args ))) WARN( "glPathParameterfvNV returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -17450,8 +17450,8 @@ static void WINAPI glPathParameteriNV( GLuint path, GLenum pname, GLint value )
     struct glPathParameteriNV_params args = { .teb = NtCurrentTeb(), .pname = pname, .value = value };
     NTSTATUS status;
     TRACE( "path %d, pname %d, value %d\n", path, pname, value );
-    if (!alloc_context_objects( OBJ_TYPE_PATH, 1, &path, TRUE )) return;
-    args.path = *map_context_objects( OBJ_TYPE_PATH, 1, &path );
+    if (!alloc_map_context_object( OBJ_TYPE_PATH, &path, TRUE )) return;
+    args.path = path;
     if ((status = UNIX_CALL( glPathParameteriNV, &args ))) WARN( "glPathParameteriNV returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -17461,8 +17461,8 @@ static void WINAPI glPathParameterivNV( GLuint path, GLenum pname, const GLint *
     struct glPathParameterivNV_params args = { .teb = NtCurrentTeb(), .pname = pname, .value = value };
     NTSTATUS status;
     TRACE( "path %d, pname %d, value %p\n", path, pname, value );
-    if (!alloc_context_objects( OBJ_TYPE_PATH, 1, &path, TRUE )) return;
-    args.path = *map_context_objects( OBJ_TYPE_PATH, 1, &path );
+    if (!alloc_map_context_object( OBJ_TYPE_PATH, &path, TRUE )) return;
+    args.path = path;
     if ((status = UNIX_CALL( glPathParameterivNV, &args ))) WARN( "glPathParameterivNV returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -17490,8 +17490,8 @@ static void WINAPI glPathStringNV( GLuint path, GLenum format, GLsizei length, c
     struct glPathStringNV_params args = { .teb = NtCurrentTeb(), .format = format, .length = length, .pathString = pathString };
     NTSTATUS status;
     TRACE( "path %d, format %d, length %d, pathString %p\n", path, format, length, pathString );
-    if (!alloc_context_objects( OBJ_TYPE_PATH, 1, &path, TRUE )) return;
-    args.path = *map_context_objects( OBJ_TYPE_PATH, 1, &path );
+    if (!alloc_map_context_object( OBJ_TYPE_PATH, &path, TRUE )) return;
+    args.path = path;
     if ((status = UNIX_CALL( glPathStringNV, &args ))) WARN( "glPathStringNV returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -17501,8 +17501,8 @@ static void WINAPI glPathSubCommandsNV( GLuint path, GLsizei commandStart, GLsiz
     struct glPathSubCommandsNV_params args = { .teb = NtCurrentTeb(), .commandStart = commandStart, .commandsToDelete = commandsToDelete, .numCommands = numCommands, .commands = commands, .numCoords = numCoords, .coordType = coordType, .coords = coords };
     NTSTATUS status;
     TRACE( "path %d, commandStart %d, commandsToDelete %d, numCommands %d, commands %p, numCoords %d, coordType %d, coords %p\n", path, commandStart, commandsToDelete, numCommands, commands, numCoords, coordType, coords );
-    if (!alloc_context_objects( OBJ_TYPE_PATH, 1, &path, TRUE )) return;
-    args.path = *map_context_objects( OBJ_TYPE_PATH, 1, &path );
+    if (!alloc_map_context_object( OBJ_TYPE_PATH, &path, TRUE )) return;
+    args.path = path;
     if ((status = UNIX_CALL( glPathSubCommandsNV, &args ))) WARN( "glPathSubCommandsNV returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -17512,8 +17512,8 @@ static void WINAPI glPathSubCoordsNV( GLuint path, GLsizei coordStart, GLsizei n
     struct glPathSubCoordsNV_params args = { .teb = NtCurrentTeb(), .coordStart = coordStart, .numCoords = numCoords, .coordType = coordType, .coords = coords };
     NTSTATUS status;
     TRACE( "path %d, coordStart %d, numCoords %d, coordType %d, coords %p\n", path, coordStart, numCoords, coordType, coords );
-    if (!alloc_context_objects( OBJ_TYPE_PATH, 1, &path, TRUE )) return;
-    args.path = *map_context_objects( OBJ_TYPE_PATH, 1, &path );
+    if (!alloc_map_context_object( OBJ_TYPE_PATH, &path, TRUE )) return;
+    args.path = path;
     if ((status = UNIX_CALL( glPathSubCoordsNV, &args ))) WARN( "glPathSubCoordsNV returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -17676,8 +17676,8 @@ static GLboolean WINAPI glPointAlongPathNV( GLuint path, GLsizei startSegment, G
     struct glPointAlongPathNV_params args = { .teb = NtCurrentTeb(), .startSegment = startSegment, .numSegments = numSegments, .distance = distance, .x = x, .y = y, .tangentX = tangentX, .tangentY = tangentY };
     NTSTATUS status;
     TRACE( "path %d, startSegment %d, numSegments %d, distance %f, x %p, y %p, tangentX %p, tangentY %p\n", path, startSegment, numSegments, distance, x, y, tangentX, tangentY );
-    if (!alloc_context_objects( OBJ_TYPE_PATH, 1, &path, TRUE )) return args.ret;
-    args.path = *map_context_objects( OBJ_TYPE_PATH, 1, &path );
+    if (!alloc_map_context_object( OBJ_TYPE_PATH, &path, TRUE )) return args.ret;
+    args.path = path;
     if ((status = UNIX_CALL( glPointAlongPathNV, &args ))) WARN( "glPointAlongPathNV returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
     return args.ret;
@@ -18410,8 +18410,8 @@ static void WINAPI glProgramUniform1dEXT( GLuint program, GLint location, GLdoub
     struct glProgramUniform1dEXT_params args = { .teb = NtCurrentTeb(), .location = location, .x = x };
     NTSTATUS status;
     TRACE( "program %d, location %d, x %f\n", program, location, x );
-    if (!alloc_context_objects( OBJ_TYPE_PROGRAM, 1, &program, TRUE )) return;
-    args.program = *map_context_objects( OBJ_TYPE_PROGRAM, 1, &program );
+    if (!alloc_map_context_object( OBJ_TYPE_PROGRAM, &program, TRUE )) return;
+    args.program = program;
     if ((status = UNIX_CALL( glProgramUniform1dEXT, &args ))) WARN( "glProgramUniform1dEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -18431,8 +18431,8 @@ static void WINAPI glProgramUniform1dvEXT( GLuint program, GLint location, GLsiz
     struct glProgramUniform1dvEXT_params args = { .teb = NtCurrentTeb(), .location = location, .count = count, .value = value };
     NTSTATUS status;
     TRACE( "program %d, location %d, count %d, value %p\n", program, location, count, value );
-    if (!alloc_context_objects( OBJ_TYPE_PROGRAM, 1, &program, TRUE )) return;
-    args.program = *map_context_objects( OBJ_TYPE_PROGRAM, 1, &program );
+    if (!alloc_map_context_object( OBJ_TYPE_PROGRAM, &program, TRUE )) return;
+    args.program = program;
     if ((status = UNIX_CALL( glProgramUniform1dvEXT, &args ))) WARN( "glProgramUniform1dvEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -18452,8 +18452,8 @@ static void WINAPI glProgramUniform1fEXT( GLuint program, GLint location, GLfloa
     struct glProgramUniform1fEXT_params args = { .teb = NtCurrentTeb(), .location = location, .v0 = v0 };
     NTSTATUS status;
     TRACE( "program %d, location %d, v0 %f\n", program, location, v0 );
-    if (!alloc_context_objects( OBJ_TYPE_PROGRAM, 1, &program, TRUE )) return;
-    args.program = *map_context_objects( OBJ_TYPE_PROGRAM, 1, &program );
+    if (!alloc_map_context_object( OBJ_TYPE_PROGRAM, &program, TRUE )) return;
+    args.program = program;
     if ((status = UNIX_CALL( glProgramUniform1fEXT, &args ))) WARN( "glProgramUniform1fEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -18473,8 +18473,8 @@ static void WINAPI glProgramUniform1fvEXT( GLuint program, GLint location, GLsiz
     struct glProgramUniform1fvEXT_params args = { .teb = NtCurrentTeb(), .location = location, .count = count, .value = value };
     NTSTATUS status;
     TRACE( "program %d, location %d, count %d, value %p\n", program, location, count, value );
-    if (!alloc_context_objects( OBJ_TYPE_PROGRAM, 1, &program, TRUE )) return;
-    args.program = *map_context_objects( OBJ_TYPE_PROGRAM, 1, &program );
+    if (!alloc_map_context_object( OBJ_TYPE_PROGRAM, &program, TRUE )) return;
+    args.program = program;
     if ((status = UNIX_CALL( glProgramUniform1fvEXT, &args ))) WARN( "glProgramUniform1fvEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -18534,8 +18534,8 @@ static void WINAPI glProgramUniform1iEXT( GLuint program, GLint location, GLint 
     struct glProgramUniform1iEXT_params args = { .teb = NtCurrentTeb(), .location = location, .v0 = v0 };
     NTSTATUS status;
     TRACE( "program %d, location %d, v0 %d\n", program, location, v0 );
-    if (!alloc_context_objects( OBJ_TYPE_PROGRAM, 1, &program, TRUE )) return;
-    args.program = *map_context_objects( OBJ_TYPE_PROGRAM, 1, &program );
+    if (!alloc_map_context_object( OBJ_TYPE_PROGRAM, &program, TRUE )) return;
+    args.program = program;
     if ((status = UNIX_CALL( glProgramUniform1iEXT, &args ))) WARN( "glProgramUniform1iEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -18555,8 +18555,8 @@ static void WINAPI glProgramUniform1ivEXT( GLuint program, GLint location, GLsiz
     struct glProgramUniform1ivEXT_params args = { .teb = NtCurrentTeb(), .location = location, .count = count, .value = value };
     NTSTATUS status;
     TRACE( "program %d, location %d, count %d, value %p\n", program, location, count, value );
-    if (!alloc_context_objects( OBJ_TYPE_PROGRAM, 1, &program, TRUE )) return;
-    args.program = *map_context_objects( OBJ_TYPE_PROGRAM, 1, &program );
+    if (!alloc_map_context_object( OBJ_TYPE_PROGRAM, &program, TRUE )) return;
+    args.program = program;
     if ((status = UNIX_CALL( glProgramUniform1ivEXT, &args ))) WARN( "glProgramUniform1ivEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -18616,8 +18616,8 @@ static void WINAPI glProgramUniform1uiEXT( GLuint program, GLint location, GLuin
     struct glProgramUniform1uiEXT_params args = { .teb = NtCurrentTeb(), .location = location, .v0 = v0 };
     NTSTATUS status;
     TRACE( "program %d, location %d, v0 %d\n", program, location, v0 );
-    if (!alloc_context_objects( OBJ_TYPE_PROGRAM, 1, &program, TRUE )) return;
-    args.program = *map_context_objects( OBJ_TYPE_PROGRAM, 1, &program );
+    if (!alloc_map_context_object( OBJ_TYPE_PROGRAM, &program, TRUE )) return;
+    args.program = program;
     if ((status = UNIX_CALL( glProgramUniform1uiEXT, &args ))) WARN( "glProgramUniform1uiEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -18637,8 +18637,8 @@ static void WINAPI glProgramUniform1uivEXT( GLuint program, GLint location, GLsi
     struct glProgramUniform1uivEXT_params args = { .teb = NtCurrentTeb(), .location = location, .count = count, .value = value };
     NTSTATUS status;
     TRACE( "program %d, location %d, count %d, value %p\n", program, location, count, value );
-    if (!alloc_context_objects( OBJ_TYPE_PROGRAM, 1, &program, TRUE )) return;
-    args.program = *map_context_objects( OBJ_TYPE_PROGRAM, 1, &program );
+    if (!alloc_map_context_object( OBJ_TYPE_PROGRAM, &program, TRUE )) return;
+    args.program = program;
     if ((status = UNIX_CALL( glProgramUniform1uivEXT, &args ))) WARN( "glProgramUniform1uivEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -18658,8 +18658,8 @@ static void WINAPI glProgramUniform2dEXT( GLuint program, GLint location, GLdoub
     struct glProgramUniform2dEXT_params args = { .teb = NtCurrentTeb(), .location = location, .x = x, .y = y };
     NTSTATUS status;
     TRACE( "program %d, location %d, x %f, y %f\n", program, location, x, y );
-    if (!alloc_context_objects( OBJ_TYPE_PROGRAM, 1, &program, TRUE )) return;
-    args.program = *map_context_objects( OBJ_TYPE_PROGRAM, 1, &program );
+    if (!alloc_map_context_object( OBJ_TYPE_PROGRAM, &program, TRUE )) return;
+    args.program = program;
     if ((status = UNIX_CALL( glProgramUniform2dEXT, &args ))) WARN( "glProgramUniform2dEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -18679,8 +18679,8 @@ static void WINAPI glProgramUniform2dvEXT( GLuint program, GLint location, GLsiz
     struct glProgramUniform2dvEXT_params args = { .teb = NtCurrentTeb(), .location = location, .count = count, .value = value };
     NTSTATUS status;
     TRACE( "program %d, location %d, count %d, value %p\n", program, location, count, value );
-    if (!alloc_context_objects( OBJ_TYPE_PROGRAM, 1, &program, TRUE )) return;
-    args.program = *map_context_objects( OBJ_TYPE_PROGRAM, 1, &program );
+    if (!alloc_map_context_object( OBJ_TYPE_PROGRAM, &program, TRUE )) return;
+    args.program = program;
     if ((status = UNIX_CALL( glProgramUniform2dvEXT, &args ))) WARN( "glProgramUniform2dvEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -18700,8 +18700,8 @@ static void WINAPI glProgramUniform2fEXT( GLuint program, GLint location, GLfloa
     struct glProgramUniform2fEXT_params args = { .teb = NtCurrentTeb(), .location = location, .v0 = v0, .v1 = v1 };
     NTSTATUS status;
     TRACE( "program %d, location %d, v0 %f, v1 %f\n", program, location, v0, v1 );
-    if (!alloc_context_objects( OBJ_TYPE_PROGRAM, 1, &program, TRUE )) return;
-    args.program = *map_context_objects( OBJ_TYPE_PROGRAM, 1, &program );
+    if (!alloc_map_context_object( OBJ_TYPE_PROGRAM, &program, TRUE )) return;
+    args.program = program;
     if ((status = UNIX_CALL( glProgramUniform2fEXT, &args ))) WARN( "glProgramUniform2fEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -18721,8 +18721,8 @@ static void WINAPI glProgramUniform2fvEXT( GLuint program, GLint location, GLsiz
     struct glProgramUniform2fvEXT_params args = { .teb = NtCurrentTeb(), .location = location, .count = count, .value = value };
     NTSTATUS status;
     TRACE( "program %d, location %d, count %d, value %p\n", program, location, count, value );
-    if (!alloc_context_objects( OBJ_TYPE_PROGRAM, 1, &program, TRUE )) return;
-    args.program = *map_context_objects( OBJ_TYPE_PROGRAM, 1, &program );
+    if (!alloc_map_context_object( OBJ_TYPE_PROGRAM, &program, TRUE )) return;
+    args.program = program;
     if ((status = UNIX_CALL( glProgramUniform2fvEXT, &args ))) WARN( "glProgramUniform2fvEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -18782,8 +18782,8 @@ static void WINAPI glProgramUniform2iEXT( GLuint program, GLint location, GLint 
     struct glProgramUniform2iEXT_params args = { .teb = NtCurrentTeb(), .location = location, .v0 = v0, .v1 = v1 };
     NTSTATUS status;
     TRACE( "program %d, location %d, v0 %d, v1 %d\n", program, location, v0, v1 );
-    if (!alloc_context_objects( OBJ_TYPE_PROGRAM, 1, &program, TRUE )) return;
-    args.program = *map_context_objects( OBJ_TYPE_PROGRAM, 1, &program );
+    if (!alloc_map_context_object( OBJ_TYPE_PROGRAM, &program, TRUE )) return;
+    args.program = program;
     if ((status = UNIX_CALL( glProgramUniform2iEXT, &args ))) WARN( "glProgramUniform2iEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -18803,8 +18803,8 @@ static void WINAPI glProgramUniform2ivEXT( GLuint program, GLint location, GLsiz
     struct glProgramUniform2ivEXT_params args = { .teb = NtCurrentTeb(), .location = location, .count = count, .value = value };
     NTSTATUS status;
     TRACE( "program %d, location %d, count %d, value %p\n", program, location, count, value );
-    if (!alloc_context_objects( OBJ_TYPE_PROGRAM, 1, &program, TRUE )) return;
-    args.program = *map_context_objects( OBJ_TYPE_PROGRAM, 1, &program );
+    if (!alloc_map_context_object( OBJ_TYPE_PROGRAM, &program, TRUE )) return;
+    args.program = program;
     if ((status = UNIX_CALL( glProgramUniform2ivEXT, &args ))) WARN( "glProgramUniform2ivEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -18864,8 +18864,8 @@ static void WINAPI glProgramUniform2uiEXT( GLuint program, GLint location, GLuin
     struct glProgramUniform2uiEXT_params args = { .teb = NtCurrentTeb(), .location = location, .v0 = v0, .v1 = v1 };
     NTSTATUS status;
     TRACE( "program %d, location %d, v0 %d, v1 %d\n", program, location, v0, v1 );
-    if (!alloc_context_objects( OBJ_TYPE_PROGRAM, 1, &program, TRUE )) return;
-    args.program = *map_context_objects( OBJ_TYPE_PROGRAM, 1, &program );
+    if (!alloc_map_context_object( OBJ_TYPE_PROGRAM, &program, TRUE )) return;
+    args.program = program;
     if ((status = UNIX_CALL( glProgramUniform2uiEXT, &args ))) WARN( "glProgramUniform2uiEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -18885,8 +18885,8 @@ static void WINAPI glProgramUniform2uivEXT( GLuint program, GLint location, GLsi
     struct glProgramUniform2uivEXT_params args = { .teb = NtCurrentTeb(), .location = location, .count = count, .value = value };
     NTSTATUS status;
     TRACE( "program %d, location %d, count %d, value %p\n", program, location, count, value );
-    if (!alloc_context_objects( OBJ_TYPE_PROGRAM, 1, &program, TRUE )) return;
-    args.program = *map_context_objects( OBJ_TYPE_PROGRAM, 1, &program );
+    if (!alloc_map_context_object( OBJ_TYPE_PROGRAM, &program, TRUE )) return;
+    args.program = program;
     if ((status = UNIX_CALL( glProgramUniform2uivEXT, &args ))) WARN( "glProgramUniform2uivEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -18906,8 +18906,8 @@ static void WINAPI glProgramUniform3dEXT( GLuint program, GLint location, GLdoub
     struct glProgramUniform3dEXT_params args = { .teb = NtCurrentTeb(), .location = location, .x = x, .y = y, .z = z };
     NTSTATUS status;
     TRACE( "program %d, location %d, x %f, y %f, z %f\n", program, location, x, y, z );
-    if (!alloc_context_objects( OBJ_TYPE_PROGRAM, 1, &program, TRUE )) return;
-    args.program = *map_context_objects( OBJ_TYPE_PROGRAM, 1, &program );
+    if (!alloc_map_context_object( OBJ_TYPE_PROGRAM, &program, TRUE )) return;
+    args.program = program;
     if ((status = UNIX_CALL( glProgramUniform3dEXT, &args ))) WARN( "glProgramUniform3dEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -18927,8 +18927,8 @@ static void WINAPI glProgramUniform3dvEXT( GLuint program, GLint location, GLsiz
     struct glProgramUniform3dvEXT_params args = { .teb = NtCurrentTeb(), .location = location, .count = count, .value = value };
     NTSTATUS status;
     TRACE( "program %d, location %d, count %d, value %p\n", program, location, count, value );
-    if (!alloc_context_objects( OBJ_TYPE_PROGRAM, 1, &program, TRUE )) return;
-    args.program = *map_context_objects( OBJ_TYPE_PROGRAM, 1, &program );
+    if (!alloc_map_context_object( OBJ_TYPE_PROGRAM, &program, TRUE )) return;
+    args.program = program;
     if ((status = UNIX_CALL( glProgramUniform3dvEXT, &args ))) WARN( "glProgramUniform3dvEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -18948,8 +18948,8 @@ static void WINAPI glProgramUniform3fEXT( GLuint program, GLint location, GLfloa
     struct glProgramUniform3fEXT_params args = { .teb = NtCurrentTeb(), .location = location, .v0 = v0, .v1 = v1, .v2 = v2 };
     NTSTATUS status;
     TRACE( "program %d, location %d, v0 %f, v1 %f, v2 %f\n", program, location, v0, v1, v2 );
-    if (!alloc_context_objects( OBJ_TYPE_PROGRAM, 1, &program, TRUE )) return;
-    args.program = *map_context_objects( OBJ_TYPE_PROGRAM, 1, &program );
+    if (!alloc_map_context_object( OBJ_TYPE_PROGRAM, &program, TRUE )) return;
+    args.program = program;
     if ((status = UNIX_CALL( glProgramUniform3fEXT, &args ))) WARN( "glProgramUniform3fEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -18969,8 +18969,8 @@ static void WINAPI glProgramUniform3fvEXT( GLuint program, GLint location, GLsiz
     struct glProgramUniform3fvEXT_params args = { .teb = NtCurrentTeb(), .location = location, .count = count, .value = value };
     NTSTATUS status;
     TRACE( "program %d, location %d, count %d, value %p\n", program, location, count, value );
-    if (!alloc_context_objects( OBJ_TYPE_PROGRAM, 1, &program, TRUE )) return;
-    args.program = *map_context_objects( OBJ_TYPE_PROGRAM, 1, &program );
+    if (!alloc_map_context_object( OBJ_TYPE_PROGRAM, &program, TRUE )) return;
+    args.program = program;
     if ((status = UNIX_CALL( glProgramUniform3fvEXT, &args ))) WARN( "glProgramUniform3fvEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -19030,8 +19030,8 @@ static void WINAPI glProgramUniform3iEXT( GLuint program, GLint location, GLint 
     struct glProgramUniform3iEXT_params args = { .teb = NtCurrentTeb(), .location = location, .v0 = v0, .v1 = v1, .v2 = v2 };
     NTSTATUS status;
     TRACE( "program %d, location %d, v0 %d, v1 %d, v2 %d\n", program, location, v0, v1, v2 );
-    if (!alloc_context_objects( OBJ_TYPE_PROGRAM, 1, &program, TRUE )) return;
-    args.program = *map_context_objects( OBJ_TYPE_PROGRAM, 1, &program );
+    if (!alloc_map_context_object( OBJ_TYPE_PROGRAM, &program, TRUE )) return;
+    args.program = program;
     if ((status = UNIX_CALL( glProgramUniform3iEXT, &args ))) WARN( "glProgramUniform3iEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -19051,8 +19051,8 @@ static void WINAPI glProgramUniform3ivEXT( GLuint program, GLint location, GLsiz
     struct glProgramUniform3ivEXT_params args = { .teb = NtCurrentTeb(), .location = location, .count = count, .value = value };
     NTSTATUS status;
     TRACE( "program %d, location %d, count %d, value %p\n", program, location, count, value );
-    if (!alloc_context_objects( OBJ_TYPE_PROGRAM, 1, &program, TRUE )) return;
-    args.program = *map_context_objects( OBJ_TYPE_PROGRAM, 1, &program );
+    if (!alloc_map_context_object( OBJ_TYPE_PROGRAM, &program, TRUE )) return;
+    args.program = program;
     if ((status = UNIX_CALL( glProgramUniform3ivEXT, &args ))) WARN( "glProgramUniform3ivEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -19112,8 +19112,8 @@ static void WINAPI glProgramUniform3uiEXT( GLuint program, GLint location, GLuin
     struct glProgramUniform3uiEXT_params args = { .teb = NtCurrentTeb(), .location = location, .v0 = v0, .v1 = v1, .v2 = v2 };
     NTSTATUS status;
     TRACE( "program %d, location %d, v0 %d, v1 %d, v2 %d\n", program, location, v0, v1, v2 );
-    if (!alloc_context_objects( OBJ_TYPE_PROGRAM, 1, &program, TRUE )) return;
-    args.program = *map_context_objects( OBJ_TYPE_PROGRAM, 1, &program );
+    if (!alloc_map_context_object( OBJ_TYPE_PROGRAM, &program, TRUE )) return;
+    args.program = program;
     if ((status = UNIX_CALL( glProgramUniform3uiEXT, &args ))) WARN( "glProgramUniform3uiEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -19133,8 +19133,8 @@ static void WINAPI glProgramUniform3uivEXT( GLuint program, GLint location, GLsi
     struct glProgramUniform3uivEXT_params args = { .teb = NtCurrentTeb(), .location = location, .count = count, .value = value };
     NTSTATUS status;
     TRACE( "program %d, location %d, count %d, value %p\n", program, location, count, value );
-    if (!alloc_context_objects( OBJ_TYPE_PROGRAM, 1, &program, TRUE )) return;
-    args.program = *map_context_objects( OBJ_TYPE_PROGRAM, 1, &program );
+    if (!alloc_map_context_object( OBJ_TYPE_PROGRAM, &program, TRUE )) return;
+    args.program = program;
     if ((status = UNIX_CALL( glProgramUniform3uivEXT, &args ))) WARN( "glProgramUniform3uivEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -19154,8 +19154,8 @@ static void WINAPI glProgramUniform4dEXT( GLuint program, GLint location, GLdoub
     struct glProgramUniform4dEXT_params args = { .teb = NtCurrentTeb(), .location = location, .x = x, .y = y, .z = z, .w = w };
     NTSTATUS status;
     TRACE( "program %d, location %d, x %f, y %f, z %f, w %f\n", program, location, x, y, z, w );
-    if (!alloc_context_objects( OBJ_TYPE_PROGRAM, 1, &program, TRUE )) return;
-    args.program = *map_context_objects( OBJ_TYPE_PROGRAM, 1, &program );
+    if (!alloc_map_context_object( OBJ_TYPE_PROGRAM, &program, TRUE )) return;
+    args.program = program;
     if ((status = UNIX_CALL( glProgramUniform4dEXT, &args ))) WARN( "glProgramUniform4dEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -19175,8 +19175,8 @@ static void WINAPI glProgramUniform4dvEXT( GLuint program, GLint location, GLsiz
     struct glProgramUniform4dvEXT_params args = { .teb = NtCurrentTeb(), .location = location, .count = count, .value = value };
     NTSTATUS status;
     TRACE( "program %d, location %d, count %d, value %p\n", program, location, count, value );
-    if (!alloc_context_objects( OBJ_TYPE_PROGRAM, 1, &program, TRUE )) return;
-    args.program = *map_context_objects( OBJ_TYPE_PROGRAM, 1, &program );
+    if (!alloc_map_context_object( OBJ_TYPE_PROGRAM, &program, TRUE )) return;
+    args.program = program;
     if ((status = UNIX_CALL( glProgramUniform4dvEXT, &args ))) WARN( "glProgramUniform4dvEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -19196,8 +19196,8 @@ static void WINAPI glProgramUniform4fEXT( GLuint program, GLint location, GLfloa
     struct glProgramUniform4fEXT_params args = { .teb = NtCurrentTeb(), .location = location, .v0 = v0, .v1 = v1, .v2 = v2, .v3 = v3 };
     NTSTATUS status;
     TRACE( "program %d, location %d, v0 %f, v1 %f, v2 %f, v3 %f\n", program, location, v0, v1, v2, v3 );
-    if (!alloc_context_objects( OBJ_TYPE_PROGRAM, 1, &program, TRUE )) return;
-    args.program = *map_context_objects( OBJ_TYPE_PROGRAM, 1, &program );
+    if (!alloc_map_context_object( OBJ_TYPE_PROGRAM, &program, TRUE )) return;
+    args.program = program;
     if ((status = UNIX_CALL( glProgramUniform4fEXT, &args ))) WARN( "glProgramUniform4fEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -19217,8 +19217,8 @@ static void WINAPI glProgramUniform4fvEXT( GLuint program, GLint location, GLsiz
     struct glProgramUniform4fvEXT_params args = { .teb = NtCurrentTeb(), .location = location, .count = count, .value = value };
     NTSTATUS status;
     TRACE( "program %d, location %d, count %d, value %p\n", program, location, count, value );
-    if (!alloc_context_objects( OBJ_TYPE_PROGRAM, 1, &program, TRUE )) return;
-    args.program = *map_context_objects( OBJ_TYPE_PROGRAM, 1, &program );
+    if (!alloc_map_context_object( OBJ_TYPE_PROGRAM, &program, TRUE )) return;
+    args.program = program;
     if ((status = UNIX_CALL( glProgramUniform4fvEXT, &args ))) WARN( "glProgramUniform4fvEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -19278,8 +19278,8 @@ static void WINAPI glProgramUniform4iEXT( GLuint program, GLint location, GLint 
     struct glProgramUniform4iEXT_params args = { .teb = NtCurrentTeb(), .location = location, .v0 = v0, .v1 = v1, .v2 = v2, .v3 = v3 };
     NTSTATUS status;
     TRACE( "program %d, location %d, v0 %d, v1 %d, v2 %d, v3 %d\n", program, location, v0, v1, v2, v3 );
-    if (!alloc_context_objects( OBJ_TYPE_PROGRAM, 1, &program, TRUE )) return;
-    args.program = *map_context_objects( OBJ_TYPE_PROGRAM, 1, &program );
+    if (!alloc_map_context_object( OBJ_TYPE_PROGRAM, &program, TRUE )) return;
+    args.program = program;
     if ((status = UNIX_CALL( glProgramUniform4iEXT, &args ))) WARN( "glProgramUniform4iEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -19299,8 +19299,8 @@ static void WINAPI glProgramUniform4ivEXT( GLuint program, GLint location, GLsiz
     struct glProgramUniform4ivEXT_params args = { .teb = NtCurrentTeb(), .location = location, .count = count, .value = value };
     NTSTATUS status;
     TRACE( "program %d, location %d, count %d, value %p\n", program, location, count, value );
-    if (!alloc_context_objects( OBJ_TYPE_PROGRAM, 1, &program, TRUE )) return;
-    args.program = *map_context_objects( OBJ_TYPE_PROGRAM, 1, &program );
+    if (!alloc_map_context_object( OBJ_TYPE_PROGRAM, &program, TRUE )) return;
+    args.program = program;
     if ((status = UNIX_CALL( glProgramUniform4ivEXT, &args ))) WARN( "glProgramUniform4ivEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -19360,8 +19360,8 @@ static void WINAPI glProgramUniform4uiEXT( GLuint program, GLint location, GLuin
     struct glProgramUniform4uiEXT_params args = { .teb = NtCurrentTeb(), .location = location, .v0 = v0, .v1 = v1, .v2 = v2, .v3 = v3 };
     NTSTATUS status;
     TRACE( "program %d, location %d, v0 %d, v1 %d, v2 %d, v3 %d\n", program, location, v0, v1, v2, v3 );
-    if (!alloc_context_objects( OBJ_TYPE_PROGRAM, 1, &program, TRUE )) return;
-    args.program = *map_context_objects( OBJ_TYPE_PROGRAM, 1, &program );
+    if (!alloc_map_context_object( OBJ_TYPE_PROGRAM, &program, TRUE )) return;
+    args.program = program;
     if ((status = UNIX_CALL( glProgramUniform4uiEXT, &args ))) WARN( "glProgramUniform4uiEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -19381,8 +19381,8 @@ static void WINAPI glProgramUniform4uivEXT( GLuint program, GLint location, GLsi
     struct glProgramUniform4uivEXT_params args = { .teb = NtCurrentTeb(), .location = location, .count = count, .value = value };
     NTSTATUS status;
     TRACE( "program %d, location %d, count %d, value %p\n", program, location, count, value );
-    if (!alloc_context_objects( OBJ_TYPE_PROGRAM, 1, &program, TRUE )) return;
-    args.program = *map_context_objects( OBJ_TYPE_PROGRAM, 1, &program );
+    if (!alloc_map_context_object( OBJ_TYPE_PROGRAM, &program, TRUE )) return;
+    args.program = program;
     if ((status = UNIX_CALL( glProgramUniform4uivEXT, &args ))) WARN( "glProgramUniform4uivEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -19442,8 +19442,8 @@ static void WINAPI glProgramUniformMatrix2dvEXT( GLuint program, GLint location,
     struct glProgramUniformMatrix2dvEXT_params args = { .teb = NtCurrentTeb(), .location = location, .count = count, .transpose = transpose, .value = value };
     NTSTATUS status;
     TRACE( "program %d, location %d, count %d, transpose %d, value %p\n", program, location, count, transpose, value );
-    if (!alloc_context_objects( OBJ_TYPE_PROGRAM, 1, &program, TRUE )) return;
-    args.program = *map_context_objects( OBJ_TYPE_PROGRAM, 1, &program );
+    if (!alloc_map_context_object( OBJ_TYPE_PROGRAM, &program, TRUE )) return;
+    args.program = program;
     if ((status = UNIX_CALL( glProgramUniformMatrix2dvEXT, &args ))) WARN( "glProgramUniformMatrix2dvEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -19463,8 +19463,8 @@ static void WINAPI glProgramUniformMatrix2fvEXT( GLuint program, GLint location,
     struct glProgramUniformMatrix2fvEXT_params args = { .teb = NtCurrentTeb(), .location = location, .count = count, .transpose = transpose, .value = value };
     NTSTATUS status;
     TRACE( "program %d, location %d, count %d, transpose %d, value %p\n", program, location, count, transpose, value );
-    if (!alloc_context_objects( OBJ_TYPE_PROGRAM, 1, &program, TRUE )) return;
-    args.program = *map_context_objects( OBJ_TYPE_PROGRAM, 1, &program );
+    if (!alloc_map_context_object( OBJ_TYPE_PROGRAM, &program, TRUE )) return;
+    args.program = program;
     if ((status = UNIX_CALL( glProgramUniformMatrix2fvEXT, &args ))) WARN( "glProgramUniformMatrix2fvEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -19484,8 +19484,8 @@ static void WINAPI glProgramUniformMatrix2x3dvEXT( GLuint program, GLint locatio
     struct glProgramUniformMatrix2x3dvEXT_params args = { .teb = NtCurrentTeb(), .location = location, .count = count, .transpose = transpose, .value = value };
     NTSTATUS status;
     TRACE( "program %d, location %d, count %d, transpose %d, value %p\n", program, location, count, transpose, value );
-    if (!alloc_context_objects( OBJ_TYPE_PROGRAM, 1, &program, TRUE )) return;
-    args.program = *map_context_objects( OBJ_TYPE_PROGRAM, 1, &program );
+    if (!alloc_map_context_object( OBJ_TYPE_PROGRAM, &program, TRUE )) return;
+    args.program = program;
     if ((status = UNIX_CALL( glProgramUniformMatrix2x3dvEXT, &args ))) WARN( "glProgramUniformMatrix2x3dvEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -19505,8 +19505,8 @@ static void WINAPI glProgramUniformMatrix2x3fvEXT( GLuint program, GLint locatio
     struct glProgramUniformMatrix2x3fvEXT_params args = { .teb = NtCurrentTeb(), .location = location, .count = count, .transpose = transpose, .value = value };
     NTSTATUS status;
     TRACE( "program %d, location %d, count %d, transpose %d, value %p\n", program, location, count, transpose, value );
-    if (!alloc_context_objects( OBJ_TYPE_PROGRAM, 1, &program, TRUE )) return;
-    args.program = *map_context_objects( OBJ_TYPE_PROGRAM, 1, &program );
+    if (!alloc_map_context_object( OBJ_TYPE_PROGRAM, &program, TRUE )) return;
+    args.program = program;
     if ((status = UNIX_CALL( glProgramUniformMatrix2x3fvEXT, &args ))) WARN( "glProgramUniformMatrix2x3fvEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -19526,8 +19526,8 @@ static void WINAPI glProgramUniformMatrix2x4dvEXT( GLuint program, GLint locatio
     struct glProgramUniformMatrix2x4dvEXT_params args = { .teb = NtCurrentTeb(), .location = location, .count = count, .transpose = transpose, .value = value };
     NTSTATUS status;
     TRACE( "program %d, location %d, count %d, transpose %d, value %p\n", program, location, count, transpose, value );
-    if (!alloc_context_objects( OBJ_TYPE_PROGRAM, 1, &program, TRUE )) return;
-    args.program = *map_context_objects( OBJ_TYPE_PROGRAM, 1, &program );
+    if (!alloc_map_context_object( OBJ_TYPE_PROGRAM, &program, TRUE )) return;
+    args.program = program;
     if ((status = UNIX_CALL( glProgramUniformMatrix2x4dvEXT, &args ))) WARN( "glProgramUniformMatrix2x4dvEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -19547,8 +19547,8 @@ static void WINAPI glProgramUniformMatrix2x4fvEXT( GLuint program, GLint locatio
     struct glProgramUniformMatrix2x4fvEXT_params args = { .teb = NtCurrentTeb(), .location = location, .count = count, .transpose = transpose, .value = value };
     NTSTATUS status;
     TRACE( "program %d, location %d, count %d, transpose %d, value %p\n", program, location, count, transpose, value );
-    if (!alloc_context_objects( OBJ_TYPE_PROGRAM, 1, &program, TRUE )) return;
-    args.program = *map_context_objects( OBJ_TYPE_PROGRAM, 1, &program );
+    if (!alloc_map_context_object( OBJ_TYPE_PROGRAM, &program, TRUE )) return;
+    args.program = program;
     if ((status = UNIX_CALL( glProgramUniformMatrix2x4fvEXT, &args ))) WARN( "glProgramUniformMatrix2x4fvEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -19568,8 +19568,8 @@ static void WINAPI glProgramUniformMatrix3dvEXT( GLuint program, GLint location,
     struct glProgramUniformMatrix3dvEXT_params args = { .teb = NtCurrentTeb(), .location = location, .count = count, .transpose = transpose, .value = value };
     NTSTATUS status;
     TRACE( "program %d, location %d, count %d, transpose %d, value %p\n", program, location, count, transpose, value );
-    if (!alloc_context_objects( OBJ_TYPE_PROGRAM, 1, &program, TRUE )) return;
-    args.program = *map_context_objects( OBJ_TYPE_PROGRAM, 1, &program );
+    if (!alloc_map_context_object( OBJ_TYPE_PROGRAM, &program, TRUE )) return;
+    args.program = program;
     if ((status = UNIX_CALL( glProgramUniformMatrix3dvEXT, &args ))) WARN( "glProgramUniformMatrix3dvEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -19589,8 +19589,8 @@ static void WINAPI glProgramUniformMatrix3fvEXT( GLuint program, GLint location,
     struct glProgramUniformMatrix3fvEXT_params args = { .teb = NtCurrentTeb(), .location = location, .count = count, .transpose = transpose, .value = value };
     NTSTATUS status;
     TRACE( "program %d, location %d, count %d, transpose %d, value %p\n", program, location, count, transpose, value );
-    if (!alloc_context_objects( OBJ_TYPE_PROGRAM, 1, &program, TRUE )) return;
-    args.program = *map_context_objects( OBJ_TYPE_PROGRAM, 1, &program );
+    if (!alloc_map_context_object( OBJ_TYPE_PROGRAM, &program, TRUE )) return;
+    args.program = program;
     if ((status = UNIX_CALL( glProgramUniformMatrix3fvEXT, &args ))) WARN( "glProgramUniformMatrix3fvEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -19610,8 +19610,8 @@ static void WINAPI glProgramUniformMatrix3x2dvEXT( GLuint program, GLint locatio
     struct glProgramUniformMatrix3x2dvEXT_params args = { .teb = NtCurrentTeb(), .location = location, .count = count, .transpose = transpose, .value = value };
     NTSTATUS status;
     TRACE( "program %d, location %d, count %d, transpose %d, value %p\n", program, location, count, transpose, value );
-    if (!alloc_context_objects( OBJ_TYPE_PROGRAM, 1, &program, TRUE )) return;
-    args.program = *map_context_objects( OBJ_TYPE_PROGRAM, 1, &program );
+    if (!alloc_map_context_object( OBJ_TYPE_PROGRAM, &program, TRUE )) return;
+    args.program = program;
     if ((status = UNIX_CALL( glProgramUniformMatrix3x2dvEXT, &args ))) WARN( "glProgramUniformMatrix3x2dvEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -19631,8 +19631,8 @@ static void WINAPI glProgramUniformMatrix3x2fvEXT( GLuint program, GLint locatio
     struct glProgramUniformMatrix3x2fvEXT_params args = { .teb = NtCurrentTeb(), .location = location, .count = count, .transpose = transpose, .value = value };
     NTSTATUS status;
     TRACE( "program %d, location %d, count %d, transpose %d, value %p\n", program, location, count, transpose, value );
-    if (!alloc_context_objects( OBJ_TYPE_PROGRAM, 1, &program, TRUE )) return;
-    args.program = *map_context_objects( OBJ_TYPE_PROGRAM, 1, &program );
+    if (!alloc_map_context_object( OBJ_TYPE_PROGRAM, &program, TRUE )) return;
+    args.program = program;
     if ((status = UNIX_CALL( glProgramUniformMatrix3x2fvEXT, &args ))) WARN( "glProgramUniformMatrix3x2fvEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -19652,8 +19652,8 @@ static void WINAPI glProgramUniformMatrix3x4dvEXT( GLuint program, GLint locatio
     struct glProgramUniformMatrix3x4dvEXT_params args = { .teb = NtCurrentTeb(), .location = location, .count = count, .transpose = transpose, .value = value };
     NTSTATUS status;
     TRACE( "program %d, location %d, count %d, transpose %d, value %p\n", program, location, count, transpose, value );
-    if (!alloc_context_objects( OBJ_TYPE_PROGRAM, 1, &program, TRUE )) return;
-    args.program = *map_context_objects( OBJ_TYPE_PROGRAM, 1, &program );
+    if (!alloc_map_context_object( OBJ_TYPE_PROGRAM, &program, TRUE )) return;
+    args.program = program;
     if ((status = UNIX_CALL( glProgramUniformMatrix3x4dvEXT, &args ))) WARN( "glProgramUniformMatrix3x4dvEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -19673,8 +19673,8 @@ static void WINAPI glProgramUniformMatrix3x4fvEXT( GLuint program, GLint locatio
     struct glProgramUniformMatrix3x4fvEXT_params args = { .teb = NtCurrentTeb(), .location = location, .count = count, .transpose = transpose, .value = value };
     NTSTATUS status;
     TRACE( "program %d, location %d, count %d, transpose %d, value %p\n", program, location, count, transpose, value );
-    if (!alloc_context_objects( OBJ_TYPE_PROGRAM, 1, &program, TRUE )) return;
-    args.program = *map_context_objects( OBJ_TYPE_PROGRAM, 1, &program );
+    if (!alloc_map_context_object( OBJ_TYPE_PROGRAM, &program, TRUE )) return;
+    args.program = program;
     if ((status = UNIX_CALL( glProgramUniformMatrix3x4fvEXT, &args ))) WARN( "glProgramUniformMatrix3x4fvEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -19694,8 +19694,8 @@ static void WINAPI glProgramUniformMatrix4dvEXT( GLuint program, GLint location,
     struct glProgramUniformMatrix4dvEXT_params args = { .teb = NtCurrentTeb(), .location = location, .count = count, .transpose = transpose, .value = value };
     NTSTATUS status;
     TRACE( "program %d, location %d, count %d, transpose %d, value %p\n", program, location, count, transpose, value );
-    if (!alloc_context_objects( OBJ_TYPE_PROGRAM, 1, &program, TRUE )) return;
-    args.program = *map_context_objects( OBJ_TYPE_PROGRAM, 1, &program );
+    if (!alloc_map_context_object( OBJ_TYPE_PROGRAM, &program, TRUE )) return;
+    args.program = program;
     if ((status = UNIX_CALL( glProgramUniformMatrix4dvEXT, &args ))) WARN( "glProgramUniformMatrix4dvEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -19715,8 +19715,8 @@ static void WINAPI glProgramUniformMatrix4fvEXT( GLuint program, GLint location,
     struct glProgramUniformMatrix4fvEXT_params args = { .teb = NtCurrentTeb(), .location = location, .count = count, .transpose = transpose, .value = value };
     NTSTATUS status;
     TRACE( "program %d, location %d, count %d, transpose %d, value %p\n", program, location, count, transpose, value );
-    if (!alloc_context_objects( OBJ_TYPE_PROGRAM, 1, &program, TRUE )) return;
-    args.program = *map_context_objects( OBJ_TYPE_PROGRAM, 1, &program );
+    if (!alloc_map_context_object( OBJ_TYPE_PROGRAM, &program, TRUE )) return;
+    args.program = program;
     if ((status = UNIX_CALL( glProgramUniformMatrix4fvEXT, &args ))) WARN( "glProgramUniformMatrix4fvEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -19736,8 +19736,8 @@ static void WINAPI glProgramUniformMatrix4x2dvEXT( GLuint program, GLint locatio
     struct glProgramUniformMatrix4x2dvEXT_params args = { .teb = NtCurrentTeb(), .location = location, .count = count, .transpose = transpose, .value = value };
     NTSTATUS status;
     TRACE( "program %d, location %d, count %d, transpose %d, value %p\n", program, location, count, transpose, value );
-    if (!alloc_context_objects( OBJ_TYPE_PROGRAM, 1, &program, TRUE )) return;
-    args.program = *map_context_objects( OBJ_TYPE_PROGRAM, 1, &program );
+    if (!alloc_map_context_object( OBJ_TYPE_PROGRAM, &program, TRUE )) return;
+    args.program = program;
     if ((status = UNIX_CALL( glProgramUniformMatrix4x2dvEXT, &args ))) WARN( "glProgramUniformMatrix4x2dvEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -19757,8 +19757,8 @@ static void WINAPI glProgramUniformMatrix4x2fvEXT( GLuint program, GLint locatio
     struct glProgramUniformMatrix4x2fvEXT_params args = { .teb = NtCurrentTeb(), .location = location, .count = count, .transpose = transpose, .value = value };
     NTSTATUS status;
     TRACE( "program %d, location %d, count %d, transpose %d, value %p\n", program, location, count, transpose, value );
-    if (!alloc_context_objects( OBJ_TYPE_PROGRAM, 1, &program, TRUE )) return;
-    args.program = *map_context_objects( OBJ_TYPE_PROGRAM, 1, &program );
+    if (!alloc_map_context_object( OBJ_TYPE_PROGRAM, &program, TRUE )) return;
+    args.program = program;
     if ((status = UNIX_CALL( glProgramUniformMatrix4x2fvEXT, &args ))) WARN( "glProgramUniformMatrix4x2fvEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -19778,8 +19778,8 @@ static void WINAPI glProgramUniformMatrix4x3dvEXT( GLuint program, GLint locatio
     struct glProgramUniformMatrix4x3dvEXT_params args = { .teb = NtCurrentTeb(), .location = location, .count = count, .transpose = transpose, .value = value };
     NTSTATUS status;
     TRACE( "program %d, location %d, count %d, transpose %d, value %p\n", program, location, count, transpose, value );
-    if (!alloc_context_objects( OBJ_TYPE_PROGRAM, 1, &program, TRUE )) return;
-    args.program = *map_context_objects( OBJ_TYPE_PROGRAM, 1, &program );
+    if (!alloc_map_context_object( OBJ_TYPE_PROGRAM, &program, TRUE )) return;
+    args.program = program;
     if ((status = UNIX_CALL( glProgramUniformMatrix4x3dvEXT, &args ))) WARN( "glProgramUniformMatrix4x3dvEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -19799,8 +19799,8 @@ static void WINAPI glProgramUniformMatrix4x3fvEXT( GLuint program, GLint locatio
     struct glProgramUniformMatrix4x3fvEXT_params args = { .teb = NtCurrentTeb(), .location = location, .count = count, .transpose = transpose, .value = value };
     NTSTATUS status;
     TRACE( "program %d, location %d, count %d, transpose %d, value %p\n", program, location, count, transpose, value );
-    if (!alloc_context_objects( OBJ_TYPE_PROGRAM, 1, &program, TRUE )) return;
-    args.program = *map_context_objects( OBJ_TYPE_PROGRAM, 1, &program );
+    if (!alloc_map_context_object( OBJ_TYPE_PROGRAM, &program, TRUE )) return;
+    args.program = program;
     if ((status = UNIX_CALL( glProgramUniformMatrix4x3fvEXT, &args ))) WARN( "glProgramUniformMatrix4x3fvEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -21417,8 +21417,8 @@ static void WINAPI glStencilFillPathInstancedNV( GLsizei numPaths, GLenum pathNa
     struct glStencilFillPathInstancedNV_params args = { .teb = NtCurrentTeb(), .numPaths = numPaths, .pathNameType = pathNameType, .paths = paths, .fillMode = fillMode, .mask = mask, .transformType = transformType, .transformValues = transformValues };
     NTSTATUS status;
     TRACE( "numPaths %d, pathNameType %d, paths %p, pathBase %d, fillMode %d, mask %d, transformType %d, transformValues %p\n", numPaths, pathNameType, paths, pathBase, fillMode, mask, transformType, transformValues );
-    if (!alloc_context_objects( OBJ_TYPE_PATH, 1, &pathBase, TRUE )) return;
-    args.pathBase = *map_context_objects( OBJ_TYPE_PATH, 1, &pathBase );
+    if (!alloc_map_context_object( OBJ_TYPE_PATH, &pathBase, TRUE )) return;
+    args.pathBase = pathBase;
     if ((status = UNIX_CALL( glStencilFillPathInstancedNV, &args ))) WARN( "glStencilFillPathInstancedNV returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -21428,8 +21428,8 @@ static void WINAPI glStencilFillPathNV( GLuint path, GLenum fillMode, GLuint mas
     struct glStencilFillPathNV_params args = { .teb = NtCurrentTeb(), .fillMode = fillMode, .mask = mask };
     NTSTATUS status;
     TRACE( "path %d, fillMode %d, mask %d\n", path, fillMode, mask );
-    if (!alloc_context_objects( OBJ_TYPE_PATH, 1, &path, TRUE )) return;
-    args.path = *map_context_objects( OBJ_TYPE_PATH, 1, &path );
+    if (!alloc_map_context_object( OBJ_TYPE_PATH, &path, TRUE )) return;
+    args.path = path;
     if ((status = UNIX_CALL( glStencilFillPathNV, &args ))) WARN( "glStencilFillPathNV returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -21493,8 +21493,8 @@ static void WINAPI glStencilStrokePathInstancedNV( GLsizei numPaths, GLenum path
     struct glStencilStrokePathInstancedNV_params args = { .teb = NtCurrentTeb(), .numPaths = numPaths, .pathNameType = pathNameType, .paths = paths, .reference = reference, .mask = mask, .transformType = transformType, .transformValues = transformValues };
     NTSTATUS status;
     TRACE( "numPaths %d, pathNameType %d, paths %p, pathBase %d, reference %d, mask %d, transformType %d, transformValues %p\n", numPaths, pathNameType, paths, pathBase, reference, mask, transformType, transformValues );
-    if (!alloc_context_objects( OBJ_TYPE_PATH, 1, &pathBase, TRUE )) return;
-    args.pathBase = *map_context_objects( OBJ_TYPE_PATH, 1, &pathBase );
+    if (!alloc_map_context_object( OBJ_TYPE_PATH, &pathBase, TRUE )) return;
+    args.pathBase = pathBase;
     if ((status = UNIX_CALL( glStencilStrokePathInstancedNV, &args ))) WARN( "glStencilStrokePathInstancedNV returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -21504,8 +21504,8 @@ static void WINAPI glStencilStrokePathNV( GLuint path, GLint reference, GLuint m
     struct glStencilStrokePathNV_params args = { .teb = NtCurrentTeb(), .reference = reference, .mask = mask };
     NTSTATUS status;
     TRACE( "path %d, reference %d, mask %d\n", path, reference, mask );
-    if (!alloc_context_objects( OBJ_TYPE_PATH, 1, &path, TRUE )) return;
-    args.path = *map_context_objects( OBJ_TYPE_PATH, 1, &path );
+    if (!alloc_map_context_object( OBJ_TYPE_PATH, &path, TRUE )) return;
+    args.path = path;
     if ((status = UNIX_CALL( glStencilStrokePathNV, &args ))) WARN( "glStencilStrokePathNV returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -21515,8 +21515,8 @@ static void WINAPI glStencilThenCoverFillPathInstancedNV( GLsizei numPaths, GLen
     struct glStencilThenCoverFillPathInstancedNV_params args = { .teb = NtCurrentTeb(), .numPaths = numPaths, .pathNameType = pathNameType, .paths = paths, .fillMode = fillMode, .mask = mask, .coverMode = coverMode, .transformType = transformType, .transformValues = transformValues };
     NTSTATUS status;
     TRACE( "numPaths %d, pathNameType %d, paths %p, pathBase %d, fillMode %d, mask %d, coverMode %d, transformType %d, transformValues %p\n", numPaths, pathNameType, paths, pathBase, fillMode, mask, coverMode, transformType, transformValues );
-    if (!alloc_context_objects( OBJ_TYPE_PATH, 1, &pathBase, TRUE )) return;
-    args.pathBase = *map_context_objects( OBJ_TYPE_PATH, 1, &pathBase );
+    if (!alloc_map_context_object( OBJ_TYPE_PATH, &pathBase, TRUE )) return;
+    args.pathBase = pathBase;
     if ((status = UNIX_CALL( glStencilThenCoverFillPathInstancedNV, &args ))) WARN( "glStencilThenCoverFillPathInstancedNV returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -21526,8 +21526,8 @@ static void WINAPI glStencilThenCoverFillPathNV( GLuint path, GLenum fillMode, G
     struct glStencilThenCoverFillPathNV_params args = { .teb = NtCurrentTeb(), .fillMode = fillMode, .mask = mask, .coverMode = coverMode };
     NTSTATUS status;
     TRACE( "path %d, fillMode %d, mask %d, coverMode %d\n", path, fillMode, mask, coverMode );
-    if (!alloc_context_objects( OBJ_TYPE_PATH, 1, &path, TRUE )) return;
-    args.path = *map_context_objects( OBJ_TYPE_PATH, 1, &path );
+    if (!alloc_map_context_object( OBJ_TYPE_PATH, &path, TRUE )) return;
+    args.path = path;
     if ((status = UNIX_CALL( glStencilThenCoverFillPathNV, &args ))) WARN( "glStencilThenCoverFillPathNV returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -21537,8 +21537,8 @@ static void WINAPI glStencilThenCoverStrokePathInstancedNV( GLsizei numPaths, GL
     struct glStencilThenCoverStrokePathInstancedNV_params args = { .teb = NtCurrentTeb(), .numPaths = numPaths, .pathNameType = pathNameType, .paths = paths, .reference = reference, .mask = mask, .coverMode = coverMode, .transformType = transformType, .transformValues = transformValues };
     NTSTATUS status;
     TRACE( "numPaths %d, pathNameType %d, paths %p, pathBase %d, reference %d, mask %d, coverMode %d, transformType %d, transformValues %p\n", numPaths, pathNameType, paths, pathBase, reference, mask, coverMode, transformType, transformValues );
-    if (!alloc_context_objects( OBJ_TYPE_PATH, 1, &pathBase, TRUE )) return;
-    args.pathBase = *map_context_objects( OBJ_TYPE_PATH, 1, &pathBase );
+    if (!alloc_map_context_object( OBJ_TYPE_PATH, &pathBase, TRUE )) return;
+    args.pathBase = pathBase;
     if ((status = UNIX_CALL( glStencilThenCoverStrokePathInstancedNV, &args ))) WARN( "glStencilThenCoverStrokePathInstancedNV returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -21548,8 +21548,8 @@ static void WINAPI glStencilThenCoverStrokePathNV( GLuint path, GLint reference,
     struct glStencilThenCoverStrokePathNV_params args = { .teb = NtCurrentTeb(), .reference = reference, .mask = mask, .coverMode = coverMode };
     NTSTATUS status;
     TRACE( "path %d, reference %d, mask %d, coverMode %d\n", path, reference, mask, coverMode );
-    if (!alloc_context_objects( OBJ_TYPE_PATH, 1, &path, TRUE )) return;
-    args.path = *map_context_objects( OBJ_TYPE_PATH, 1, &path );
+    if (!alloc_map_context_object( OBJ_TYPE_PATH, &path, TRUE )) return;
+    args.path = path;
     if ((status = UNIX_CALL( glStencilThenCoverStrokePathNV, &args ))) WARN( "glStencilThenCoverStrokePathNV returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -22731,10 +22731,10 @@ static void WINAPI glTextureBufferEXT( GLuint texture, GLenum target, GLenum int
     struct glTextureBufferEXT_params args = { .teb = NtCurrentTeb(), .target = target, .internalformat = internalformat };
     NTSTATUS status;
     TRACE( "texture %d, target %d, internalformat %d, buffer %d\n", texture, target, internalformat, buffer );
-    if (!alloc_context_objects( OBJ_TYPE_TEXTURE, 1, &texture, TRUE )) return;
-    if (!alloc_context_objects( OBJ_TYPE_BUFFER, 1, &buffer, TRUE )) return;
-    args.texture = *map_context_objects( OBJ_TYPE_TEXTURE, 1, &texture );
-    args.buffer = *map_context_objects( OBJ_TYPE_BUFFER, 1, &buffer );
+    if (!alloc_map_context_object( OBJ_TYPE_TEXTURE, &texture, TRUE )) return;
+    if (!alloc_map_context_object( OBJ_TYPE_BUFFER, &buffer, TRUE )) return;
+    args.texture = texture;
+    args.buffer = buffer;
     if ((status = UNIX_CALL( glTextureBufferEXT, &args ))) WARN( "glTextureBufferEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -22755,10 +22755,10 @@ static void WINAPI glTextureBufferRangeEXT( GLuint texture, GLenum target, GLenu
     struct glTextureBufferRangeEXT_params args = { .teb = NtCurrentTeb(), .target = target, .internalformat = internalformat, .offset = offset, .size = size };
     NTSTATUS status;
     TRACE( "texture %d, target %d, internalformat %d, buffer %d, offset %Id, size %Id\n", texture, target, internalformat, buffer, offset, size );
-    if (!alloc_context_objects( OBJ_TYPE_TEXTURE, 1, &texture, TRUE )) return;
-    if (!alloc_context_objects( OBJ_TYPE_BUFFER, 1, &buffer, TRUE )) return;
-    args.texture = *map_context_objects( OBJ_TYPE_TEXTURE, 1, &texture );
-    args.buffer = *map_context_objects( OBJ_TYPE_BUFFER, 1, &buffer );
+    if (!alloc_map_context_object( OBJ_TYPE_TEXTURE, &texture, TRUE )) return;
+    if (!alloc_map_context_object( OBJ_TYPE_BUFFER, &buffer, TRUE )) return;
+    args.texture = texture;
+    args.buffer = buffer;
     if ((status = UNIX_CALL( glTextureBufferRangeEXT, &args ))) WARN( "glTextureBufferRangeEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -22777,8 +22777,8 @@ static void WINAPI glTextureImage1DEXT( GLuint texture, GLenum target, GLint lev
     struct glTextureImage1DEXT_params args = { .teb = NtCurrentTeb(), .target = target, .level = level, .internalformat = internalformat, .width = width, .border = border, .format = format, .type = type, .pixels = pixels };
     NTSTATUS status;
     TRACE( "texture %d, target %d, level %d, internalformat %d, width %d, border %d, format %d, type %d, pixels %p\n", texture, target, level, internalformat, width, border, format, type, pixels );
-    if (!alloc_context_objects( OBJ_TYPE_TEXTURE, 1, &texture, TRUE )) return;
-    args.texture = *map_context_objects( OBJ_TYPE_TEXTURE, 1, &texture );
+    if (!alloc_map_context_object( OBJ_TYPE_TEXTURE, &texture, TRUE )) return;
+    args.texture = texture;
     if ((status = UNIX_CALL( glTextureImage1DEXT, &args ))) WARN( "glTextureImage1DEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -22788,8 +22788,8 @@ static void WINAPI glTextureImage2DEXT( GLuint texture, GLenum target, GLint lev
     struct glTextureImage2DEXT_params args = { .teb = NtCurrentTeb(), .target = target, .level = level, .internalformat = internalformat, .width = width, .height = height, .border = border, .format = format, .type = type, .pixels = pixels };
     NTSTATUS status;
     TRACE( "texture %d, target %d, level %d, internalformat %d, width %d, height %d, border %d, format %d, type %d, pixels %p\n", texture, target, level, internalformat, width, height, border, format, type, pixels );
-    if (!alloc_context_objects( OBJ_TYPE_TEXTURE, 1, &texture, TRUE )) return;
-    args.texture = *map_context_objects( OBJ_TYPE_TEXTURE, 1, &texture );
+    if (!alloc_map_context_object( OBJ_TYPE_TEXTURE, &texture, TRUE )) return;
+    args.texture = texture;
     if ((status = UNIX_CALL( glTextureImage2DEXT, &args ))) WARN( "glTextureImage2DEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -22819,8 +22819,8 @@ static void WINAPI glTextureImage3DEXT( GLuint texture, GLenum target, GLint lev
     struct glTextureImage3DEXT_params args = { .teb = NtCurrentTeb(), .target = target, .level = level, .internalformat = internalformat, .width = width, .height = height, .depth = depth, .border = border, .format = format, .type = type, .pixels = pixels };
     NTSTATUS status;
     TRACE( "texture %d, target %d, level %d, internalformat %d, width %d, height %d, depth %d, border %d, format %d, type %d, pixels %p\n", texture, target, level, internalformat, width, height, depth, border, format, type, pixels );
-    if (!alloc_context_objects( OBJ_TYPE_TEXTURE, 1, &texture, TRUE )) return;
-    args.texture = *map_context_objects( OBJ_TYPE_TEXTURE, 1, &texture );
+    if (!alloc_map_context_object( OBJ_TYPE_TEXTURE, &texture, TRUE )) return;
+    args.texture = texture;
     if ((status = UNIX_CALL( glTextureImage3DEXT, &args ))) WARN( "glTextureImage3DEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -22877,8 +22877,8 @@ static void WINAPI glTexturePageCommitmentEXT( GLuint texture, GLint level, GLin
     struct glTexturePageCommitmentEXT_params args = { .teb = NtCurrentTeb(), .level = level, .xoffset = xoffset, .yoffset = yoffset, .zoffset = zoffset, .width = width, .height = height, .depth = depth, .commit = commit };
     NTSTATUS status;
     TRACE( "texture %d, level %d, xoffset %d, yoffset %d, zoffset %d, width %d, height %d, depth %d, commit %d\n", texture, level, xoffset, yoffset, zoffset, width, height, depth, commit );
-    if (!alloc_context_objects( OBJ_TYPE_TEXTURE, 1, &texture, TRUE )) return;
-    args.texture = *map_context_objects( OBJ_TYPE_TEXTURE, 1, &texture );
+    if (!alloc_map_context_object( OBJ_TYPE_TEXTURE, &texture, TRUE )) return;
+    args.texture = texture;
     if ((status = UNIX_CALL( glTexturePageCommitmentEXT, &args ))) WARN( "glTexturePageCommitmentEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -22909,8 +22909,8 @@ static void WINAPI glTextureParameterIivEXT( GLuint texture, GLenum target, GLen
     struct glTextureParameterIivEXT_params args = { .teb = NtCurrentTeb(), .target = target, .pname = pname, .params = params };
     NTSTATUS status;
     TRACE( "texture %d, target %d, pname %d, params %p\n", texture, target, pname, params );
-    if (!alloc_context_objects( OBJ_TYPE_TEXTURE, 1, &texture, TRUE )) return;
-    args.texture = *map_context_objects( OBJ_TYPE_TEXTURE, 1, &texture );
+    if (!alloc_map_context_object( OBJ_TYPE_TEXTURE, &texture, TRUE )) return;
+    args.texture = texture;
     if ((status = UNIX_CALL( glTextureParameterIivEXT, &args ))) WARN( "glTextureParameterIivEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -22930,8 +22930,8 @@ static void WINAPI glTextureParameterIuivEXT( GLuint texture, GLenum target, GLe
     struct glTextureParameterIuivEXT_params args = { .teb = NtCurrentTeb(), .target = target, .pname = pname, .params = params };
     NTSTATUS status;
     TRACE( "texture %d, target %d, pname %d, params %p\n", texture, target, pname, params );
-    if (!alloc_context_objects( OBJ_TYPE_TEXTURE, 1, &texture, TRUE )) return;
-    args.texture = *map_context_objects( OBJ_TYPE_TEXTURE, 1, &texture );
+    if (!alloc_map_context_object( OBJ_TYPE_TEXTURE, &texture, TRUE )) return;
+    args.texture = texture;
     if ((status = UNIX_CALL( glTextureParameterIuivEXT, &args ))) WARN( "glTextureParameterIuivEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -22951,8 +22951,8 @@ static void WINAPI glTextureParameterfEXT( GLuint texture, GLenum target, GLenum
     struct glTextureParameterfEXT_params args = { .teb = NtCurrentTeb(), .target = target, .pname = pname, .param = param };
     NTSTATUS status;
     TRACE( "texture %d, target %d, pname %d, param %f\n", texture, target, pname, param );
-    if (!alloc_context_objects( OBJ_TYPE_TEXTURE, 1, &texture, TRUE )) return;
-    args.texture = *map_context_objects( OBJ_TYPE_TEXTURE, 1, &texture );
+    if (!alloc_map_context_object( OBJ_TYPE_TEXTURE, &texture, TRUE )) return;
+    args.texture = texture;
     if ((status = UNIX_CALL( glTextureParameterfEXT, &args ))) WARN( "glTextureParameterfEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -22972,8 +22972,8 @@ static void WINAPI glTextureParameterfvEXT( GLuint texture, GLenum target, GLenu
     struct glTextureParameterfvEXT_params args = { .teb = NtCurrentTeb(), .target = target, .pname = pname, .params = params };
     NTSTATUS status;
     TRACE( "texture %d, target %d, pname %d, params %p\n", texture, target, pname, params );
-    if (!alloc_context_objects( OBJ_TYPE_TEXTURE, 1, &texture, TRUE )) return;
-    args.texture = *map_context_objects( OBJ_TYPE_TEXTURE, 1, &texture );
+    if (!alloc_map_context_object( OBJ_TYPE_TEXTURE, &texture, TRUE )) return;
+    args.texture = texture;
     if ((status = UNIX_CALL( glTextureParameterfvEXT, &args ))) WARN( "glTextureParameterfvEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -22993,8 +22993,8 @@ static void WINAPI glTextureParameteriEXT( GLuint texture, GLenum target, GLenum
     struct glTextureParameteriEXT_params args = { .teb = NtCurrentTeb(), .target = target, .pname = pname, .param = param };
     NTSTATUS status;
     TRACE( "texture %d, target %d, pname %d, param %d\n", texture, target, pname, param );
-    if (!alloc_context_objects( OBJ_TYPE_TEXTURE, 1, &texture, TRUE )) return;
-    args.texture = *map_context_objects( OBJ_TYPE_TEXTURE, 1, &texture );
+    if (!alloc_map_context_object( OBJ_TYPE_TEXTURE, &texture, TRUE )) return;
+    args.texture = texture;
     if ((status = UNIX_CALL( glTextureParameteriEXT, &args ))) WARN( "glTextureParameteriEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -23014,8 +23014,8 @@ static void WINAPI glTextureParameterivEXT( GLuint texture, GLenum target, GLenu
     struct glTextureParameterivEXT_params args = { .teb = NtCurrentTeb(), .target = target, .pname = pname, .params = params };
     NTSTATUS status;
     TRACE( "texture %d, target %d, pname %d, params %p\n", texture, target, pname, params );
-    if (!alloc_context_objects( OBJ_TYPE_TEXTURE, 1, &texture, TRUE )) return;
-    args.texture = *map_context_objects( OBJ_TYPE_TEXTURE, 1, &texture );
+    if (!alloc_map_context_object( OBJ_TYPE_TEXTURE, &texture, TRUE )) return;
+    args.texture = texture;
     if ((status = UNIX_CALL( glTextureParameterivEXT, &args ))) WARN( "glTextureParameterivEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -23034,10 +23034,10 @@ static void WINAPI glTextureRenderbufferEXT( GLuint texture, GLenum target, GLui
     struct glTextureRenderbufferEXT_params args = { .teb = NtCurrentTeb(), .target = target };
     NTSTATUS status;
     TRACE( "texture %d, target %d, renderbuffer %d\n", texture, target, renderbuffer );
-    if (!alloc_context_objects( OBJ_TYPE_TEXTURE, 1, &texture, TRUE )) return;
-    if (!alloc_context_objects( OBJ_TYPE_RENDERBUFFER, 1, &renderbuffer, TRUE )) return;
-    args.texture = *map_context_objects( OBJ_TYPE_TEXTURE, 1, &texture );
-    args.renderbuffer = *map_context_objects( OBJ_TYPE_RENDERBUFFER, 1, &renderbuffer );
+    if (!alloc_map_context_object( OBJ_TYPE_TEXTURE, &texture, TRUE )) return;
+    if (!alloc_map_context_object( OBJ_TYPE_RENDERBUFFER, &renderbuffer, TRUE )) return;
+    args.texture = texture;
+    args.renderbuffer = renderbuffer;
     if ((status = UNIX_CALL( glTextureRenderbufferEXT, &args ))) WARN( "glTextureRenderbufferEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -23057,8 +23057,8 @@ static void WINAPI glTextureStorage1DEXT( GLuint texture, GLenum target, GLsizei
     struct glTextureStorage1DEXT_params args = { .teb = NtCurrentTeb(), .target = target, .levels = levels, .internalformat = internalformat, .width = width };
     NTSTATUS status;
     TRACE( "texture %d, target %d, levels %d, internalformat %d, width %d\n", texture, target, levels, internalformat, width );
-    if (!alloc_context_objects( OBJ_TYPE_TEXTURE, 1, &texture, TRUE )) return;
-    args.texture = *map_context_objects( OBJ_TYPE_TEXTURE, 1, &texture );
+    if (!alloc_map_context_object( OBJ_TYPE_TEXTURE, &texture, TRUE )) return;
+    args.texture = texture;
     if ((status = UNIX_CALL( glTextureStorage1DEXT, &args ))) WARN( "glTextureStorage1DEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -23078,8 +23078,8 @@ static void WINAPI glTextureStorage2DEXT( GLuint texture, GLenum target, GLsizei
     struct glTextureStorage2DEXT_params args = { .teb = NtCurrentTeb(), .target = target, .levels = levels, .internalformat = internalformat, .width = width, .height = height };
     NTSTATUS status;
     TRACE( "texture %d, target %d, levels %d, internalformat %d, width %d, height %d\n", texture, target, levels, internalformat, width, height );
-    if (!alloc_context_objects( OBJ_TYPE_TEXTURE, 1, &texture, TRUE )) return;
-    args.texture = *map_context_objects( OBJ_TYPE_TEXTURE, 1, &texture );
+    if (!alloc_map_context_object( OBJ_TYPE_TEXTURE, &texture, TRUE )) return;
+    args.texture = texture;
     if ((status = UNIX_CALL( glTextureStorage2DEXT, &args ))) WARN( "glTextureStorage2DEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -23099,8 +23099,8 @@ static void WINAPI glTextureStorage2DMultisampleEXT( GLuint texture, GLenum targ
     struct glTextureStorage2DMultisampleEXT_params args = { .teb = NtCurrentTeb(), .target = target, .samples = samples, .internalformat = internalformat, .width = width, .height = height, .fixedsamplelocations = fixedsamplelocations };
     NTSTATUS status;
     TRACE( "texture %d, target %d, samples %d, internalformat %d, width %d, height %d, fixedsamplelocations %d\n", texture, target, samples, internalformat, width, height, fixedsamplelocations );
-    if (!alloc_context_objects( OBJ_TYPE_TEXTURE, 1, &texture, TRUE )) return;
-    args.texture = *map_context_objects( OBJ_TYPE_TEXTURE, 1, &texture );
+    if (!alloc_map_context_object( OBJ_TYPE_TEXTURE, &texture, TRUE )) return;
+    args.texture = texture;
     if ((status = UNIX_CALL( glTextureStorage2DMultisampleEXT, &args ))) WARN( "glTextureStorage2DMultisampleEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -23120,8 +23120,8 @@ static void WINAPI glTextureStorage3DEXT( GLuint texture, GLenum target, GLsizei
     struct glTextureStorage3DEXT_params args = { .teb = NtCurrentTeb(), .target = target, .levels = levels, .internalformat = internalformat, .width = width, .height = height, .depth = depth };
     NTSTATUS status;
     TRACE( "texture %d, target %d, levels %d, internalformat %d, width %d, height %d, depth %d\n", texture, target, levels, internalformat, width, height, depth );
-    if (!alloc_context_objects( OBJ_TYPE_TEXTURE, 1, &texture, TRUE )) return;
-    args.texture = *map_context_objects( OBJ_TYPE_TEXTURE, 1, &texture );
+    if (!alloc_map_context_object( OBJ_TYPE_TEXTURE, &texture, TRUE )) return;
+    args.texture = texture;
     if ((status = UNIX_CALL( glTextureStorage3DEXT, &args ))) WARN( "glTextureStorage3DEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -23141,8 +23141,8 @@ static void WINAPI glTextureStorage3DMultisampleEXT( GLuint texture, GLenum targ
     struct glTextureStorage3DMultisampleEXT_params args = { .teb = NtCurrentTeb(), .target = target, .samples = samples, .internalformat = internalformat, .width = width, .height = height, .depth = depth, .fixedsamplelocations = fixedsamplelocations };
     NTSTATUS status;
     TRACE( "texture %d, target %d, samples %d, internalformat %d, width %d, height %d, depth %d, fixedsamplelocations %d\n", texture, target, samples, internalformat, width, height, depth, fixedsamplelocations );
-    if (!alloc_context_objects( OBJ_TYPE_TEXTURE, 1, &texture, TRUE )) return;
-    args.texture = *map_context_objects( OBJ_TYPE_TEXTURE, 1, &texture );
+    if (!alloc_map_context_object( OBJ_TYPE_TEXTURE, &texture, TRUE )) return;
+    args.texture = texture;
     if ((status = UNIX_CALL( glTextureStorage3DMultisampleEXT, &args ))) WARN( "glTextureStorage3DMultisampleEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -23227,8 +23227,8 @@ static void WINAPI glTextureSubImage1DEXT( GLuint texture, GLenum target, GLint 
     struct glTextureSubImage1DEXT_params args = { .teb = NtCurrentTeb(), .target = target, .level = level, .xoffset = xoffset, .width = width, .format = format, .type = type, .pixels = pixels };
     NTSTATUS status;
     TRACE( "texture %d, target %d, level %d, xoffset %d, width %d, format %d, type %d, pixels %p\n", texture, target, level, xoffset, width, format, type, pixels );
-    if (!alloc_context_objects( OBJ_TYPE_TEXTURE, 1, &texture, TRUE )) return;
-    args.texture = *map_context_objects( OBJ_TYPE_TEXTURE, 1, &texture );
+    if (!alloc_map_context_object( OBJ_TYPE_TEXTURE, &texture, TRUE )) return;
+    args.texture = texture;
     if ((status = UNIX_CALL( glTextureSubImage1DEXT, &args ))) WARN( "glTextureSubImage1DEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -23248,8 +23248,8 @@ static void WINAPI glTextureSubImage2DEXT( GLuint texture, GLenum target, GLint 
     struct glTextureSubImage2DEXT_params args = { .teb = NtCurrentTeb(), .target = target, .level = level, .xoffset = xoffset, .yoffset = yoffset, .width = width, .height = height, .format = format, .type = type, .pixels = pixels };
     NTSTATUS status;
     TRACE( "texture %d, target %d, level %d, xoffset %d, yoffset %d, width %d, height %d, format %d, type %d, pixels %p\n", texture, target, level, xoffset, yoffset, width, height, format, type, pixels );
-    if (!alloc_context_objects( OBJ_TYPE_TEXTURE, 1, &texture, TRUE )) return;
-    args.texture = *map_context_objects( OBJ_TYPE_TEXTURE, 1, &texture );
+    if (!alloc_map_context_object( OBJ_TYPE_TEXTURE, &texture, TRUE )) return;
+    args.texture = texture;
     if ((status = UNIX_CALL( glTextureSubImage2DEXT, &args ))) WARN( "glTextureSubImage2DEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -23269,8 +23269,8 @@ static void WINAPI glTextureSubImage3DEXT( GLuint texture, GLenum target, GLint 
     struct glTextureSubImage3DEXT_params args = { .teb = NtCurrentTeb(), .target = target, .level = level, .xoffset = xoffset, .yoffset = yoffset, .zoffset = zoffset, .width = width, .height = height, .depth = depth, .format = format, .type = type, .pixels = pixels };
     NTSTATUS status;
     TRACE( "texture %d, target %d, level %d, xoffset %d, yoffset %d, zoffset %d, width %d, height %d, depth %d, format %d, type %d, pixels %p\n", texture, target, level, xoffset, yoffset, zoffset, width, height, depth, format, type, pixels );
-    if (!alloc_context_objects( OBJ_TYPE_TEXTURE, 1, &texture, TRUE )) return;
-    args.texture = *map_context_objects( OBJ_TYPE_TEXTURE, 1, &texture );
+    if (!alloc_map_context_object( OBJ_TYPE_TEXTURE, &texture, TRUE )) return;
+    args.texture = texture;
     if ((status = UNIX_CALL( glTextureSubImage3DEXT, &args ))) WARN( "glTextureSubImage3DEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -23368,10 +23368,10 @@ static void WINAPI glTransformPathNV( GLuint resultPath, GLuint srcPath, GLenum 
     struct glTransformPathNV_params args = { .teb = NtCurrentTeb(), .transformType = transformType, .transformValues = transformValues };
     NTSTATUS status;
     TRACE( "resultPath %d, srcPath %d, transformType %d, transformValues %p\n", resultPath, srcPath, transformType, transformValues );
-    if (!alloc_context_objects( OBJ_TYPE_PATH, 1, &resultPath, TRUE )) return;
-    if (!alloc_context_objects( OBJ_TYPE_PATH, 1, &srcPath, TRUE )) return;
-    args.resultPath = *map_context_objects( OBJ_TYPE_PATH, 1, &resultPath );
-    args.srcPath = *map_context_objects( OBJ_TYPE_PATH, 1, &srcPath );
+    if (!alloc_map_context_object( OBJ_TYPE_PATH, &resultPath, TRUE )) return;
+    if (!alloc_map_context_object( OBJ_TYPE_PATH, &srcPath, TRUE )) return;
+    args.resultPath = resultPath;
+    args.srcPath = srcPath;
     if ((status = UNIX_CALL( glTransformPathNV, &args ))) WARN( "glTransformPathNV returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -24504,8 +24504,8 @@ static GLboolean WINAPI glUnmapNamedBufferEXT( GLuint buffer )
     struct glUnmapNamedBufferEXT_params args = { .teb = NtCurrentTeb() };
     NTSTATUS status;
     TRACE( "buffer %d\n", buffer );
-    if (!alloc_context_objects( OBJ_TYPE_BUFFER, 1, &buffer, TRUE )) return args.ret;
-    args.buffer = *map_context_objects( OBJ_TYPE_BUFFER, 1, &buffer );
+    if (!alloc_map_context_object( OBJ_TYPE_BUFFER, &buffer, TRUE )) return args.ret;
+    args.buffer = buffer;
     if ((status = UNIX_CALL( glUnmapNamedBufferEXT, &args ))) WARN( "glUnmapNamedBufferEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
     return args.ret;
@@ -25028,8 +25028,8 @@ static void WINAPI glVertexArrayBindVertexBufferEXT( GLuint vaobj, GLuint bindin
     struct glVertexArrayBindVertexBufferEXT_params args = { .teb = NtCurrentTeb(), .vaobj = vaobj, .bindingindex = bindingindex, .offset = offset, .stride = stride };
     NTSTATUS status;
     TRACE( "vaobj %d, bindingindex %d, buffer %d, offset %Id, stride %d\n", vaobj, bindingindex, buffer, offset, stride );
-    if (!alloc_context_objects( OBJ_TYPE_BUFFER, 1, &buffer, TRUE )) return;
-    args.buffer = *map_context_objects( OBJ_TYPE_BUFFER, 1, &buffer );
+    if (!alloc_map_context_object( OBJ_TYPE_BUFFER, &buffer, TRUE )) return;
+    args.buffer = buffer;
     if ((status = UNIX_CALL( glVertexArrayBindVertexBufferEXT, &args ))) WARN( "glVertexArrayBindVertexBufferEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -25048,8 +25048,8 @@ static void WINAPI glVertexArrayColorOffsetEXT( GLuint vaobj, GLuint buffer, GLi
     struct glVertexArrayColorOffsetEXT_params args = { .teb = NtCurrentTeb(), .vaobj = vaobj, .size = size, .type = type, .stride = stride, .offset = offset };
     NTSTATUS status;
     TRACE( "vaobj %d, buffer %d, size %d, type %d, stride %d, offset %Id\n", vaobj, buffer, size, type, stride, offset );
-    if (!alloc_context_objects( OBJ_TYPE_BUFFER, 1, &buffer, TRUE )) return;
-    args.buffer = *map_context_objects( OBJ_TYPE_BUFFER, 1, &buffer );
+    if (!alloc_map_context_object( OBJ_TYPE_BUFFER, &buffer, TRUE )) return;
+    args.buffer = buffer;
     if ((status = UNIX_CALL( glVertexArrayColorOffsetEXT, &args ))) WARN( "glVertexArrayColorOffsetEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -25059,8 +25059,8 @@ static void WINAPI glVertexArrayEdgeFlagOffsetEXT( GLuint vaobj, GLuint buffer, 
     struct glVertexArrayEdgeFlagOffsetEXT_params args = { .teb = NtCurrentTeb(), .vaobj = vaobj, .stride = stride, .offset = offset };
     NTSTATUS status;
     TRACE( "vaobj %d, buffer %d, stride %d, offset %Id\n", vaobj, buffer, stride, offset );
-    if (!alloc_context_objects( OBJ_TYPE_BUFFER, 1, &buffer, TRUE )) return;
-    args.buffer = *map_context_objects( OBJ_TYPE_BUFFER, 1, &buffer );
+    if (!alloc_map_context_object( OBJ_TYPE_BUFFER, &buffer, TRUE )) return;
+    args.buffer = buffer;
     if ((status = UNIX_CALL( glVertexArrayEdgeFlagOffsetEXT, &args ))) WARN( "glVertexArrayEdgeFlagOffsetEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -25080,8 +25080,8 @@ static void WINAPI glVertexArrayFogCoordOffsetEXT( GLuint vaobj, GLuint buffer, 
     struct glVertexArrayFogCoordOffsetEXT_params args = { .teb = NtCurrentTeb(), .vaobj = vaobj, .type = type, .stride = stride, .offset = offset };
     NTSTATUS status;
     TRACE( "vaobj %d, buffer %d, type %d, stride %d, offset %Id\n", vaobj, buffer, type, stride, offset );
-    if (!alloc_context_objects( OBJ_TYPE_BUFFER, 1, &buffer, TRUE )) return;
-    args.buffer = *map_context_objects( OBJ_TYPE_BUFFER, 1, &buffer );
+    if (!alloc_map_context_object( OBJ_TYPE_BUFFER, &buffer, TRUE )) return;
+    args.buffer = buffer;
     if ((status = UNIX_CALL( glVertexArrayFogCoordOffsetEXT, &args ))) WARN( "glVertexArrayFogCoordOffsetEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -25091,8 +25091,8 @@ static void WINAPI glVertexArrayIndexOffsetEXT( GLuint vaobj, GLuint buffer, GLe
     struct glVertexArrayIndexOffsetEXT_params args = { .teb = NtCurrentTeb(), .vaobj = vaobj, .type = type, .stride = stride, .offset = offset };
     NTSTATUS status;
     TRACE( "vaobj %d, buffer %d, type %d, stride %d, offset %Id\n", vaobj, buffer, type, stride, offset );
-    if (!alloc_context_objects( OBJ_TYPE_BUFFER, 1, &buffer, TRUE )) return;
-    args.buffer = *map_context_objects( OBJ_TYPE_BUFFER, 1, &buffer );
+    if (!alloc_map_context_object( OBJ_TYPE_BUFFER, &buffer, TRUE )) return;
+    args.buffer = buffer;
     if ((status = UNIX_CALL( glVertexArrayIndexOffsetEXT, &args ))) WARN( "glVertexArrayIndexOffsetEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -25102,8 +25102,8 @@ static void WINAPI glVertexArrayMultiTexCoordOffsetEXT( GLuint vaobj, GLuint buf
     struct glVertexArrayMultiTexCoordOffsetEXT_params args = { .teb = NtCurrentTeb(), .vaobj = vaobj, .texunit = texunit, .size = size, .type = type, .stride = stride, .offset = offset };
     NTSTATUS status;
     TRACE( "vaobj %d, buffer %d, texunit %d, size %d, type %d, stride %d, offset %Id\n", vaobj, buffer, texunit, size, type, stride, offset );
-    if (!alloc_context_objects( OBJ_TYPE_BUFFER, 1, &buffer, TRUE )) return;
-    args.buffer = *map_context_objects( OBJ_TYPE_BUFFER, 1, &buffer );
+    if (!alloc_map_context_object( OBJ_TYPE_BUFFER, &buffer, TRUE )) return;
+    args.buffer = buffer;
     if ((status = UNIX_CALL( glVertexArrayMultiTexCoordOffsetEXT, &args ))) WARN( "glVertexArrayMultiTexCoordOffsetEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -25113,8 +25113,8 @@ static void WINAPI glVertexArrayNormalOffsetEXT( GLuint vaobj, GLuint buffer, GL
     struct glVertexArrayNormalOffsetEXT_params args = { .teb = NtCurrentTeb(), .vaobj = vaobj, .type = type, .stride = stride, .offset = offset };
     NTSTATUS status;
     TRACE( "vaobj %d, buffer %d, type %d, stride %d, offset %Id\n", vaobj, buffer, type, stride, offset );
-    if (!alloc_context_objects( OBJ_TYPE_BUFFER, 1, &buffer, TRUE )) return;
-    args.buffer = *map_context_objects( OBJ_TYPE_BUFFER, 1, &buffer );
+    if (!alloc_map_context_object( OBJ_TYPE_BUFFER, &buffer, TRUE )) return;
+    args.buffer = buffer;
     if ((status = UNIX_CALL( glVertexArrayNormalOffsetEXT, &args ))) WARN( "glVertexArrayNormalOffsetEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -25151,8 +25151,8 @@ static void WINAPI glVertexArraySecondaryColorOffsetEXT( GLuint vaobj, GLuint bu
     struct glVertexArraySecondaryColorOffsetEXT_params args = { .teb = NtCurrentTeb(), .vaobj = vaobj, .size = size, .type = type, .stride = stride, .offset = offset };
     NTSTATUS status;
     TRACE( "vaobj %d, buffer %d, size %d, type %d, stride %d, offset %Id\n", vaobj, buffer, size, type, stride, offset );
-    if (!alloc_context_objects( OBJ_TYPE_BUFFER, 1, &buffer, TRUE )) return;
-    args.buffer = *map_context_objects( OBJ_TYPE_BUFFER, 1, &buffer );
+    if (!alloc_map_context_object( OBJ_TYPE_BUFFER, &buffer, TRUE )) return;
+    args.buffer = buffer;
     if ((status = UNIX_CALL( glVertexArraySecondaryColorOffsetEXT, &args ))) WARN( "glVertexArraySecondaryColorOffsetEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -25162,8 +25162,8 @@ static void WINAPI glVertexArrayTexCoordOffsetEXT( GLuint vaobj, GLuint buffer, 
     struct glVertexArrayTexCoordOffsetEXT_params args = { .teb = NtCurrentTeb(), .vaobj = vaobj, .size = size, .type = type, .stride = stride, .offset = offset };
     NTSTATUS status;
     TRACE( "vaobj %d, buffer %d, size %d, type %d, stride %d, offset %Id\n", vaobj, buffer, size, type, stride, offset );
-    if (!alloc_context_objects( OBJ_TYPE_BUFFER, 1, &buffer, TRUE )) return;
-    args.buffer = *map_context_objects( OBJ_TYPE_BUFFER, 1, &buffer );
+    if (!alloc_map_context_object( OBJ_TYPE_BUFFER, &buffer, TRUE )) return;
+    args.buffer = buffer;
     if ((status = UNIX_CALL( glVertexArrayTexCoordOffsetEXT, &args ))) WARN( "glVertexArrayTexCoordOffsetEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -25209,8 +25209,8 @@ static void WINAPI glVertexArrayVertexAttribIOffsetEXT( GLuint vaobj, GLuint buf
     struct glVertexArrayVertexAttribIOffsetEXT_params args = { .teb = NtCurrentTeb(), .vaobj = vaobj, .index = index, .size = size, .type = type, .stride = stride, .offset = offset };
     NTSTATUS status;
     TRACE( "vaobj %d, buffer %d, index %d, size %d, type %d, stride %d, offset %Id\n", vaobj, buffer, index, size, type, stride, offset );
-    if (!alloc_context_objects( OBJ_TYPE_BUFFER, 1, &buffer, TRUE )) return;
-    args.buffer = *map_context_objects( OBJ_TYPE_BUFFER, 1, &buffer );
+    if (!alloc_map_context_object( OBJ_TYPE_BUFFER, &buffer, TRUE )) return;
+    args.buffer = buffer;
     if ((status = UNIX_CALL( glVertexArrayVertexAttribIOffsetEXT, &args ))) WARN( "glVertexArrayVertexAttribIOffsetEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -25229,8 +25229,8 @@ static void WINAPI glVertexArrayVertexAttribLOffsetEXT( GLuint vaobj, GLuint buf
     struct glVertexArrayVertexAttribLOffsetEXT_params args = { .teb = NtCurrentTeb(), .vaobj = vaobj, .index = index, .size = size, .type = type, .stride = stride, .offset = offset };
     NTSTATUS status;
     TRACE( "vaobj %d, buffer %d, index %d, size %d, type %d, stride %d, offset %Id\n", vaobj, buffer, index, size, type, stride, offset );
-    if (!alloc_context_objects( OBJ_TYPE_BUFFER, 1, &buffer, TRUE )) return;
-    args.buffer = *map_context_objects( OBJ_TYPE_BUFFER, 1, &buffer );
+    if (!alloc_map_context_object( OBJ_TYPE_BUFFER, &buffer, TRUE )) return;
+    args.buffer = buffer;
     if ((status = UNIX_CALL( glVertexArrayVertexAttribLOffsetEXT, &args ))) WARN( "glVertexArrayVertexAttribLOffsetEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -25240,8 +25240,8 @@ static void WINAPI glVertexArrayVertexAttribOffsetEXT( GLuint vaobj, GLuint buff
     struct glVertexArrayVertexAttribOffsetEXT_params args = { .teb = NtCurrentTeb(), .vaobj = vaobj, .index = index, .size = size, .type = type, .normalized = normalized, .stride = stride, .offset = offset };
     NTSTATUS status;
     TRACE( "vaobj %d, buffer %d, index %d, size %d, type %d, normalized %d, stride %d, offset %Id\n", vaobj, buffer, index, size, type, normalized, stride, offset );
-    if (!alloc_context_objects( OBJ_TYPE_BUFFER, 1, &buffer, TRUE )) return;
-    args.buffer = *map_context_objects( OBJ_TYPE_BUFFER, 1, &buffer );
+    if (!alloc_map_context_object( OBJ_TYPE_BUFFER, &buffer, TRUE )) return;
+    args.buffer = buffer;
     if ((status = UNIX_CALL( glVertexArrayVertexAttribOffsetEXT, &args ))) WARN( "glVertexArrayVertexAttribOffsetEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -25283,8 +25283,8 @@ static void WINAPI glVertexArrayVertexOffsetEXT( GLuint vaobj, GLuint buffer, GL
     struct glVertexArrayVertexOffsetEXT_params args = { .teb = NtCurrentTeb(), .vaobj = vaobj, .size = size, .type = type, .stride = stride, .offset = offset };
     NTSTATUS status;
     TRACE( "vaobj %d, buffer %d, size %d, type %d, stride %d, offset %Id\n", vaobj, buffer, size, type, stride, offset );
-    if (!alloc_context_objects( OBJ_TYPE_BUFFER, 1, &buffer, TRUE )) return;
-    args.buffer = *map_context_objects( OBJ_TYPE_BUFFER, 1, &buffer );
+    if (!alloc_map_context_object( OBJ_TYPE_BUFFER, &buffer, TRUE )) return;
+    args.buffer = buffer;
     if ((status = UNIX_CALL( glVertexArrayVertexOffsetEXT, &args ))) WARN( "glVertexArrayVertexOffsetEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -27894,9 +27894,9 @@ static void WINAPI glWeightPathsNV( GLuint resultPath, GLsizei numPaths, const G
     struct glWeightPathsNV_params args = { .teb = NtCurrentTeb(), .numPaths = numPaths, .weights = weights };
     NTSTATUS status;
     TRACE( "resultPath %d, numPaths %d, paths %p, weights %p\n", resultPath, numPaths, paths, weights );
-    if (!alloc_context_objects( OBJ_TYPE_PATH, 1, &resultPath, TRUE )) return;
+    if (!alloc_map_context_object( OBJ_TYPE_PATH, &resultPath, TRUE )) return;
     if (!alloc_context_objects( OBJ_TYPE_PATH, numPaths, paths, TRUE )) return;
-    args.resultPath = *map_context_objects( OBJ_TYPE_PATH, 1, &resultPath );
+    args.resultPath = resultPath;
     paths_tmp = numPaths > 0 ? memdup_objects( numPaths, paths, paths_buf, ARRAY_SIZE(paths_buf) ) : NULL;
     args.paths = numPaths > 0 ? map_context_objects( OBJ_TYPE_PATH, numPaths, paths_tmp ) : NULL;
     if ((status = UNIX_CALL( glWeightPathsNV, &args ))) WARN( "glWeightPathsNV returned %#lx\n", status );
