@@ -1263,6 +1263,11 @@ BOOL WINAPI wglMakeContextCurrentARB( HDC draw_hdc, HDC read_hdc, HGLRC handle )
     teb->glCurrentRC = handle;
     teb->glReserved1[0] = draw_hdc;
     teb->glReserved1[1] = read_hdc;
+    /* set_context_attribute's remembered context is this thread's current one
+     * or none: a context is made not current before it is deleted, so the
+     * handle never outlives it (or meets its slot's generation coming round). */
+    if (teb->glReserved1[WINE_GL_RESERVED_UNTRACKED_RC] != handle)
+        teb->glReserved1[WINE_GL_RESERVED_UNTRACKED_RC] = NULL;
     return TRUE;
 }
 
@@ -1350,9 +1355,9 @@ void set_context_attribute( GLenum name, const void *value, size_t size )
      * cannot copy, which sets all of the context's used bits for good: after
      * the first, another changes nothing, but finding the context took a
      * lookup in its table each time, in translated x86 code for a 32-bit
-     * program on the Switch (about 1.8% of Doom 3's). A context's handle
-     * carries its slot's generation, so the one remembered here names no other
-     * context, and it is the current one only while it is current. */
+     * program on the Switch (about 1.8% of Doom 3's). The context remembered
+     * here is forgotten when another becomes current (wglMakeContextCurrentARB),
+     * so it is always the thread's current one, alive. */
     if (name == -1 && teb->glCurrentRC && teb->glReserved1[WINE_GL_RESERVED_UNTRACKED_RC] == teb->glCurrentRC) return;
     if (!(ctx = get_current_context())) return;
 
