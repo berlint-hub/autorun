@@ -72,17 +72,20 @@ static int progress( void *opaque, const char *what, unsigned long long current,
     return SDL_AtomicGet( &d->cancel );
 }
 
-/* Which repository the card follows, and saying so on the card. */
+/* Which repository the card follows, and saying so on the card: the word
+ * the card has, or this build's own (HORIZON_DLLS_DEFAULT_FORK). */
 static int read_source( const char *root )
 {
     char path[640], word[16] = "";
     FILE *file;
 
     snprintf( path, sizeof(path), "%s/%s", root, HORIZON_DLLS_SOURCE );
-    if (!(file = fopen( path, "r" ))) return 0;
+    if (!(file = fopen( path, "r" ))) return HORIZON_DLLS_DEFAULT_FORK;
     if (!fgets( word, sizeof(word), file )) word[0] = 0;
     fclose( file );
-    return !strncmp( word, "fork", 4 );
+    if (!strncmp( word, "fork", 4 )) return 1;
+    if (!strncmp( word, "autorun", 7 )) return 0;
+    return HORIZON_DLLS_DEFAULT_FORK;
 }
 
 static int write_source( const char *root, int fork )
@@ -92,9 +95,8 @@ static int write_source( const char *root, int fork )
     int ok;
 
     snprintf( path, sizeof(path), "%s/%s", root, HORIZON_DLLS_SOURCE );
-    if (!fork) { remove( path ); return 1; }
     if (!(file = fopen( path, "w" ))) return 0;
-    ok = fputs( "fork\n", file ) >= 0;
+    ok = fputs( fork ? "fork\n" : "autorun\n", file ) >= 0;
     return !fclose( file ) && ok;
 }
 

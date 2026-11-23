@@ -1616,11 +1616,13 @@ static void profile_report( const struct nx_prof_row *rows, unsigned int count )
 }
 
 /* Which x86 code makes the server requests, while the profiler runs: one
- * request in eight, by kind and by each of the first three guest return
- * addresses above the system call (walk_x86, the x86 context exported at its
- * gate). Doom 3 makes some ten thousand requests a second in places, most of
- * them a handle duplicated, compared, queried and closed, and the counts alone
- * do not say who for. */
+ * request in eight, by kind and by the first four words walk_x86 gives above
+ * the system call (the x86 context exported at its gate): the two at its ESP,
+ * where the return into the API the program called is, and the first two of
+ * the frame chain. Doom 3 makes some ten thousand requests a second in
+ * places, most of them a handle duplicated, compared, queried and closed,
+ * which the frame chain alone put at exe+0x10e50f in its main loop: the game
+ * is built without frame pointers. */
 #define NX_PROF_SERVER_SAMPLE 8
 static pthread_mutex_t server_callers_mutex = PTHREAD_MUTEX_INITIALIZER;
 static struct nx_prof_table server_callers;
@@ -1635,8 +1637,8 @@ void wine_nx_prof_server_request( unsigned int code, void *teb )
         __atomic_add_fetch( &server_sequence, 1, __ATOMIC_RELAXED ) % NX_PROF_SERVER_SAMPLE) return;
     n = walk_x86( (uint64_t)(uintptr_t)teb, callers );
     pthread_mutex_lock( &server_callers_mutex );
-    if (n <= 1) nx_prof_add( &server_callers, ((uint64_t)code << 32) | NX_PROF_NO_SITE );
-    for (i = 1; i < n && i <= 3; i++) nx_prof_add( &server_callers, ((uint64_t)code << 32) | callers[i] );
+    if (!n) nx_prof_add( &server_callers, ((uint64_t)code << 32) | NX_PROF_NO_SITE );
+    for (i = 0; i < n && i <= 3; i++) nx_prof_add( &server_callers, ((uint64_t)code << 32) | callers[i] );
     pthread_mutex_unlock( &server_callers_mutex );
 }
 
@@ -1664,7 +1666,7 @@ static void server_callers_report( const unsigned int *calls, unsigned int count
     }
     for (k = 0; k < shown; k++)
     {
-        unsigned int top[4] = {0}, found = 0, samples = 0;  /* samples: whether any */
+        unsigned int top[6] = {0}, found = 0, samples = 0;  /* samples: whether any */
         const char *request = &wine_nx_server_names ? __atomic_load_n( &wine_nx_server_names[codes[k]], __ATOMIC_RELAXED ) : NULL;
 
         for (i = 0; i < NX_PROF_BUCKETS; i++)
@@ -1673,10 +1675,10 @@ static void server_callers_report( const unsigned int *calls, unsigned int count
 
             if (!bucket->count || (bucket->key >> 32) != codes[k]) continue;
             samples += bucket->count;
-            j = found < 4 ? found++ : 4;
+            j = found < 6 ? found++ : 6;
             for (; j > 0 && table.buckets[top[j - 1]].count < bucket->count; j--)
-                if (j < 4) top[j] = top[j - 1];
-            if (j < 4) top[j] = i;
+                if (j < 6) top[j] = top[j - 1];
+            if (j < 6) top[j] = i;
         }
         if (!samples) continue;
         len = appendf( line, 0, "[SERVER] %s %u from:", request ? request : "?", calls[codes[k]] );
