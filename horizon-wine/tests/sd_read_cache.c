@@ -232,7 +232,101 @@ static void test_open_files(void)
     sd_cache_closed( &list, &pool, (void *)4 );
     sd_cache_closed( &list, &pool, (void *)5 );
     sd_cache_closed( &list, &pool, (void *)6 );  /* opened before the cache: unknown */
-    assert( !list && !pool.used );
+    /* The readers' chunk stays for the next open of the path (test_shelf). */
+    assert( !list && pool.used == 1 && pool.shelf );
+    sd_cache_shelf_forget( &pool, NULL );
+    assert( !pool.used && !pool.held && !pool.shelf );
+    free( f.data );
+}
+
+/* Doom 3's pattern: its pk4 archive opened again for every file read from it.
+ * What a closed reader read stays for the next open of the path, until a
+ * writer opens it, it is written, renamed or deleted, or the pool needs the
+ * memory. */
+static void test_shelf(void)
+{
+    static const char pk4[] = "sdmc:/Roms/Windows/Doom 3/base/pak002.pk4";
+    static const char other[] = "sdmc:/Roms/Windows/Doom 3/base/pak003.pk4";
+    struct sd_cache_pool pool = { .max = 8, .cap = 16 };
+    struct fake_file f = make_file( 4LL * SD_CACHE_CHUNK );
+    struct sd_cache_file *list = NULL, *a, *b, *c;
+    unsigned int before;
+    char buf[100];
+
+    assert( sd_cache_under_path( pk4, "/roms/WINDOWS/doom 3/" ) && sd_cache_under_path( pk4, pk4 ) );
+    assert( !sd_cache_under_path( pk4, "sdmc:/Roms/Windows/Doom" ) && sd_cache_under_path( pk4, NULL ) );
+
+    /* One open reads two files of the archive and is closed. */
+    a = sd_cache_opened( &list, &pool, (void *)1, pk4, 0 );
+    assert( cached_read( a, &pool, &f, 1000, buf, 100 ) == 100 );
+    assert( cached_read( a, &pool, &f, SD_CACHE_CHUNK + 50, buf, 100 ) == 100 );
+    assert( f.requests == 2 && pool.used == 2 );
+    sd_cache_closed( &list, &pool, (void *)1 );
+    assert( !list && pool.used == 2 && pool.shelf );
+
+    /* The next open of the path, however it is spelled, reads them from memory. */
+    b = sd_cache_opened( &list, &pool, (void *)2, "/roms/windows/DOOM 3//base/PAK002.pk4", 0 );
+    before = f.requests;
+    assert( cached_read( b, &pool, &f, 1500, buf, 100 ) == 100 && !memcmp( buf, f.data + 1500, 100 ) );
+    assert( cached_read( b, &pool, &f, SD_CACHE_CHUNK + 900, buf, 100 ) == 100 );
+    assert( !memcmp( buf, f.data + SD_CACHE_CHUNK + 900, 100 ) && f.requests == before && pool.used == 2 );
+    /* A read running on past a shelved chunk asks the card for the rest only. */
+    assert( cached_read( b, &pool, &f, 2 * SD_CACHE_CHUNK - 50, buf, 100 ) == 100 );
+    assert( !memcmp( buf, f.data + 2 * SD_CACHE_CHUNK - 50, 100 ) && f.requests == before + 1 && pool.used == 3 );
+
+    /* Another path finds none of it. */
+    c = sd_cache_opened( &list, &pool, (void *)3, other, 0 );
+    assert( cached_read( c, &pool, &f, 1000, buf, 100 ) == 100 && f.requests == before + 2 && pool.used == 4 );
+    sd_cache_closed( &list, &pool, (void *)3 );
+
+    /* Two opens with the same chunk leave one copy of it. */
+    c = sd_cache_opened( &list, &pool, (void *)4, pk4, 0 );
+    assert( cached_read( c, &pool, &f, 1000, buf, 100 ) == 100 && f.requests == before + 3 && pool.used == 5 );
+    sd_cache_closed( &list, &pool, (void *)2 );
+    sd_cache_closed( &list, &pool, (void *)4 );
+    assert( !list && pool.used == 4 );
+
+    /* A writer's open of the path leaves nothing of it, and keeps nothing itself. */
+    a = sd_cache_opened( &list, &pool, (void *)5, pk4, 1 );
+    assert( pool.used == 1 );
+    assert( cached_read( a, &pool, &f, 1000, buf, 100 ) == 100 && pool.used == 2 );
+    sd_cache_closed( &list, &pool, (void *)5 );
+    assert( pool.used == 1 );
+
+    /* A write to the path, through another open. */
+    a = sd_cache_opened( &list, &pool, (void *)6, pk4, 0 );
+    assert( cached_read( a, &pool, &f, 1000, buf, 100 ) == 100 );
+    sd_cache_closed( &list, &pool, (void *)6 );
+    assert( pool.used == 2 );
+    sd_cache_written( list, &pool, "sdmc:/ROMS/windows/doom 3/base/pak002.pk4" );
+    assert( pool.used == 1 );
+
+    /* A rename of its folder (sd_cache_forget_path), and with nothing left
+     * held the shelf goes too. */
+    sd_cache_forget_path( list, &pool, "sdmc:/Roms/Windows/Doom 3" );
+    assert( !pool.used && !pool.held && !pool.shelf );
+
+    /* A full pool takes the chunk read longest ago, shelved or not. */
+    pool.max = 2;
+    a = sd_cache_opened( &list, &pool, (void *)7, pk4, 0 );
+    assert( cached_read( a, &pool, &f, 0, buf, 10 ) == 10 );
+    assert( cached_read( a, &pool, &f, SD_CACHE_CHUNK, buf, 10 ) == 10 );
+    sd_cache_closed( &list, &pool, (void *)7 );
+    c = sd_cache_opened( &list, &pool, (void *)8, other, 0 );
+    before = f.requests;
+    assert( cached_read( c, &pool, &f, 0, buf, 10 ) == 10 && f.requests == before + 1 && pool.used == 2 );
+    b = sd_cache_opened( &list, &pool, (void *)9, pk4, 0 );
+    assert( cached_read( b, &pool, &f, SD_CACHE_CHUNK + 1, buf, 10 ) == 10 && f.requests == before + 1 );
+    assert( !memcmp( buf, f.data + SD_CACHE_CHUNK + 1, 10 ) );
+    assert( cached_read( b, &pool, &f, 1, buf, 10 ) == 10 && f.requests == before + 2 );
+    assert( !memcmp( buf, f.data + 1, 10 ) && pool.used == 2 );
+
+    /* An untracked writer: nothing is kept from then on. */
+    sd_cache_closed( &list, &pool, (void *)8 );
+    pool.no_shelf = 1;
+    sd_cache_shelf_forget( &pool, NULL );
+    sd_cache_closed( &list, &pool, (void *)9 );
+    assert( !list && !pool.used && !pool.held && !pool.shelf );
     free( f.data );
 }
 
@@ -551,8 +645,9 @@ int main(void)
     test_readahead();
     test_replay();
     test_open_files();
+    test_shelf();
     puts( "SD read cache: sprite reads, end of file, least recently used, failures, a full pool taking the "
           "oldest chunk of any file, 300 open files, a pool that grows and shrinks with the free heap, "
-          "readahead, and open files a program writes to passed" );
+          "readahead, and open files a program writes to, and a closed reader's chunks for the next open of its path passed" );
     return 0;
 }

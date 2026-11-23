@@ -65,6 +65,15 @@ struct sd_cache_line
  * whose packages are read all run long, and The Sims 2 plays with about a
  * gigabyte of the heap untouched. cap is what held can list, so max can grow
  * without the list moving. */
+/* A chunk of a file read and closed, kept for the next open of its path
+ * (sd_cache_shelve): its line is in the pool's held list like any other, and
+ * the slot is free while line.data is NULL. */
+struct sd_cache_shelved
+{
+    struct sd_cache_line line;
+    char *path;
+};
+
 struct sd_cache_pool
 {
     unsigned int used, max;        /* chunks allocated for all files, and the limit */
@@ -72,7 +81,21 @@ struct sd_cache_pool
     unsigned int fill_min;         /* the smallest fill, or 0 for whole chunks */
     unsigned long long clock;      /* counts every chunk read, across files */
     struct sd_cache_line **held;   /* the lines holding a chunk, used of them */
+    struct sd_cache_shelved *shelf;  /* shelf_size slots, allocated with the first */
+    unsigned int shelf_size;
+    int no_shelf;                  /* a writer could not be followed: nothing is kept */
 };
+
+/* With no chunk held anywhere, no slot holds one either. */
+static inline void sd_cache_shelf_free( struct sd_cache_pool *pool )
+{
+    unsigned int i;
+
+    for (i = 0; i < pool->shelf_size; i++) free( pool->shelf[i].path );
+    free( pool->shelf );
+    pool->shelf = NULL;
+    pool->shelf_size = 0;
+}
 
 static inline void sd_cache_held_add( struct sd_cache_pool *pool, struct sd_cache_line *line )
 {
@@ -93,6 +116,7 @@ static inline void sd_cache_held_remove( struct sd_cache_pool *pool, struct sd_c
     {
         free( pool->held );
         pool->held = NULL;
+        sd_cache_shelf_free( pool );
     }
 }
 
@@ -263,6 +287,146 @@ static inline struct sd_cache_line *sd_cache_victim( struct sd_cache_file *file 
     return victim;
 }
 
+/* FAT ignores ASCII case, repeated and trailing slashes name the same file,
+ * and a path without a device is on sdmc, the default device. */
+static inline int sd_cache_same_path( const char *a, const char *b )
+{
+    if (!strncmp( a, "sdmc:", 5 )) a += 5;
+    if (!strncmp( b, "sdmc:", 5 )) b += 5;
+    for (;;)
+    {
+        char ca, cb;
+
+        while (a[0] == '/' && (a[1] == '/' || !a[1])) a++;
+        while (b[0] == '/' && (b[1] == '/' || !b[1])) b++;
+        ca = *a;
+        cb = *b;
+        if (ca >= 'A' && ca <= 'Z') ca += 'a' - 'A';
+        if (cb >= 'A' && cb <= 'Z') cb += 'a' - 'A';
+        if (ca != cb) return 0;
+        if (!ca) return 1;
+        a++;
+        b++;
+    }
+}
+
+/* Whether path a is b, or lies under the directory b; any path when b is
+ * NULL. */
+static inline int sd_cache_under_path( const char *a, const char *b )
+{
+    if (!b) return 1;
+    if (!strncmp( a, "sdmc:", 5 )) a += 5;
+    if (!strncmp( b, "sdmc:", 5 )) b += 5;
+    for (;;)
+    {
+        char ca, cb;
+
+        while (a[0] == '/' && (a[1] == '/' || !a[1])) a++;
+        while (b[0] == '/' && (b[1] == '/' || !b[1])) b++;
+        ca = *a;
+        cb = *b;
+        if (!cb) return !ca || ca == '/';
+        if (ca >= 'A' && ca <= 'Z') ca += 'a' - 'A';
+        if (cb >= 'A' && cb <= 'Z') cb += 'a' - 'A';
+        if (ca != cb) return 0;
+        a++;
+        b++;
+    }
+}
+
+/* The shelved chunk of path that holds offset. */
+static inline struct sd_cache_shelved *sd_cache_shelf_find( struct sd_cache_pool *pool, const char *path,
+                                                            long long offset )
+{
+    unsigned int i;
+
+    for (i = 0; i < pool->shelf_size; i++)
+    {
+        struct sd_cache_shelved *slot = &pool->shelf[i];
+
+        if (slot->line.data && slot->line.start >= 0 && offset >= slot->line.start &&
+            offset < slot->line.start + (long long)slot->line.len && sd_cache_same_path( slot->path, path ))
+            return slot;
+    }
+    return NULL;
+}
+
+/* What is shelved of path, or of anything under the directory path, or of
+ * everything (NULL), is out of date: written, truncated, renamed, deleted. */
+static inline void sd_cache_shelf_forget( struct sd_cache_pool *pool, const char *path )
+{
+    unsigned int i;
+
+    for (i = 0; i < pool->shelf_size; i++)
+    {
+        struct sd_cache_shelved *slot = &pool->shelf[i];
+
+        if (!slot->path || !sd_cache_under_path( slot->path, path )) continue;
+        free( slot->path );
+        slot->path = NULL;
+        if (!slot->line.data) continue;
+        free( slot->line.data );
+        memset( &slot->line, 0, sizeof(slot->line) );
+        slot->line.start = -1;
+        sd_cache_held_remove( pool, &slot->line );
+        if (!pool->shelf) return;  /* that was the last chunk held, and the shelf went with it */
+    }
+}
+
+/* A file read and closed leaves its chunks for the next open of its path,
+ * in the pool with every other chunk until it needs them. Doom 3 opens its
+ * pk4 archive again for every file it reads from it (unzReOpen), and each
+ * open started with nothing: the card gave 1.9 GB of the archives for the
+ * 0.3 GB the game asked for while a level loaded. */
+static inline void sd_cache_shelve( struct sd_cache_file *file, struct sd_cache_pool *pool )
+{
+    unsigned int i, j, size = pool->cap ? pool->cap : pool->max;
+
+    if (pool->no_shelf || !file->path) return;
+    if (!pool->shelf)
+    {
+        if (!size || !(pool->shelf = calloc( size, sizeof(*pool->shelf) ))) return;
+        pool->shelf_size = size;
+    }
+    for (i = 0; i < SD_CACHE_LINES; i++)
+    {
+        struct sd_cache_line *line = &file->lines[i];
+        struct sd_cache_shelved *slot = NULL;
+
+        if (!line->data || line->start < 0) continue;
+        for (j = 0; j < pool->shelf_size; j++)
+        {
+            struct sd_cache_shelved *other = &pool->shelf[j];
+
+            if (!other->line.data)
+            {
+                if (!slot) slot = other;
+                continue;
+            }
+            /* Two opens read the same chunk: one copy is enough. */
+            if (other->line.start == line->start && sd_cache_same_path( other->path, file->path ))
+            {
+                if (other->line.used_at < line->used_at) other->line.used_at = line->used_at;
+                slot = NULL;
+                break;
+            }
+        }
+        if (!slot) continue;
+        if (!slot->path || !sd_cache_same_path( slot->path, file->path ))
+        {
+            char *path = strdup( file->path );
+
+            if (!path) continue;
+            free( slot->path );
+            slot->path = path;
+        }
+        slot->line = *line;
+        sd_cache_held_replace( pool, line, &slot->line );
+        memset( line, 0, sizeof(*line) );
+        line->start = -1;
+    }
+}
+
 /* Copy size bytes at offset into buf, filling chunks through fill. Returns the
  * bytes copied (fewer only at the end of the file), -1 when a request fails
  * before anything was copied, or SD_CACHE_BYPASS when no chunk can be
@@ -279,7 +443,36 @@ static inline long long sd_cache_read( struct sd_cache_file *file, struct sd_cac
         struct sd_cache_line *line = sd_cache_line_for( file, at );
         size_t skip, count;
 
-        if (!line)
+        struct sd_cache_shelved *shelved;
+
+        if (!line && file->path && pool->shelf && (shelved = sd_cache_shelf_find( pool, file->path, at )))
+        {
+            /* An earlier open of the path read it: the chunk comes off the
+             * shelf, and the one it replaces here goes there in its place. */
+            line = sd_cache_victim( file );
+            if (line->data && line->start >= 0)
+            {
+                struct sd_cache_line kept = *line;
+
+                *line = shelved->line;
+                shelved->line = kept;
+            }
+            else
+            {
+                if (line->data)  /* a buffer holding nothing */
+                {
+                    free( line->data );
+                    line->data = NULL;
+                    sd_cache_held_remove( pool, line );
+                }
+                *line = shelved->line;
+                sd_cache_held_replace( pool, &shelved->line, line );
+                memset( &shelved->line, 0, sizeof(shelved->line) );
+                shelved->line.start = -1;
+            }
+            line->lru = 0x80000000u;
+        }
+        else if (!line)
         {
             long long start, got;
             unsigned int window;
@@ -335,29 +528,6 @@ static inline long long sd_cache_read( struct sd_cache_file *file, struct sd_cac
     return (long long)done;
 }
 
-/* FAT ignores ASCII case, repeated and trailing slashes name the same file,
- * and a path without a device is on sdmc, the default device. */
-static inline int sd_cache_same_path( const char *a, const char *b )
-{
-    if (!strncmp( a, "sdmc:", 5 )) a += 5;
-    if (!strncmp( b, "sdmc:", 5 )) b += 5;
-    for (;;)
-    {
-        char ca, cb;
-
-        while (a[0] == '/' && (a[1] == '/' || !a[1])) a++;
-        while (b[0] == '/' && (b[1] == '/' || !b[1])) b++;
-        ca = *a;
-        cb = *b;
-        if (ca >= 'A' && ca <= 'Z') ca += 'a' - 'A';
-        if (cb >= 'A' && cb <= 'Z') cb += 'a' - 'A';
-        if (ca != cb) return 0;
-        if (!ca) return 1;
-        a++;
-        b++;
-    }
-}
-
 static inline struct sd_cache_file *sd_cache_find( struct sd_cache_file *list, void *key )
 {
     for (; list; list = list->next) if (list->key == key) return list;
@@ -367,6 +537,7 @@ static inline struct sd_cache_file *sd_cache_find( struct sd_cache_file *list, v
 /* Stop caching every open file with this path. */
 static inline void sd_cache_forget_path( struct sd_cache_file *list, struct sd_cache_pool *pool, const char *path )
 {
+    sd_cache_shelf_forget( pool, path );
     for (; list; list = list->next)
     {
         if (!sd_cache_same_path( list->path, path )) continue;
@@ -379,6 +550,7 @@ static inline void sd_cache_forget_path( struct sd_cache_file *list, struct sd_c
  * date, and is dropped. They stay cached, and read the card again. */
 static inline void sd_cache_written( struct sd_cache_file *list, struct sd_cache_pool *pool, const char *path )
 {
+    sd_cache_shelf_forget( pool, path );
     for (; list; list = list->next)
         if (sd_cache_same_path( list->path, path )) sd_cache_drop( list, pool );
 }
@@ -398,6 +570,9 @@ static inline struct sd_cache_file *sd_cache_opened( struct sd_cache_file **list
     file->key = key;
     file->writable = writable;
     file->cacheable = 1;
+    /* A writer's bytes may reach the card from it alone, without a reader
+     * to see them: what was shelved of the path is not kept past it. */
+    if (writable) sd_cache_shelf_forget( pool, path );
     /* What a writer of this path left behind is not what this open will read. */
     for (other = *list; other; other = other->next)
         if (other->writable && sd_cache_same_path( other->path, path )) sd_cache_drop( other, pool );
@@ -414,6 +589,7 @@ static inline void sd_cache_closed( struct sd_cache_file **list, struct sd_cache
     {
         if (file->key != key) continue;
         *prev = file->next;
+        if (file->cacheable && !file->writable) sd_cache_shelve( file, pool );
         sd_cache_drop( file, pool );
         free( file->path );
         free( file );

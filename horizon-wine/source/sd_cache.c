@@ -460,7 +460,9 @@ static int sd_cache_open( struct _reent *r, void *fd, const char *path, int flag
     {
         /* Without a record of this writer, its readers cannot be told apart. */
         sd_cache_off = 1;
+        sd_cache_pool.no_shelf = 1;
         for (file = sd_cache_files; file; file = file->next) sd_cache_drop( file, &sd_cache_pool );
+        sd_cache_shelf_forget( &sd_cache_pool, NULL );
     }
     if (flags & O_TRUNC) sd_cache_written( sd_cache_files, &sd_cache_pool, path );
     if (flags & (O_CREAT | O_TRUNC)) sd_stat_changed( path );
