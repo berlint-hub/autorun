@@ -124,8 +124,10 @@ Without a network, download that repository (Code, Download ZIP) and unzip its
 games, settings and artwork stay. Every push to `main` releases its build as
 `autorun-<run>-<commit>` (the build workflow), so the console updates itself
 from this repository without the archive going through a computer: both
-runtimes (the nxvk one too) and their symbol files are replaced, and the
-Windows DLLs come from the DLL repository at the next start. A release of the
+runtimes (the nxvk one too) and their symbol files are replaced, and at the
+first start after it the launcher downloads the Windows DLLs that changed in
+the DLL repository it follows (**Settings -> System -> Windows DLLs**, Source)
+without asking; a game started meanwhile waits for them. A release of the
 build the card already runs is not offered.
 
 An update from a release up to `autorun-232` stopped on the symbol file that

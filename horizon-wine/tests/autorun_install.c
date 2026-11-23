@@ -134,7 +134,10 @@ int main(int argc, char **argv)
         if (result != AUTORUN_INSTALL_OK) fprintf(stderr, "%s\n", autorun_install_error(result));
         assert(result == AUTORUN_INSTALL_OK);
         assert(autorun_install_recover(argv[1], 0) == 1);
-        assert(autorun_install_finish(argv[1]));
+        /* The first start after the update is told so (the launcher then
+         * brings the DLLs); the next one finds nothing to finish. */
+        assert(autorun_install_finish(argv[1]) == 2);
+        assert(autorun_install_finish(argv[1]) == 1);
     }
     return 0;
 }

@@ -4840,7 +4840,7 @@ int wine_nx_launcher_run( struct wine_nx_launcher_options *options, char *target
     const void *font = NULL;
     size_t font_size = 0;
     char path[512];
-    int ret, i, added, missing;
+    int ret, i, added, missing, updated;
     Uint32 started;
 
     memset( l, 0, sizeof(*l) );
@@ -4932,8 +4932,8 @@ int wine_nx_launcher_run( struct wine_nx_launcher_options *options, char *target
         if (!strcasecmp( p->path, target ) || !strcasecmp( p->dos, target )) l->history_selection = i;
     }
     preload_art( l );
-    if (!autorun_install_finish( options->runtime_dir ))
-        ui_toast( &l->ui, "The update recovery files could not be cleared.", 5000 );
+    updated = autorun_install_finish( options->runtime_dir );
+    if (!updated) ui_toast( &l->ui, "The update recovery files could not be cleared.", 5000 );
     l->update = launcher_update_create( &l->ui, options->runtime_dir, options->schedule_restart );
     /* A program on Carafe's FEX build left that build in system32, where the
      * Windows DLLs check that starts next would take it for a file to replace:
@@ -4951,6 +4951,13 @@ int wine_nx_launcher_run( struct wine_nx_launcher_options *options, char *target
     default: break;
     }
     l->dlls = launcher_dlls_create( &l->ui, options->runtime_dir );
+    /* The first start after Autorun updated itself: the DLLs the new runtime
+     * goes with come too, as the check finds them, without asking. */
+    if (updated == 2)
+    {
+        launcher_log( "[LAUNCHER] Autorun was just updated: the Windows DLLs follow once the check is done" );
+        launcher_dlls_after_update( l->dlls );
+    }
     l->fixes = launcher_fixes_create( &l->ui, options->runtime_dir );
     l->graphics = launcher_graphics_create( &l->ui, options->runtime_dir );
     l->ui.background_tick = background_tick;

@@ -16,6 +16,9 @@ enum autorun_install_result autorun_install_archive( const char *runtime_dir, co
     const char *tag, int require_amd64, autorun_install_progress progress, void *opaque );
 /* -1: recovery failed, 0: no transaction, 1: installed, 2: rolled back. */
 int autorun_install_recover( const char *runtime_dir, int restore );
+/* Clears an installed update's recovery files: 0 when they could not be
+ * cleared, 1 when there were none, 2 when an update was just finished, so the
+ * runtime runs for the first time after it. */
 int autorun_install_finish( const char *runtime_dir );
 int autorun_installed_release( const char *runtime_dir, char *tag, size_t size );
 const char *autorun_install_error( enum autorun_install_result result );

@@ -24,6 +24,10 @@ struct launcher_dlls
     /* The worker's while it runs, the launcher's between jobs. */
     struct horizon_dll_manifest remote, local;
     int have_remote, have_local, planned, notify;
+    /* Autorun has just updated itself (launcher_dlls_after_update): the
+     * check's plan is downloaded without asking (1), and that download is
+     * running in the background (2). */
+    int after_update;
     struct horizon_dlls_plan plan;
     enum horizon_dlls_result result;
     /* What the worker is doing, under the mutex. */
@@ -267,7 +271,31 @@ static int finish( struct launcher_dlls *d )
 
 void launcher_dlls_tick( struct launcher_dlls *d )
 {
-    if (!d || !finish( d ) || !d->notify || d->ui->modal_depth) return;
+    int job;
+
+    if (!d) return;
+    job = d->job;
+    if (!finish( d )) return;
+    if (d->after_update == 1 && job == JOB_CHECK)
+    {
+        d->after_update = 0;
+        if (d->have_remote && d->planned && d->plan.pending && start( d, JOB_APPLY ))
+        {
+            d->after_update = 2;
+            d->notify = 0;
+            if (!d->ui->modal_depth) ui_notice( d->ui, "Updating the Windows DLLs for the new Autorun" );
+            return;
+        }
+    }
+    else if (d->after_update == 2 && job == JOB_APPLY)
+    {
+        d->after_update = 0;
+        if (!d->ui->modal_depth)
+            ui_notice( d->ui, d->result == HORIZON_DLLS_OK ? "Windows DLLs updated for the new Autorun"
+                                                           : horizon_dlls_error( d->result ) );
+        return;
+    }
+    if (!d->notify || d->ui->modal_depth) return;
     d->notify = 0;
     if (!ready( d, NULL, 0 ))
         ui_notice( d->ui, "Windows DLLs needed: Settings > System > Windows DLLs" );
@@ -289,6 +317,11 @@ struct launcher_dlls *launcher_dlls_create( struct ui *ui, const char *root )
     d->fork = read_source( d->root );
     start( d, JOB_CHECK );
     return d;
+}
+
+void launcher_dlls_after_update( struct launcher_dlls *d )
+{
+    if (d) d->after_update = 1;
 }
 
 void launcher_dlls_destroy( struct launcher_dlls *d )
@@ -355,6 +388,12 @@ static void draw_progress( struct launcher_dlls *d, const char *title )
     ui_present( ui );
 }
 
+/* What a wait for the job running in the background says it is. */
+static const char *waiting_title( const struct launcher_dlls *d )
+{
+    return d->job == JOB_APPLY ? "Downloading Windows DLLs" : "Checking the DLL repository";
+}
+
 /* A job with its progress over the screen, B to stop it; with JOB_NONE,
  * waits for the one already running. Returns its result. */
 static enum horizon_dlls_result run( struct launcher_dlls *d, int job, const char *title )
@@ -372,7 +411,9 @@ static enum horizon_dlls_result run( struct launcher_dlls *d, int job, const cha
                 ui_sound( d->ui, LAUNCHER_SOUND_BACK );
                 SDL_AtomicSet( &d->cancel, 1 );
             }
-        draw_progress( d, title );
+        /* A wait names what runs, which the download after an update may
+         * have followed the check with meanwhile (launcher_dlls_tick). */
+        draw_progress( d, job == JOB_NONE ? waiting_title( d ) : title );
         ui_wait( d->ui );
     }
     if (d->thread)  /* the launcher is closing */
@@ -382,6 +423,9 @@ static enum horizon_dlls_result run( struct launcher_dlls *d, int job, const cha
         d->thread = NULL;
         d->job = JOB_NONE;
     }
+    /* A download after an update that this waited for is over, as is one
+     * still to start: the screen that waited goes on from here. */
+    d->after_update = 0;
     ui_progress_end( d->ui );
     return d->result;
 }
@@ -425,7 +469,7 @@ void launcher_dlls_open( struct launcher_dlls *d )
 
     if (!d) return;
     d->notify = 0;
-    if (d->thread) run( d, JOB_NONE, "Checking the DLL repository" );
+    if (d->thread) run( d, JOB_NONE, waiting_title( d ) );
     else if (!d->planned) run( d, JOB_CHECK, "Checking the DLL repository" );
     while (ui->running)
     {
@@ -521,7 +565,7 @@ int launcher_dlls_is_ready( struct launcher_dlls *d )
 /* The check and a plan, waiting for the one running in the background. */
 static void settle( struct launcher_dlls *d )
 {
-    if (d->thread) run( d, JOB_NONE, "Checking the DLL repository" );
+    if (d->thread) run( d, JOB_NONE, waiting_title( d ) );
     if (!d->have_remote) run( d, JOB_CHECK, "Checking the DLL repository" );
 }
 
@@ -541,6 +585,16 @@ int launcher_dlls_ready( struct launcher_dlls *d )
 {
     char why[160], text[512];
 
+    /* The DLLs that follow an update of Autorun come before the game: the
+     * download running, or the check it waits for and then the download. */
+    if (d && d->after_update)
+    {
+        int download = d->after_update == 1;
+
+        if (d->thread) run( d, JOB_NONE, waiting_title( d ) );
+        if (download && d->have_remote && d->planned && d->plan.pending)
+            run( d, JOB_APPLY, "Downloading Windows DLLs" );
+    }
     if (!d || ready( d, why, sizeof(why) )) return 1;
     snprintf( text, sizeof(text), "This game needs the Windows DLLs Autorun downloads from its DLL repository. %s\n\n"
               "Download them in Windows DLLs; the game starts when you come back with them there.", why );

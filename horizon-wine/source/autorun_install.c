@@ -468,7 +468,7 @@ int autorun_install_finish( const char *root )
         erase( path );
     }
     free( p );
-    return ok;
+    return ok ? 2 : 0;
 }
 
 int autorun_installed_release( const char *root, char *tag, size_t size )

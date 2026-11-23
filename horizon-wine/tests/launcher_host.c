@@ -54,6 +54,7 @@ void launcher_update_destroy( struct launcher_update *update ) { (void)update; }
 int autorun_install_finish( const char *root ) { (void)root; return 1; }
 /* The DLL manager has its own test (check-horizon-dlls.sh); here the card has them. */
 struct launcher_dlls *launcher_dlls_create( struct ui *ui, const char *root ) { (void)ui; (void)root; return NULL; }
+void launcher_dlls_after_update( struct launcher_dlls *dlls ) { (void)dlls; }
 void launcher_dlls_tick( struct launcher_dlls *dlls ) { (void)dlls; }
 void launcher_dlls_open( struct launcher_dlls *dlls ) { (void)dlls; }
 int launcher_dlls_ready( struct launcher_dlls *dlls ) { (void)dlls; return 1; }

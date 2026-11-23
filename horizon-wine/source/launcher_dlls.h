@@ -11,6 +11,11 @@ struct launcher_dlls;
 
 /* Starts checking the repository in the background. */
 struct launcher_dlls *launcher_dlls_create( struct ui *ui, const char *runtime_dir );
+/* Autorun has just updated itself: once the check is done, what the
+ * repository has new or changed for the card is downloaded in the background
+ * without asking, as the new runtime goes with it. A game started meanwhile
+ * waits for it. */
+void launcher_dlls_after_update( struct launcher_dlls *dlls );
 void launcher_dlls_tick( struct launcher_dlls *dlls );
 void launcher_dlls_open( struct launcher_dlls *dlls );
 /* 1 when the card can start a program. When it cannot, says so and offers the
