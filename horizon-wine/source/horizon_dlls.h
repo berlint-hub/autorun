@@ -34,8 +34,14 @@
 #define HORIZON_DLLS_FORK_RAW "https://raw.githubusercontent.com/" HORIZON_DLLS_FORK_OWNER "/autorun-horizon-dlls/"
 #define HORIZON_DLLS_FORK_MANIFEST_URL HORIZON_DLLS_FORK_RAW "main/switch/wine/horizon-dlls/manifest.json"
 /* Which of the two the card follows, a line of text beside its manifest:
- * "fork", or anything else (or no file) for the first. */
+ * "fork" or "autorun". Without one, a card follows the fork when this build
+ * is the fork's (HORIZON_DLLS_DEFAULT_FORK): its runtime runs the fork's
+ * modules, and what Autorun's repository has of them may need another
+ * runtime, which leaves the card with older ones. */
 #define HORIZON_DLLS_SOURCE "horizon-dlls/source.txt"
+#ifndef HORIZON_DLLS_DEFAULT_FORK
+#define HORIZON_DLLS_DEFAULT_FORK 1
+#endif
 /* Relative to the runtime directory, as in the repository under switch/wine. */
 #define HORIZON_DLLS_MANIFEST "horizon-dlls/manifest.json"
 #define HORIZON_DLLS_CLASSES  "horizon-dlls/classes.reg"

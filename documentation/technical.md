@@ -188,7 +188,10 @@ against the manifest's size and SHA-256, then put in place. Starting a game on
 a card without them offers them first. **Source** in that screen chooses which
 repository the card follows: Autorun's, or the fork of it named in
 `source/horizon_dlls.h` (`HORIZON_DLLS_FORK_OWNER`), for DLLs built from a
-fork's own source. The choice is one word in `horizon-dlls/source.txt`; changing
+fork's own source. The choice is one word in `horizon-dlls/source.txt`, `fork`
+or `autorun`; a card without it follows the fork when the build is the fork's
+(`HORIZON_DLLS_DEFAULT_FORK`, on in this repository), as its runtime runs the
+fork's modules and Autorun's may need another runtime; changing
 it only reads the other manifest, and Update then replaces the files whose size
 or SHA-256 differ, either way round. A manifest may name files in either
 repository. A card that takes the whole set at once takes the fork's release,
