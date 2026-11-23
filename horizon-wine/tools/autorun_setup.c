@@ -90,7 +90,10 @@ static BOOL set_string( HKEY root, const WCHAR *path, const WCHAR *name, const W
 }
 
 /* What regsvr32 does for a DLL: load it and call its DllRegisterServer. One
- * that is not on the card is left out and does not count as a failure. */
+ * that is not on the card is left out and does not count as a failure, nor
+ * does one without a DllRegisterServer, which has nothing to register (Wine's
+ * msdmo and mciqtz32: DMOs register through DMORegister, MCI drivers in
+ * wine.inf). */
 static BOOL register_dll( const WCHAR *name )
 {
     HRESULT (WINAPI *register_server)(void);
@@ -106,9 +109,9 @@ static BOOL register_dll( const WCHAR *name )
     }
     if (!(register_server = (void *)GetProcAddress( module, "DllRegisterServer" )))
     {
-        report( "register", name, "has no DllRegisterServer, error", GetLastError() );
+        report( "register", name, "nothing to register (no DllRegisterServer), error", GetLastError() );
         FreeLibrary( module );
-        return FALSE;
+        return TRUE;
     }
     hr = register_server();
     report( "register", name, SUCCEEDED(hr) ? "ok, hr" : "failed, hr", (DWORD)hr );
