@@ -106,9 +106,20 @@ static int card_stat( struct _reent *r, const char *path, struct stat *st )
     return card_fstat( r, NULL, st );
 }
 
+static int card_unlink( struct _reent *r, const char *path ) { (void)r; (void)path; return 0; }
+
+static int card_rename( struct _reent *r, const char *from, const char *to )
+{
+    (void)r;
+    (void)from;
+    (void)to;
+    return 0;
+}
+
 static const devoptab_t card = {
     .open_r = card_open, .close_r = card_close, .read_r = card_read, .write_r = card_write,
     .seek_r = card_seek, .fstat_r = card_fstat, .stat_r = card_stat,
+    .unlink_r = card_unlink, .rename_r = card_rename,
 };
 
 static void reset(void)
@@ -116,6 +127,9 @@ static void reset(void)
     size_t i;
 
     while (sd_cache_files) sd_cache_close( &test_reent, sd_cache_files->key );
+    /* What closed readers left for the next open of their paths. */
+    sd_cache_shelf_forget( &sd_cache_pool, NULL );
+    sd_cache_pool.no_shelf = 0;
     sd_stat_forget_all( &sd_stat_cache );
     memset( sd_cache_closed_tally, 0, sizeof(sd_cache_closed_tally) );
     assert( !sd_cache_pool.used && !sd_cache_pool.held && !sd_write_buffers );
@@ -263,6 +277,52 @@ static void test_tiny_reads(void)
     assert( sd_cache_pool.used <= SD_CACHE_LINES );
 }
 
+/* Doom 3 opens its pk4 archive again for every file it reads from it: what a
+ * reader read stays for the next open of the path, and a writer's open of it,
+ * a write, a rename of it or of its folder, or its deletion, sends the next
+ * read to the card again. */
+static void test_reopen(void)
+{
+    static const char pk4[] = "sdmc:/Roms/Windows/Doom 3/base/pak002.pk4";
+
+    assert( !sd_cache_open( &test_reent, &reader, pk4, O_RDONLY, 0 ) );
+    assert( read_byte( &reader ) == data[0] && card_reads == 1 );
+    assert( !sd_cache_close( &test_reent, &reader ) );
+    assert( sd_cache_pool.used == 1 );
+    assert( !sd_cache_open( &test_reent, &reader, "/roms/windows/doom 3/BASE/pak002.pk4", O_RDONLY, 0 ) );
+    assert( read_byte( &reader ) == data[0] && card_reads == 1 );
+    assert( !sd_cache_close( &test_reent, &reader ) );
+
+    /* A writer's open of the path. */
+    assert( !sd_cache_open( &test_reent, &writer, pk4, O_RDWR, 0 ) );
+    assert( !sd_cache_pool.used );
+    assert( !sd_cache_seek( &test_reent, &writer, 0, SEEK_SET ) );
+    assert( sd_cache_write_file( &test_reent, &writer, "Q", 1 ) == 1 );
+    assert( !sd_cache_close( &test_reent, &writer ) && data[0] == 'Q' );
+    assert( !sd_cache_open( &test_reent, &reader, pk4, O_RDONLY, 0 ) );
+    assert( read_byte( &reader ) == 'Q' && card_reads == 2 );
+    assert( !sd_cache_close( &test_reent, &reader ) && sd_cache_pool.used == 1 );
+
+    /* A write by an open made while the reader was closed, through a path
+     * spelled otherwise, is seen as well. */
+    assert( !sd_cache_open( &test_reent, &writer, "sdmc:/ROMS/Windows/Doom 3/base//PAK002.PK4", O_WRONLY, 0 ) );
+    assert( sd_cache_write_file( &test_reent, &writer, "R", 1 ) == 1 );
+    assert( !sd_cache_close( &test_reent, &writer ) );
+    assert( !sd_cache_open( &test_reent, &reader, pk4, O_RDONLY, 0 ) );
+    assert( read_byte( &reader ) == 'R' && card_reads == 3 );
+    assert( !sd_cache_close( &test_reent, &reader ) );
+
+    /* Deleting the path, renaming it, or renaming its folder. */
+    assert( sd_cache_pool.used == 1 );
+    assert( !sd_cache_unlink( &test_reent, pk4 ) );
+    assert( !sd_cache_pool.used );
+    assert( !sd_cache_open( &test_reent, &reader, pk4, O_RDONLY, 0 ) );
+    read_byte( &reader );
+    assert( !sd_cache_close( &test_reent, &reader ) && sd_cache_pool.used == 1 );
+    assert( !sd_cache_rename( &test_reent, "sdmc:/Roms/Windows/Doom 3", "sdmc:/Roms/Windows/Doom3" ) );
+    assert( !sd_cache_pool.used );
+}
+
 /* [SDFILES]: what the card gave each open file against what was asked of it,
  * scattered small reads costing whole chunks, and big reads straight through. */
 static void test_report_files(void)
@@ -330,7 +390,7 @@ int main( int argc, char **argv )
         { "tracking-failure", test_tracking_failure }, { "truncate", test_truncate },
         { "held-write", test_held_write }, { "shared-write", test_shared_write },
         { "append", test_append }, { "tiny-reads", test_tiny_reads },
-        { "report-files", test_report_files },
+        { "report-files", test_report_files }, { "reopen", test_reopen },
     };
     unsigned int i;
 
