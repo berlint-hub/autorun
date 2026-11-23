@@ -363,6 +363,8 @@ unsigned int wine_nx_server_request_count = REQ_NB_REQUESTS;
 unsigned int wine_nx_server_calls[REQ_NB_REQUESTS];
 unsigned long long wine_nx_server_ticks[REQ_NB_REQUESTS];
 const char *wine_nx_server_names[REQ_NB_REQUESTS];
+/* The runtime's profiler, which records which x86 code made the request. */
+extern void wine_nx_prof_server_request( unsigned int code, void *teb ) __attribute__((weak));
 
 static int horizon_sync_call( struct __server_request_info *req )
 {
@@ -425,6 +427,7 @@ unsigned int server_call_unlocked( void *req_ptr )
         __atomic_store_n( &wine_nx_server_names[code], req->name, __ATOMIC_RELAXED );
         __atomic_add_fetch( &wine_nx_server_calls[code], 1, __ATOMIC_RELAXED );
         __atomic_add_fetch( &wine_nx_server_ticks[code], armGetSystemTick() - start, __ATOMIC_RELAXED );
+        if (wine_nx_prof_server_request) wine_nx_prof_server_request( code, NtCurrentTeb() );
     }
 #endif
     return ret;

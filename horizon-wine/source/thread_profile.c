@@ -1615,6 +1615,82 @@ static void profile_report( const struct nx_prof_row *rows, unsigned int count )
     pthread_mutex_unlock( &profile_mutex );
 }
 
+/* Which x86 code makes the server requests, while the profiler runs: one
+ * request in eight, by kind and by each of the first three guest return
+ * addresses above the system call (walk_x86, the x86 context exported at its
+ * gate). Doom 3 makes some ten thousand requests a second in places, most of
+ * them a handle duplicated, compared, queried and closed, and the counts alone
+ * do not say who for. */
+#define NX_PROF_SERVER_SAMPLE 8
+static pthread_mutex_t server_callers_mutex = PTHREAD_MUTEX_INITIALIZER;
+static struct nx_prof_table server_callers;
+static unsigned int server_sequence;
+
+void wine_nx_prof_server_request( unsigned int code, void *teb )
+{
+    uint32_t callers[NX_PROF_DEPTH];
+    unsigned int n, i;
+
+    if (code >= NX_PROF_MAX_REQUESTS ||
+        __atomic_add_fetch( &server_sequence, 1, __ATOMIC_RELAXED ) % NX_PROF_SERVER_SAMPLE) return;
+    n = walk_x86( (uint64_t)(uintptr_t)teb, callers );
+    pthread_mutex_lock( &server_callers_mutex );
+    if (n <= 1) nx_prof_add( &server_callers, ((uint64_t)code << 32) | NX_PROF_NO_SITE );
+    for (i = 1; i < n && i <= 3; i++) nx_prof_add( &server_callers, ((uint64_t)code << 32) | callers[i] );
+    pthread_mutex_unlock( &server_callers_mutex );
+}
+
+/* For the most frequent requests of the interval, the guest code they came
+ * from: about how many of them had each return address above them ("-" for
+ * none: a request of the runtime's own, or of a thread with no x86 frame). */
+static void server_callers_report( const unsigned int *calls, unsigned int count )
+{
+    static struct nx_prof_table table;
+    unsigned int codes[4], shown = 0, i, j, k;
+    char line[NX_PROF_LINE + 24], name[96];
+    int len;
+
+    pthread_mutex_lock( &server_callers_mutex );
+    table = server_callers;
+    memset( &server_callers, 0, sizeof(server_callers) );
+    pthread_mutex_unlock( &server_callers_mutex );
+    for (i = 0; i < count; i++)
+    {
+        if (!calls[i]) continue;
+        j = shown < 4 ? shown++ : 4;
+        for (; j > 0 && calls[codes[j - 1]] < calls[i]; j--)
+            if (j < 4) codes[j] = codes[j - 1];
+        if (j < 4) codes[j] = i;
+    }
+    for (k = 0; k < shown; k++)
+    {
+        unsigned int top[4] = {0}, found = 0, samples = 0;  /* samples: whether any */
+        const char *request = &wine_nx_server_names ? __atomic_load_n( &wine_nx_server_names[codes[k]], __ATOMIC_RELAXED ) : NULL;
+
+        for (i = 0; i < NX_PROF_BUCKETS; i++)
+        {
+            const struct nx_prof_bucket *bucket = &table.buckets[i];
+
+            if (!bucket->count || (bucket->key >> 32) != codes[k]) continue;
+            samples += bucket->count;
+            j = found < 4 ? found++ : 4;
+            for (; j > 0 && table.buckets[top[j - 1]].count < bucket->count; j--)
+                if (j < 4) top[j] = top[j - 1];
+            if (j < 4) top[j] = i;
+        }
+        if (!samples) continue;
+        len = appendf( line, 0, "[SERVER] %s %u from:", request ? request : "?", calls[codes[k]] );
+        for (j = 0; j < found; j++)
+        {
+            const struct nx_prof_bucket *bucket = &table.buckets[top[j]];
+
+            name_site( (uint32_t)bucket->key, 1, name, sizeof(name) );
+            len = appendf( line, len, " %s ~%u", name, bucket->count * NX_PROF_SERVER_SAMPLE );
+        }
+        wine_nx_runtime_trace( line );
+    }
+}
+
 /* The server requests that took the most time since the last report, with
  * calls, average and total. A wait (select) includes the time it waited. */
 static void server_report( void )
@@ -1656,6 +1732,7 @@ static void server_report( void )
                        ns / delta_calls[top[i]] / 1000, ns / 1000000 );
     }
     wine_nx_runtime_trace( line );
+    server_callers_report( delta_calls, count );
 }
 
 static void jit_dump_hex( FILE *file, const char *label, uint64_t address, uint64_t size )
