@@ -793,7 +793,7 @@ static BOOL nx_drawable_swap( struct opengl_drawable *base )
     start = horizon_interrupt_time() - start;
     __atomic_add_fetch( &wine_nx_gl_swap_time, start, __ATOMIC_RELAXED );
     __atomic_add_fetch( &wine_nx_gl_swaps, 1, __ATOMIC_RELAXED );
-    if (wine_nx_frame_presented) wine_nx_frame_presented( GetCurrentThreadId(), start );
+    if (ret && wine_nx_frame_presented) wine_nx_frame_presented( GetCurrentThreadId(), start );
     if (__atomic_load_n( &nx_osk_shown, __ATOMIC_ACQUIRE ))
         __atomic_store_n( &nx_screen_clears, NX_SCREEN_CLEARS, __ATOMIC_RELAXED );
     if (ret && __atomic_load_n( &p_glBindFramebuffer, __ATOMIC_ACQUIRE ))

@@ -4881,7 +4881,11 @@ static VkResult win32u_vkQueuePresentKHR( VkQueue client_queue, const VkPresentI
 #endif
     res = device->p_vkQueuePresentKHR( queue->host.queue, present_info );
 #ifdef __SWITCH__
-    nx_present_time = nx_present_clock() - nx_present_time;
+    {
+        unsigned long long end = nx_present_clock();
+
+        nx_present_time = end > nx_present_time ? end - nx_present_time : 0;
+    }
 #endif
     pthread_mutex_unlock( &present_lock );
 

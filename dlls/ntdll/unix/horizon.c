@@ -4324,9 +4324,6 @@ unsigned int horizon_get_processor_count(void)
     return count ? count : 1;
 }
 
-/* There is no sysinfo or /proc/meminfo on Horizon. The memory this process may
- * use is the meaningful "physical memory" for Windows programs, which size
- * caches, dictionaries and thread counts from GlobalMemoryStatusEx. */
 /* What GlobalMemoryStatusEx and the system information calls tell a program:
  * the console's figures, or with memory=N in its settings (WINE_NX_MEMORY_MB,
  * source/runtime.c) N MB in all, of which no more is free than really is. An
@@ -4354,6 +4351,9 @@ void horizon_get_reported_memory_info( unsigned long long *total, unsigned long 
     *used = *total - free;
 }
 
+/* There is no sysinfo or /proc/meminfo on Horizon. The memory this process may
+ * use is the meaningful "physical memory" for Windows programs, which size
+ * caches, dictionaries and thread counts from GlobalMemoryStatusEx. */
 void horizon_get_memory_info( unsigned long long *total, unsigned long long *used )
 {
     extern char *fake_heap_start, *fake_heap_end;
