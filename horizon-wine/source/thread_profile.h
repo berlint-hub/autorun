@@ -261,7 +261,10 @@ enum nx_prof_kind
 #define NX_PROF_CHAIN       NX_PROF_KINDS
 #define NX_PROF_X86_CALLERS (NX_PROF_KINDS + 1)
 #define NX_PROF_X86_FRAMES  (NX_PROF_KINDS + 2)
-#define NX_PROF_TABLES      (NX_PROF_KINDS + 3)
+/* For a system call sample, the two calls past those in the chain: who waits
+ * in a condition variable's wait, glthread's fence or a queue of its. */
+#define NX_PROF_WAIT_CHAIN  (NX_PROF_KINDS + 3)
+#define NX_PROF_TABLES      (NX_PROF_KINDS + 4)
 
 static inline enum nx_prof_kind nx_prof_classify( int translated, int in_runtime, int svc )
 {

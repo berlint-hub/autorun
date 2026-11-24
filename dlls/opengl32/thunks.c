@@ -148,7 +148,7 @@ void WINAPI glClearColor( GLfloat red, GLfloat green, GLfloat blue, GLfloat alph
     struct glClearColor_params args = { .teb = NtCurrentTeb(), .red = red, .green = green, .blue = blue, .alpha = alpha };
     NTSTATUS status;
     TRACE( "red %f, green %f, blue %f, alpha %f\n", red, green, blue, alpha );
-    if ((status = UNIX_CALL( glClearColor, &args ))) WARN( "glClearColor returned %#lx\n", status );
+    if ((status = UNIX_DEFER( glClearColor, &args ))) WARN( "glClearColor returned %#lx\n", status );
     set_context_attribute( GL_COLOR_CLEAR_VALUE, &args.red, 4 * sizeof(GLfloat) );
 }
 
@@ -157,7 +157,7 @@ void WINAPI glClearDepth( GLdouble depth )
     struct glClearDepth_params args = { .teb = NtCurrentTeb(), .depth = depth };
     NTSTATUS status;
     TRACE( "depth %f\n", depth );
-    if ((status = UNIX_CALL( glClearDepth, &args ))) WARN( "glClearDepth returned %#lx\n", status );
+    if ((status = UNIX_DEFER( glClearDepth, &args ))) WARN( "glClearDepth returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
 
@@ -175,7 +175,7 @@ void WINAPI glClearStencil( GLint s )
     struct glClearStencil_params args = { .teb = NtCurrentTeb(), .s = s };
     NTSTATUS status;
     TRACE( "s %d\n", s );
-    if ((status = UNIX_CALL( glClearStencil, &args ))) WARN( "glClearStencil returned %#lx\n", status );
+    if ((status = UNIX_DEFER( glClearStencil, &args ))) WARN( "glClearStencil returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
 
@@ -229,7 +229,7 @@ void WINAPI glColor3f( GLfloat red, GLfloat green, GLfloat blue )
     struct glColor3f_params args = { .teb = NtCurrentTeb(), .red = red, .green = green, .blue = blue };
     NTSTATUS status;
     TRACE( "red %f, green %f, blue %f\n", red, green, blue );
-    if ((status = UNIX_CALL( glColor3f, &args ))) WARN( "glColor3f returned %#lx\n", status );
+    if ((status = UNIX_DEFER( glColor3f, &args ))) WARN( "glColor3f returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
 
@@ -283,7 +283,7 @@ void WINAPI glColor3ub( GLubyte red, GLubyte green, GLubyte blue )
     struct glColor3ub_params args = { .teb = NtCurrentTeb(), .red = red, .green = green, .blue = blue };
     NTSTATUS status;
     TRACE( "red %d, green %d, blue %d\n", red, green, blue );
-    if ((status = UNIX_CALL( glColor3ub, &args ))) WARN( "glColor3ub returned %#lx\n", status );
+    if ((status = UNIX_DEFER( glColor3ub, &args ))) WARN( "glColor3ub returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
 
@@ -603,7 +603,7 @@ void WINAPI glDepthRange( GLdouble n, GLdouble f )
     struct glDepthRange_params args = { .teb = NtCurrentTeb(), .n = n, .f = f };
     NTSTATUS status;
     TRACE( "n %f, f %f\n", n, f );
-    if ((status = UNIX_CALL( glDepthRange, &args ))) WARN( "glDepthRange returned %#lx\n", status );
+    if ((status = UNIX_DEFER( glDepthRange, &args ))) WARN( "glDepthRange returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
 
@@ -1423,7 +1423,7 @@ void WINAPI glLineWidth( GLfloat width )
     struct glLineWidth_params args = { .teb = NtCurrentTeb(), .width = width };
     NTSTATUS status;
     TRACE( "width %f\n", width );
-    if ((status = UNIX_CALL( glLineWidth, &args ))) WARN( "glLineWidth returned %#lx\n", status );
+    if ((status = UNIX_DEFER( glLineWidth, &args ))) WARN( "glLineWidth returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
 
@@ -1822,7 +1822,7 @@ void WINAPI glPointSize( GLfloat size )
     struct glPointSize_params args = { .teb = NtCurrentTeb(), .size = size };
     NTSTATUS status;
     TRACE( "size %f\n", size );
-    if ((status = UNIX_CALL( glPointSize, &args ))) WARN( "glPointSize returned %#lx\n", status );
+    if ((status = UNIX_DEFER( glPointSize, &args ))) WARN( "glPointSize returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
 
@@ -1831,7 +1831,7 @@ void WINAPI glPolygonMode( GLenum face, GLenum mode )
     struct glPolygonMode_params args = { .teb = NtCurrentTeb(), .face = face, .mode = mode };
     NTSTATUS status;
     TRACE( "face %d, mode %d\n", face, mode );
-    if ((status = UNIX_CALL( glPolygonMode, &args ))) WARN( "glPolygonMode returned %#lx\n", status );
+    if ((status = UNIX_DEFER( glPolygonMode, &args ))) WARN( "glPolygonMode returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
 
@@ -2295,7 +2295,7 @@ void WINAPI glScissor( GLint x, GLint y, GLsizei width, GLsizei height )
     struct glScissor_params args = { .teb = NtCurrentTeb(), .x = x, .y = y, .width = width, .height = height };
     NTSTATUS status;
     TRACE( "x %d, y %d, width %d, height %d\n", x, y, width, height );
-    if ((status = UNIX_CALL( glScissor, &args ))) WARN( "glScissor returned %#lx\n", status );
+    if ((status = UNIX_DEFER( glScissor, &args ))) WARN( "glScissor returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
 
@@ -3100,7 +3100,7 @@ static void WINAPI glActiveStencilFaceEXT( GLenum face )
     struct glActiveStencilFaceEXT_params args = { .teb = NtCurrentTeb(), .face = face };
     NTSTATUS status;
     TRACE( "face %d\n", face );
-    if ((status = UNIX_CALL( glActiveStencilFaceEXT, &args ))) WARN( "glActiveStencilFaceEXT returned %#lx\n", status );
+    if ((status = UNIX_DEFER( glActiveStencilFaceEXT, &args ))) WARN( "glActiveStencilFaceEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
 
@@ -4150,7 +4150,7 @@ static void WINAPI glBlendEquation( GLenum mode )
     struct glBlendEquation_params args = { .teb = NtCurrentTeb(), .mode = mode };
     NTSTATUS status;
     TRACE( "mode %d\n", mode );
-    if ((status = UNIX_CALL( glBlendEquation, &args ))) WARN( "glBlendEquation returned %#lx\n", status );
+    if ((status = UNIX_DEFER( glBlendEquation, &args ))) WARN( "glBlendEquation returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
 
@@ -4159,7 +4159,7 @@ static void WINAPI glBlendEquationEXT( GLenum mode )
     struct glBlendEquationEXT_params args = { .teb = NtCurrentTeb(), .mode = mode };
     NTSTATUS status;
     TRACE( "mode %d\n", mode );
-    if ((status = UNIX_CALL( glBlendEquationEXT, &args ))) WARN( "glBlendEquationEXT returned %#lx\n", status );
+    if ((status = UNIX_DEFER( glBlendEquationEXT, &args ))) WARN( "glBlendEquationEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
 
@@ -6888,7 +6888,7 @@ static void WINAPI glDepthBoundsEXT( GLclampd zmin, GLclampd zmax )
     struct glDepthBoundsEXT_params args = { .teb = NtCurrentTeb(), .zmin = zmin, .zmax = zmax };
     NTSTATUS status;
     TRACE( "zmin %f, zmax %f\n", zmin, zmax );
-    if ((status = UNIX_CALL( glDepthBoundsEXT, &args ))) WARN( "glDepthBoundsEXT returned %#lx\n", status );
+    if ((status = UNIX_DEFER( glDepthBoundsEXT, &args ))) WARN( "glDepthBoundsEXT returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
 
@@ -18167,7 +18167,7 @@ static void WINAPI glProgramLocalParameter4fARB( GLenum target, GLuint index, GL
     struct glProgramLocalParameter4fARB_params args = { .teb = NtCurrentTeb(), .target = target, .index = index, .x = x, .y = y, .z = z, .w = w };
     NTSTATUS status;
     TRACE( "target %d, index %d, x %f, y %f, z %f, w %f\n", target, index, x, y, z, w );
-    if ((status = UNIX_CALL( glProgramLocalParameter4fARB, &args ))) WARN( "glProgramLocalParameter4fARB returned %#lx\n", status );
+    if ((status = UNIX_DEFER( glProgramLocalParameter4fARB, &args ))) WARN( "glProgramLocalParameter4fARB returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
 
@@ -18176,7 +18176,7 @@ static void WINAPI glProgramLocalParameter4fvARB( GLenum target, GLuint index, c
     struct glProgramLocalParameter4fvARB_params args = { .teb = NtCurrentTeb(), .target = target, .index = index, .params = params };
     NTSTATUS status;
     TRACE( "target %d, index %d, params %p\n", target, index, params );
-    if ((status = UNIX_CALL( glProgramLocalParameter4fvARB, &args ))) WARN( "glProgramLocalParameter4fvARB returned %#lx\n", status );
+    if ((status = UNIX_DEFER_DATA( glProgramLocalParameter4fvARB, &args, params, 4 * sizeof(GLfloat) ))) WARN( "glProgramLocalParameter4fvARB returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
 
@@ -21439,7 +21439,7 @@ static void WINAPI glStencilFuncSeparate( GLenum face, GLenum func, GLint ref, G
     struct glStencilFuncSeparate_params args = { .teb = NtCurrentTeb(), .face = face, .func = func, .ref = ref, .mask = mask };
     NTSTATUS status;
     TRACE( "face %d, func %d, ref %d, mask %d\n", face, func, ref, mask );
-    if ((status = UNIX_CALL( glStencilFuncSeparate, &args ))) WARN( "glStencilFuncSeparate returned %#lx\n", status );
+    if ((status = UNIX_DEFER( glStencilFuncSeparate, &args ))) WARN( "glStencilFuncSeparate returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
 
@@ -21448,7 +21448,7 @@ static void WINAPI glStencilFuncSeparateATI( GLenum frontfunc, GLenum backfunc, 
     struct glStencilFuncSeparateATI_params args = { .teb = NtCurrentTeb(), .frontfunc = frontfunc, .backfunc = backfunc, .ref = ref, .mask = mask };
     NTSTATUS status;
     TRACE( "frontfunc %d, backfunc %d, ref %d, mask %d\n", frontfunc, backfunc, ref, mask );
-    if ((status = UNIX_CALL( glStencilFuncSeparateATI, &args ))) WARN( "glStencilFuncSeparateATI returned %#lx\n", status );
+    if ((status = UNIX_DEFER( glStencilFuncSeparateATI, &args ))) WARN( "glStencilFuncSeparateATI returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
 
@@ -21466,7 +21466,7 @@ static void WINAPI glStencilOpSeparate( GLenum face, GLenum sfail, GLenum dpfail
     struct glStencilOpSeparate_params args = { .teb = NtCurrentTeb(), .face = face, .sfail = sfail, .dpfail = dpfail, .dppass = dppass };
     NTSTATUS status;
     TRACE( "face %d, sfail %d, dpfail %d, dppass %d\n", face, sfail, dpfail, dppass );
-    if ((status = UNIX_CALL( glStencilOpSeparate, &args ))) WARN( "glStencilOpSeparate returned %#lx\n", status );
+    if ((status = UNIX_DEFER( glStencilOpSeparate, &args ))) WARN( "glStencilOpSeparate returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
 
@@ -21475,7 +21475,7 @@ static void WINAPI glStencilOpSeparateATI( GLenum face, GLenum sfail, GLenum dpf
     struct glStencilOpSeparateATI_params args = { .teb = NtCurrentTeb(), .face = face, .sfail = sfail, .dpfail = dpfail, .dppass = dppass };
     NTSTATUS status;
     TRACE( "face %d, sfail %d, dpfail %d, dppass %d\n", face, sfail, dpfail, dppass );
-    if ((status = UNIX_CALL( glStencilOpSeparateATI, &args ))) WARN( "glStencilOpSeparateATI returned %#lx\n", status );
+    if ((status = UNIX_DEFER( glStencilOpSeparateATI, &args ))) WARN( "glStencilOpSeparateATI returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
 
