@@ -435,6 +435,29 @@ void wine_nx_sd_cache_flush(void)
     if (sd_cache_base) sd_cache_flush_all( _REENT );
 }
 
+/* FEX's code cache, RWCacheDB_<hash>.foz in its DiskCache folder (FEX_DISKCACHE):
+ * a file every chunk of which is kept (sd_read_cache.h, keep_whole). Its index,
+ * <name>_idx.foz, is read whole once and needs nothing of the kind. */
+static int sd_cache_keeps_whole( const char *path )
+{
+    const char *name = strrchr( path, '/' );
+    size_t length;
+
+    name = name ? name + 1 : path;
+    length = strlen( name );
+    return !strncmp( name, "RWCacheDB_", 10 ) && length > 14 && !strcmp( name + length - 4, ".foz" ) &&
+           (length < 8 || strcmp( name + length - 8, "_idx.foz" ));
+}
+
+/* Where a write through fd lands: what is held keeps the position, else the
+ * card's. -1 when it cannot be known. Called with the lock held. */
+static long long sd_cache_write_at( struct _reent *r, void *fd, const struct sd_write_buffer *wb )
+{
+    off_t card = wb && wb->len ? 0 : sd_cache_base->seek_r( r, fd, 0, SEEK_CUR );
+
+    return card == -1 ? -1 : sd_write_position( wb, card );
+}
+
 static int sd_cache_open( struct _reent *r, void *fd, const char *path, int flags, int mode )
 {
     int writable = (flags & O_ACCMODE) != O_RDONLY;
@@ -449,6 +472,7 @@ static int sd_cache_open( struct _reent *r, void *fd, const char *path, int flag
         struct sd_cache_file *other;
 
         file->append = !!(flags & O_APPEND);
+        file->keep_whole = sd_cache_keeps_whole( path );
         /* Held writes stay one file's own business only while nothing else has
          * the path open: another open reads and writes at positions of its own.
          * Settled here, as a check on every write cost the main thread of
@@ -593,7 +617,7 @@ static ssize_t sd_cache_write_file( struct _reent *r, void *fd, const char *ptr,
     struct sd_write_buffer *wb;
     struct sd_cache_file *file;
     ssize_t ret;
-    long long at = -1;
+    long long at = -1, landing = -1;
     int held = 0;
 
     /* Nothing to write is nothing to ask the card: F.E.A.R. does it often. */
@@ -602,8 +626,11 @@ static ssize_t sd_cache_write_file( struct _reent *r, void *fd, const char *ptr,
     wb = sd_write_find( sd_write_buffers, fd );
     if ((file = sd_cache_find( sd_cache_files, fd )))
     {
-        /* Open once, only this open can hold chunks of the path. */
+        /* Open once, only this open can hold chunks of the path: one that
+         * keeps every chunk takes the bytes into them, any other drops them. */
         if (file->shared) sd_cache_written( sd_cache_files, &sd_cache_pool, file->path );
+        else if (file->keep_whole && !file->append && (landing = sd_cache_write_at( r, fd, wb )) != -1)
+            sd_cache_wrote( file, &sd_cache_pool, landing, ptr, len );
         else sd_cache_drop( file, &sd_cache_pool );
         if (sd_write_hold && !file->append && !file->shared)
         {
@@ -657,6 +684,7 @@ static ssize_t sd_cache_write_file( struct _reent *r, void *fd, const char *ptr,
     if ((file = sd_cache_find( sd_cache_files, fd )))
     {
         if (file->shared) sd_cache_written( sd_cache_files, &sd_cache_pool, file->path );
+        else if (landing != -1 && ret == (ssize_t)len) sd_cache_wrote( file, &sd_cache_pool, landing, ptr, len );
         else sd_cache_drop( file, &sd_cache_pool );
     }
     sd_stat_changed( file ? file->path : NULL );

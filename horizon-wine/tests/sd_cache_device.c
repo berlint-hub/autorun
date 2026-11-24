@@ -383,6 +383,61 @@ static void test_report_files(void)
     free( big );
 }
 
+/* FEX's code cache: blocks looked up a few kilobytes at a time all over the
+ * file while new ones go at its end. Every chunk read stays: an append and a
+ * write in the middle go into the chunks held, and the card is read once a
+ * chunk. Other names are cached as before. */
+static void test_fex_code_cache(void)
+{
+    static const char path[] = "sdmc:/switch/wine/fex/cache/DiskCache/0123456789abcdef/RWCacheDB_0011223344556677.foz";
+    const size_t chunks = 40;
+    char buf[3000], blob[2500];
+    unsigned int i, seed = 7, reads;
+    size_t size, end;
+
+    assert( sd_cache_keeps_whole( path ) && sd_cache_keeps_whole( "RWCacheDB_1.foz" ) );
+    assert( !sd_cache_keeps_whole( "sdmc:/x/RWCacheDB_0011223344556677_idx.foz" ) );
+    assert( !sd_cache_keeps_whole( "sdmc:/x/RWCacheDB_.foz" ) && !sd_cache_keeps_whole( "sdmc:/x/other.foz" ) );
+    assert( !sd_cache_keeps_whole( "sdmc:/x/RWCacheDB_1.foz.bak" ) );
+
+    data_size = chunks * SD_CACHE_CHUNK - 1000;
+    assert( !sd_cache_open( &test_reent, &writer, path, O_RDWR | O_CREAT, 0 ) );
+    assert( sd_cache_files->keep_whole );
+    for (i = 0; i < 3000; i++)
+    {
+        long long at;
+
+        seed = seed * 1103515245 + 12345;
+        at = (long long)(seed % (unsigned int)(data_size - sizeof(buf)));
+        size = 64 + (seed >> 9) % (sizeof(buf) - 64);
+        assert( sd_cache_seek( &test_reent, &writer, at, SEEK_SET ) == at );
+        assert( sd_cache_read_file( &test_reent, &writer, buf, size ) == (ssize_t)size );
+        assert( !memcmp( buf, data + at, size ) );
+        /* A new block every so often, at the end, as FEX stores what it translates. */
+        if (i % 50 == 49)
+        {
+            end = data_size;
+            memset( blob, (int)(i & 0x7f), sizeof(blob) );
+            assert( sd_cache_seek( &test_reent, &writer, 0, SEEK_END ) == (off_t)end );
+            assert( sd_cache_write_file( &test_reent, &writer, blob, sizeof(blob) ) == (ssize_t)sizeof(blob) );
+            assert( sd_cache_seek( &test_reent, &writer, end, SEEK_SET ) == (off_t)end );
+            assert( sd_cache_read_file( &test_reent, &writer, buf, sizeof(blob) ) == (ssize_t)sizeof(blob) );
+            assert( !memcmp( buf, blob, sizeof(blob) ) && data_size == end + sizeof(blob) );
+        }
+    }
+    /* Each chunk came from the card about once: not once a lookup. */
+    assert( card_reads <= chunks + 3000 / 50 + 2 );
+
+    /* A write in the middle goes into the chunk held: read back, no card read. */
+    reads = card_reads;
+    assert( sd_cache_seek( &test_reent, &writer, 5 * SD_CACHE_CHUNK + 100, SEEK_SET ) == 5 * SD_CACHE_CHUNK + 100 );
+    assert( sd_cache_write_file( &test_reent, &writer, "ABC", 3 ) == 3 );
+    assert( sd_cache_seek( &test_reent, &writer, 5 * SD_CACHE_CHUNK + 99, SEEK_SET ) == 5 * SD_CACHE_CHUNK + 99 );
+    assert( sd_cache_read_file( &test_reent, &writer, buf, 5 ) == 5 );
+    assert( buf[0] == (char)data[5 * SD_CACHE_CHUNK + 99] && !memcmp( buf + 1, "ABC", 3 ) );
+    assert( !memcmp( data + 5 * SD_CACHE_CHUNK + 100, "ABC", 3 ) && card_reads == reads );
+}
+
 int main( int argc, char **argv )
 {
     static const struct { const char *name; void (*run)(void); } tests[] = {
@@ -391,6 +446,7 @@ int main( int argc, char **argv )
         { "held-write", test_held_write }, { "shared-write", test_shared_write },
         { "append", test_append }, { "tiny-reads", test_tiny_reads },
         { "report-files", test_report_files }, { "reopen", test_reopen },
+        { "fex-code-cache", test_fex_code_cache },
     };
     unsigned int i;
 

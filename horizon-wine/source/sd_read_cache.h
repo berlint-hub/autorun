@@ -42,6 +42,7 @@
 #define SD_CACHE_BYPASS (-2)          /* sd_cache_read found no memory: read directly */
 #define SD_CACHE_POOL_MIN 256         /* 32 MB, the chunks every game gets */
 #define SD_CACHE_POOL_MAX 1536        /* 192 MB, when a game leaves that much heap free */
+#define SD_CACHE_WHOLE_CHUNKS 2048    /* 256 MB of a file that keeps every chunk (keep_whole) */
 
 struct sd_cache_line
 {
@@ -194,22 +195,41 @@ struct sd_cache_file
      * open and what the card gave for it, and how much was reported. */
     unsigned long long asked, card, asked_told, card_told;
     struct sd_cache_line lines[SD_CACHE_LINES];
+    /* FEX's code cache (sd_cache_keeps_whole): read a few kilobytes at a time
+     * all over, while FEX adds what it translates at the end. Eight chunks
+     * were far too few for it, and every addition threw the eight away, so
+     * each block found in it cost a 128 KB read from the card, 0.4 to 7 ms,
+     * more than translating the block again. Such a file keeps every chunk it
+     * reads, chunk i of the file in whole[i] (allocated with the first), for
+     * as long as the pool has room: they go, oldest first, like any other
+     * file's. A write puts its bytes into the chunks it lands in
+     * (sd_cache_wrote). Past SD_CACHE_WHOLE_CHUNKS the eight lines serve. */
+    int keep_whole;
+    struct sd_cache_line *whole;
     struct sd_cache_file *next;
 };
 
 /* Reads size bytes at offset into buf. Returns the bytes read or -1. */
 typedef long long (*sd_cache_fill_fn)( void *ctx, long long offset, char *buf, size_t size );
 
+static inline void sd_cache_line_free( struct sd_cache_line *line, struct sd_cache_pool *pool )
+{
+    if (!line->data) return;
+    free( line->data );
+    sd_cache_held_remove( pool, line );
+    memset( line, 0, sizeof(*line) );
+}
+
 static inline void sd_cache_drop( struct sd_cache_file *file, struct sd_cache_pool *pool )
 {
     unsigned int i;
 
-    for (i = 0; i < SD_CACHE_LINES; i++)
+    for (i = 0; i < SD_CACHE_LINES; i++) sd_cache_line_free( &file->lines[i], pool );
+    if (file->whole)
     {
-        if (!file->lines[i].data) continue;
-        free( file->lines[i].data );
-        sd_cache_held_remove( pool, &file->lines[i] );
-        memset( &file->lines[i], 0, sizeof(file->lines[i]) );
+        for (i = 0; i < SD_CACHE_WHOLE_CHUNKS; i++) sd_cache_line_free( &file->whole[i], pool );
+        free( file->whole );
+        file->whole = NULL;
     }
     /* A write may have moved the end, and the order reads come in. */
     file->window = 0;
@@ -427,6 +447,89 @@ static inline void sd_cache_shelve( struct sd_cache_file *file, struct sd_cache_
     }
 }
 
+/* Gives a line with no buffer a chunk's: a new one, or with the pool full the
+ * one read longest ago, whoever read it. 0 without memory. */
+static inline int sd_cache_take_chunk( struct sd_cache_pool *pool, struct sd_cache_line *line )
+{
+    if (line->data) return 1;
+    if (pool->used >= pool->max)
+    {
+        /* Full: take the chunk read longest ago, whoever read it. */
+        struct sd_cache_line *old = sd_cache_oldest( pool );
+
+        if (!old) return 0;
+        line->data = old->data;
+        old->data = NULL;
+        old->start = -1;
+        old->len = 0;
+        old->lru = 0;
+        sd_cache_held_replace( pool, old, line );
+        return 1;
+    }
+    if (!pool->held && !(pool->held = calloc( pool->cap ? pool->cap : pool->max, sizeof(*pool->held) )))
+        return 0;
+    if (!(line->data = malloc( SD_CACHE_CHUNK ))) return 0;
+    sd_cache_held_add( pool, line );
+    return 1;
+}
+
+/* The line for the chunk at offset of a file that keeps every chunk, or NULL
+ * when the file does not or the offset is past what it can keep. */
+static inline struct sd_cache_line *sd_cache_whole_line( struct sd_cache_file *file, long long offset )
+{
+    long long index = offset / SD_CACHE_CHUNK;
+
+    if (!file->keep_whole || offset < 0 || index >= SD_CACHE_WHOLE_CHUNKS) return NULL;
+    if (!file->whole && !(file->whole = calloc( SD_CACHE_WHOLE_CHUNKS, sizeof(*file->whole) ))) return NULL;
+    return &file->whole[index];
+}
+
+/* Bytes written at offset through this open. A file that keeps every chunk
+ * takes them into the chunks it holds, as the card has them once they reach
+ * it; a chunk holding less than a whole one that the bytes run past the end of
+ * is let go, to be read again. Any other file, or a write at a place not
+ * known, drops everything. The caller calls it again once the bytes reached
+ * the card, for a reader that refilled a chunk while they were on the way. */
+static inline void sd_cache_line_wrote( struct sd_cache_line *line, struct sd_cache_pool *pool, long long offset,
+                                        const char *data, size_t size )
+{
+    long long end = offset + (long long)size, from, to;
+
+    if (!line->data || line->start < 0) return;
+    if (end <= line->start || offset >= line->start + SD_CACHE_CHUNK) return;
+    if (line->len < SD_CACHE_CHUNK && end > line->start + (long long)line->len)
+    {
+        sd_cache_line_free( line, pool );
+        return;
+    }
+    from = offset > line->start ? offset : line->start;
+    to = end < line->start + (long long)line->len ? end : line->start + (long long)line->len;
+    if (from < to) memcpy( line->data + (from - line->start), data + (from - offset), (size_t)(to - from) );
+}
+
+static inline void sd_cache_wrote( struct sd_cache_file *file, struct sd_cache_pool *pool, long long offset,
+                                   const char *data, size_t size )
+{
+    long long index, last;
+    unsigned int i;
+
+    if (!file->keep_whole || offset < 0)
+    {
+        sd_cache_drop( file, pool );
+        return;
+    }
+    for (i = 0; i < SD_CACHE_LINES; i++) sd_cache_line_wrote( &file->lines[i], pool, offset, data, size );
+    if (file->whole && size)
+    {
+        last = (offset + (long long)size - 1) / SD_CACHE_CHUNK;
+        for (index = offset / SD_CACHE_CHUNK; index <= last && index < SD_CACHE_WHOLE_CHUNKS; index++)
+            sd_cache_line_wrote( &file->whole[index], pool, offset, data, size );
+    }
+    if (file->size_known && offset + (long long)size > file->size) file->size_known = 0;
+    file->window = 0;
+    file->fill_end = 0;
+}
+
 /* Copy size bytes at offset into buf, filling chunks through fill. Returns the
  * bytes copied (fewer only at the end of the file), -1 when a request fails
  * before anything was copied, or SD_CACHE_BYPASS when no chunk can be
@@ -440,12 +543,41 @@ static inline long long sd_cache_read( struct sd_cache_file *file, struct sd_cac
     while (done < size)
     {
         long long at = offset + (long long)done;
-        struct sd_cache_line *line = sd_cache_line_for( file, at );
+        struct sd_cache_line *line = sd_cache_whole_line( file, at );
         size_t skip, count;
 
         struct sd_cache_shelved *shelved;
 
-        if (!line && file->path && pool->shelf && (shelved = sd_cache_shelf_find( pool, file->path, at )))
+        if (line)
+        {
+            if (!line->data || line->start < 0 || at >= line->start + (long long)line->len)
+            {
+                /* Not read yet, taken by another file, or the file has grown
+                 * past it: chunk i is read again, whole. */
+                long long start = at - at % SD_CACHE_CHUNK, got;
+                size_t want = SD_CACHE_CHUNK;
+
+                if (file->size_known && at >= file->size) break;
+                if (file->size_known && start + (long long)want > file->size) want = (size_t)(file->size - start);
+                if (!sd_cache_take_chunk( pool, line )) return done ? (long long)done : SD_CACHE_BYPASS;
+                line->start = -1;
+                line->len = 0;
+                (*fills)++;
+                if ((got = fill( ctx, start, line->data, want )) < 0)
+                    return done ? (long long)done : -1;
+                line->start = start;
+                line->len = (size_t)got;
+                if ((size_t)got < want)  /* the end of the file */
+                {
+                    file->size = start + got;
+                    file->size_known = 1;
+                }
+                if (at >= start + got) break;
+            }
+            line->lru = 0x80000000u;
+        }
+        else if ((line = sd_cache_line_for( file, at ))) {}
+        else if (file->path && pool->shelf && (shelved = sd_cache_shelf_find( pool, file->path, at )))
         {
             /* An earlier open of the path read it: the chunk comes off the
              * shelf, and the one it replaces here goes there in its place. */
@@ -480,28 +612,7 @@ static inline long long sd_cache_read( struct sd_cache_file *file, struct sd_cac
 
             if (!sd_cache_plan( file, pool, at, &start, &want, &window )) break;
             line = sd_cache_victim( file );
-            if (!line->data && pool->used >= pool->max)
-            {
-                /* Full: take the chunk read longest ago, whoever read it. */
-                struct sd_cache_line *old = sd_cache_oldest( pool );
-
-                if (!old) return done ? (long long)done : SD_CACHE_BYPASS;
-                line->data = old->data;
-                old->data = NULL;
-                old->start = -1;
-                old->len = 0;
-                old->lru = 0;
-                sd_cache_held_replace( pool, old, line );
-            }
-            else if (!line->data)
-            {
-                if (!pool->held &&
-                    !(pool->held = calloc( pool->cap ? pool->cap : pool->max, sizeof(*pool->held) )))
-                    return done ? (long long)done : SD_CACHE_BYPASS;
-                if (!(line->data = malloc( SD_CACHE_CHUNK )))
-                    return done ? (long long)done : SD_CACHE_BYPASS;
-                sd_cache_held_add( pool, line );
-            }
+            if (!sd_cache_take_chunk( pool, line )) return done ? (long long)done : SD_CACHE_BYPASS;
             line->start = -1;
             line->len = 0;
             (*fills)++;
