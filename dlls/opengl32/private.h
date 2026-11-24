@@ -95,10 +95,22 @@ extern BOOL alloc_map_context_object( enum object_type type, GLuint *handle, BOO
 
 #ifndef _WIN64
 
+/* Doom 3 sets the 16 program environment parameters of its interaction
+ * programs for every surface a light falls on, nearly all to the values they
+ * already have: the same light, the same model, the same colours. The thread
+ * keeps what it last sent for the first PROGRAM_ENV_KEPT of each target (24,
+ * the fewest a fragment program may have), and a call that would set one to
+ * what it holds goes nowhere. The deferred calls leave them alone, and so do
+ * the calls keeps_program_env names; any other forgets them all (UNIX_CALL),
+ * among them a context becoming current, a display list, glBegin and glEnd. */
+#define PROGRAM_ENV_KEPT 24
+
 struct call_batch
 {
     unsigned int used;      /* bytes of data in use */
     unsigned int flushing;  /* the batch is being run: a call made meanwhile crosses at once */
+    unsigned int program_env_known[2];  /* bit i: program_env[target][i] is the context's */
+    GLfloat program_env[2][PROGRAM_ENV_KEPT][4];  /* GL_VERTEX_PROGRAM_ARB, GL_FRAGMENT_PROGRAM_ARB */
     unsigned char data[0x4000];
 };
 
@@ -112,8 +124,65 @@ static inline void flush_calls(void)
     if (batch && batch->used) flush_call_batch( batch );
 }
 
+/* Calls that leave the program environment parameters as they are, of those
+ * not deferred that Doom 3 makes between them: draws, buffer and texture
+ * uploads, matrices, queries. */
+static inline BOOL keeps_program_env( enum unix_funcs func )
+{
+    switch (func)
+    {
+    case unix_glDrawElements: case unix_glDrawRangeElements: case unix_glDrawRangeElementsEXT:
+    case unix_glDrawArrays: case unix_glDrawArraysEXT:
+    case unix_glBufferData: case unix_glBufferDataARB: case unix_glBufferSubData: case unix_glBufferSubDataARB:
+    case unix_glMapBuffer: case unix_glMapBufferARB: case unix_glUnmapBuffer: case unix_glUnmapBufferARB:
+    case unix_glLockArraysEXT: case unix_glUnlockArraysEXT:
+    case unix_glTexImage2D: case unix_glTexSubImage2D: case unix_glCompressedTexImage2DARB:
+    case unix_glCopyTexSubImage2D: case unix_glTexParameteri: case unix_glTexParameterf:
+    case unix_glTexParameterfv: case unix_glTexParameteriv: case unix_glTexEnvfv: case unix_glTexGenfv:
+    case unix_glPushMatrix: case unix_glPopMatrix: case unix_glMultMatrixf: case unix_glClipPlane:
+    case unix_glClear: case unix_glViewport: case unix_glFlush:
+    case unix_glGetError: case unix_glGetIntegerv: case unix_glGetFloatv: case unix_glGetBooleanv:
+        return TRUE;
+    default:
+        return FALSE;
+    }
+}
+
+static inline void forget_program_env(void)
+{
+    struct call_batch *batch = NtCurrentTeb()->glReserved1[WINE_GL_RESERVED_CALL_BATCH];
+    if (batch) batch->program_env_known[0] = batch->program_env_known[1] = 0;
+}
+
+/* TRUE when the parameter already holds these values: the call is dropped.
+ * Otherwise the values are kept as what the call will set. */
+static inline BOOL program_env_unchanged( GLenum target, GLuint index, const GLfloat *params )
+{
+    struct call_batch *batch = NtCurrentTeb()->glReserved1[WINE_GL_RESERVED_CALL_BATCH];
+    unsigned int which;
+
+    if (!batch || !params || index >= PROGRAM_ENV_KEPT) return FALSE;
+    if (target == GL_VERTEX_PROGRAM_ARB) which = 0;
+    else if (target == GL_FRAGMENT_PROGRAM_ARB) which = 1;
+    else return FALSE;
+    if ((batch->program_env_known[which] >> index) & 1 &&
+        !memcmp( batch->program_env[which][index], params, sizeof(batch->program_env[which][index]) ))
+        return TRUE;
+    memcpy( batch->program_env[which][index], params, sizeof(batch->program_env[which][index]) );
+    batch->program_env_known[which] |= 1u << index;
+    return FALSE;
+}
+
+static inline BOOL program_env_unchanged4( GLenum target, GLuint index, GLfloat x, GLfloat y, GLfloat z, GLfloat w )
+{
+    const GLfloat params[4] = { x, y, z, w };
+    return program_env_unchanged( target, index, params );
+}
+
 #undef UNIX_CALL
-#define UNIX_CALL( func, params ) (flush_calls(), WINE_UNIX_CALL( unix_ ## func, params ))
+#define UNIX_CALL( func, params ) \
+    (flush_calls(), keeps_program_env( unix_ ## func ) ? (void)0 : forget_program_env(), \
+     WINE_UNIX_CALL( unix_ ## func, params ))
 #define UNIX_DEFER( func, params ) defer_call( unix_ ## func, params, sizeof(*(params)), NULL, 0 )
 /* With an array the call reads, which goes into the batch: field is the
  * parameter pointing at it, size its size in bytes. */
@@ -123,6 +192,8 @@ static inline void flush_calls(void)
 #else
 
 static inline void flush_calls(void) {}
+static inline BOOL program_env_unchanged( GLenum target, GLuint index, const GLfloat *params ) { return FALSE; }
+static inline BOOL program_env_unchanged4( GLenum target, GLuint index, GLfloat x, GLfloat y, GLfloat z, GLfloat w ) { return FALSE; }
 #define UNIX_DEFER( func, params ) UNIX_CALL( func, params )
 #define UNIX_DEFER_DATA( func, params, field, size ) UNIX_CALL( func, params )
 

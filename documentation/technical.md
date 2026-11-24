@@ -502,7 +502,14 @@ changes, and fails if the pinned text moves.
   batch first), at the end of the thread, or when the batch is full, so the
   host runs every call in the program's order. A game the batches would not
   suit is given them off with `gl-batch=0` in its settings (`[INIT] OpenGL
-  call batches off`).
+  call batches off`). With them, a program environment parameter set to the
+  values it already holds goes nowhere (`private.h`,
+  `program_env_unchanged`): Doom 3 sets the 16 of its interaction programs
+  for every surface a light falls on, nearly all to what they were for the
+  surface before. The thread keeps what it sent for the first 24 of each
+  target, and forgets them at any call not known to leave them alone
+  (`keeps_program_env`: draws, buffer and texture uploads, matrices, queries),
+  a context becoming current and display lists among them.
 - A 32-bit program whose image is not large address aware is given addresses
   below 2 GiB only. **Large address aware** in the game's settings
   (`large-address-aware=1`) gives it those up to 4 GiB without patching the
