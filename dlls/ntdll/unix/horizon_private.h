@@ -37,6 +37,8 @@ extern void wine_nx_thread_set_affinity( unsigned int tid, unsigned int mask ) _
 extern __thread int horizon_suspend_pending;
 extern void horizon_wait_suspend_arm64ec(void);
 extern void horizon_get_memory_info( unsigned long long *total, unsigned long long *used );
+/* The same as a program is told it (memory in its settings: WINE_NX_MEMORY_MB). */
+extern void horizon_get_reported_memory_info( unsigned long long *total, unsigned long long *used );
 extern void horizon_get_address_space_limits( void **start, void **limit );
 extern void *virtual_alloc_horizon_native( size_t size, void **token );
 extern int horizon_protect_fex_page( void *base, BOOL enable );

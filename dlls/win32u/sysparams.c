@@ -1852,6 +1852,16 @@ static void add_gpu( const char *name, const struct pci_id *pci_id, const GUID *
     if (!memory && vulkan_gpu) memory = vulkan_gpu->memory;
     if (!memory && opengl_gpu) memory = opengl_gpu->memory;
     if (!memory) memory = 1024 * 1024 * 1024;
+#ifdef __SWITCH__
+    {
+        /* video-memory=N in the program's settings (source/runtime.c): what
+         * WMI's Win32_VideoController and the display device's registry tell
+         * it, which Doom 3 picks its texture detail by. */
+        const char *mb = getenv( "WINE_NX_VIDEO_MEMORY_MB" );
+
+        if (mb && atoi( mb ) > 0 && atoi( mb ) <= 65536) memory = (ULONGLONG)atoi( mb ) * 1024 * 1024;
+    }
+#endif
 
     if (!write_gpu_to_registry( gpu, pci_id, memory ))
     {

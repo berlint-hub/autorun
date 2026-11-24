@@ -4327,6 +4327,33 @@ unsigned int horizon_get_processor_count(void)
 /* There is no sysinfo or /proc/meminfo on Horizon. The memory this process may
  * use is the meaningful "physical memory" for Windows programs, which size
  * caches, dictionaries and thread counts from GlobalMemoryStatusEx. */
+/* What GlobalMemoryStatusEx and the system information calls tell a program:
+ * the console's figures, or with memory=N in its settings (WINE_NX_MEMORY_MB,
+ * source/runtime.c) N MB in all, of which no more is free than really is. An
+ * old game that takes 2 GB for a negative number, or one that will not start
+ * below some figure, is told what suits it; nothing is set aside or added. */
+void horizon_get_reported_memory_info( unsigned long long *total, unsigned long long *used )
+{
+    static int reported_mb = -1;
+    unsigned long long free;
+    int mb = __atomic_load_n( &reported_mb, __ATOMIC_RELAXED );
+
+    horizon_get_memory_info( total, used );
+    if (mb < 0)
+    {
+        const char *value = getenv( "WINE_NX_MEMORY_MB" );
+
+        mb = value ? atoi( value ) : 0;
+        if (mb < 0 || mb > 65536) mb = 0;
+        __atomic_store_n( &reported_mb, mb, __ATOMIC_RELAXED );
+    }
+    if (!mb) return;
+    free = *total - *used;
+    *total = (unsigned long long)mb << 20;
+    if (free > *total) free = *total;
+    *used = *total - free;
+}
+
 void horizon_get_memory_info( unsigned long long *total, unsigned long long *used )
 {
     extern char *fake_heap_start, *fake_heap_end;

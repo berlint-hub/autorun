@@ -493,6 +493,17 @@ changes, and fails if the pinned text moves.
   (`large-address-aware=1`) gives it those up to 4 GiB without patching the
   file; `[VA] 32-bit program: addresses up to ...` in the log says which it
   got. It adds addresses, not memory.
+- The console's memory is the CPU's and the GPU's both: there is no video
+  memory of its own to set aside. What a game is *told* can be set in its
+  settings: **Video memory** (`video-memory=128` to `3072`, in MB) is what
+  win32u's GPU in the registry (WMI's `Win32_VideoController.AdapterRAM`,
+  which Doom 3 picks its texture detail by) and the WGL renderer wined3d asks
+  report, 1 GB without it; **System memory** (`memory=512` to `3072`) is what
+  `GlobalMemoryStatusEx` and the system information calls report as the
+  machine's memory, never more of it free than really is. `[INIT] video
+  memory reported to the program` and `[INIT] memory reported to the
+  program` say when they are set. A DXVK game is told by DXVK options
+  (`dxgi.maxDeviceMemory`, `d3d9.maxAvailableMemory`).
 - AMD64 programs require the 39-bit application forwarder and remain
   experimental.
 - One program at a time; one controller.

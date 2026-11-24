@@ -1916,6 +1916,16 @@ static void init_device_info( struct egl_platform *egl, const struct opengl_func
             funcs->p_glGetIntegerv( GL_GPU_MEMORY_INFO_DEDICATED_VIDMEM_NVX, values );
             egl->video_memory = values[0] / 1024;
         }
+#ifdef __SWITCH__
+        {
+            /* video-memory=N in the program's settings (source/runtime.c):
+             * the WGL renderer's video memory, which wined3d reports to
+             * Direct3D (GetAvailableTextureMem, DXGI's adapter). */
+            const char *mb = getenv( "WINE_NX_VIDEO_MEMORY_MB" );
+
+            if (mb && atoi( mb ) > 0 && atoi( mb ) <= 65536) egl->video_memory = atoi( mb );
+        }
+#endif
         TRACE( "  - video_memory: %u MiB\n", egl->video_memory );
 
         if (!has_device_persistent_id && (has_extension( extensions, "GL_EXT_memory_object" ) || has_extension( extensions, "GL_EXT_semaphore" )))
