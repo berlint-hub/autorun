@@ -24,6 +24,10 @@ static void versions(void)
     assert( dxvk_options_version( DXVK_SOURCE_SAREK, "1.10.3-20230507" ) == 11003 );
     assert( !dxvk_options_version( DXVK_SOURCE_OFFICIAL, "3.2" ) );
     assert( !dxvk_options_version( DXVK_SOURCE_SAREK, "2.0" ) );
+    assert( dxvk_options_version( DXVK_SOURCE_SAREK, "1.14.0" ) == 11400 );
+    assert( dxvk_options_version( DXVK_SOURCE_SAREK, "v1.14.1" ) == 11401 );
+    assert( !dxvk_options_version( DXVK_SOURCE_SAREK, "1.14.2" ) );
+    assert( !dxvk_options_version( DXVK_SOURCE_SAREK, "1.15.0" ) );
     assert( !dxvk_options_version( DXVK_SOURCE_GPLASYNC, "2.0-1" ) );
     static const char *const invalid[] = { "", "Bundled", "../3.1", "3.", "3.1.", "3.1.1.1", "3.0-rc1", "999999999999999999999.0" };
     for (unsigned int i = 0; i < sizeof(invalid) / sizeof(invalid[0]); i++)
@@ -57,6 +61,14 @@ static void versions(void)
     assert( find( "dxvk.enableDescriptorBuffer", DXVK_SOURCE_OFFICIAL, "2.7" ) );
     assert( find( "dxvk.enableDescriptorBuffer", DXVK_SOURCE_GPLASYNC, "2.7-1" ) );
     assert( !find( "dxvk.enableDescriptorBuffer", DXVK_SOURCE_SAREK, "1.13.0" ) );
+    /* Sarek 1.14.0 and 1.14.1 have 1.13.0's options. */
+    for (unsigned int i = 0; i < dxvk_option_count; i++)
+    {
+        int at_13 = dxvk_option_supported( dxvk_options + i, DXVK_SOURCE_SAREK, 11300 );
+
+        assert( dxvk_option_supported( dxvk_options + i, DXVK_SOURCE_SAREK, 11400 ) == at_13 );
+        assert( dxvk_option_supported( dxvk_options + i, DXVK_SOURCE_SAREK, 11401 ) == at_13 );
+    }
     assert( !find( "dxvk.enableDescriptorHeap", DXVK_SOURCE_OFFICIAL, "2.7.1" ) );
     assert( find( "dxvk.enableDescriptorHeap", DXVK_SOURCE_OFFICIAL, "3.0" ) );
     assert( !find( "dxvk.enableImplicitResolves", DXVK_SOURCE_OFFICIAL, "2.7.1" ) );
@@ -216,7 +228,7 @@ static void catalog(void)
 {
     struct launcher_kv kv;
     char config[LAUNCHER_KV_MAX];
-    static const char *const versions[] = { "1.0", "1.5", "1.9.2", "1.9.3", "1.10.3", "1.12.0", "1.13.0",
+    static const char *const versions[] = { "1.0", "1.5", "1.9.2", "1.9.3", "1.10.3", "1.12.0", "1.13.0", "1.14.1",
         "2.0", "2.1", "2.4.1", "2.6.2", "2.7", "2.7.1", "3.0", "3.1.1" };
 
     for (int source = 0; source < DXVK_SOURCE_COUNT; source++)

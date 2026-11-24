@@ -95,7 +95,11 @@ int main(void)
         static const char official[] = "[{\"tag_name\":\"v3.1.1\",\"draft\":false,\"prerelease\":false,"
             "\"assets\":[{\"name\":\"dxvk-3.1.1.tar.gz\","
             "\"browser_download_url\":\"https://github.com/doitsujin/dxvk/releases/download/v3.1.1/dxvk-3.1.1.tar.gz\"}]}]";
-        static const char github[] = "[{\"tag_name\":\"v1.13.0\",\"draft\":false,\"prerelease\":false,"
+        /* Sarek 1.14.1 is packed as 1.13.0 was (its Makefile's release target). */
+        static const char github[] = "[{\"tag_name\":\"v1.14.1\",\"draft\":false,\"prerelease\":false,"
+            "\"assets\":[{\"name\":\"dxvk-sarek-1.14.1.tar.gz\","
+            "\"browser_download_url\":\"https://github.com/pythonlover02/dxvk-sarek/releases/download/v1.14.1/dxvk-sarek-1.14.1.tar.gz\"}]},"
+            "{\"tag_name\":\"v1.13.0\",\"draft\":false,\"prerelease\":false,"
             "\"assets\":[{\"name\":\"dxvk-sarek-1.13.0.tar.gz\","
             "\"browser_download_url\":\"https://github.com/pythonlover02/dxvk-sarek/releases/download/v1.13.0/dxvk-sarek-1.13.0.tar.gz\"}]}]";
         static const char gitlab[] = "[{\"tag_name\":\"v3.1.1-1\",\"assets\":{\"links\":["
@@ -107,8 +111,8 @@ int main(void)
         assert( parse_release_page( &dxvk_backend, (const unsigned char *)official, strlen(official), readback, 4, &seen ) == 1 );
         assert( seen == 1 && !strcmp( readback[0].version, "3.1.1" ) );
         seen = 0;
-        assert( parse_release_page( &sarek_backend, (const unsigned char *)github, strlen(github), readback, 4, &seen ) == 1 );
-        assert( seen == 1 && !strcmp( readback[0].version, "1.13.0" ) );
+        assert( parse_release_page( &sarek_backend, (const unsigned char *)github, strlen(github), readback, 4, &seen ) == 2 );
+        assert( seen == 2 && !strcmp( readback[0].version, "1.14.1" ) && !strcmp( readback[1].version, "1.13.0" ) );
         seen = 0;
         assert( parse_release_page( &gplasync_backend, (const unsigned char *)gitlab, strlen(gitlab), readback, 4, &seen ) == 1 );
         assert( seen == 1 && !strcmp( readback[0].version, "3.1.1-1" ) );
