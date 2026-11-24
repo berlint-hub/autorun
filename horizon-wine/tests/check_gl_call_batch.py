@@ -9,7 +9,8 @@ and the unix side as the sources have them over a recording host: the host
 must see every call in the program's order, with the arrays as they were when
 the call was made, however the batch fills, with batching off, with an array
 missing, with a call made while the batch runs, and a batch that is not one
-is refused without reading past it."""
+is refused without reading past it. A program environment parameter set to what
+it holds goes nowhere, until a call that is not known to leave them alone.""" 
 import os
 import pathlib
 import re
@@ -53,8 +54,20 @@ enum = unixlib[unixlib.index('enum unix_funcs'):]
 enum = enum[:enum.index('};')]
 assert enum.rstrip().endswith('unix_flush_calls,\n    funcs_count')
 assert '    flush_calls,\n};' in unix_thunks and '    wow64_flush_calls,\n};' in unix_thunks
-# Every call that is not deferred sends the batch first.
-assert '#define UNIX_CALL( func, params ) (flush_calls(), WINE_UNIX_CALL( unix_ ## func, params ))' in private
+# Every call that is not deferred sends the batch first, and forgets the
+# program environment parameters unless it is known to leave them alone.
+assert ('#define UNIX_CALL( func, params ) \\\n'
+        '    (flush_calls(), keeps_program_env( unix_ ## func ) ? (void)0 : forget_program_env(), \\\n'
+        '     WINE_UNIX_CALL( unix_ ## func, params ))') in private
+# The two deferred calls that set them ask first whether they would change anything.
+for name, check in (('glProgramEnvParameter4fvARB', 'program_env_unchanged( target, index, params )'),
+                    ('glProgramEnvParameter4fARB', 'program_env_unchanged4( target, index, x, y, z, w )')):
+    thunk = re.search(r'\nstatic void WINAPI ' + name + r'\(.*?\n}\n', thunks, re.S).group(0)
+    assert thunk.index(f'    if ({check}) return;\n') < thunk.index('UNIX_DEFER'), name
+assert thunks.count('program_env_unchanged') == 2
+# The calls kept: none of them sets a program environment parameter.
+kept = re.findall(r'case unix_(\w+):', private[private.index('static inline BOOL keeps_program_env('):])
+assert kept and not [k for k in kept if 'Program' in k or 'List' in k or k in ('glBegin', 'glEnd')], kept
 assert not re.search(r'\bWINE_UNIX_CALL\(', thunks)
 assert re.findall(r'WINE_UNIX_CALL\( (\w+)', wgl) == ['unix_flush_calls', 'func']
 
@@ -75,6 +88,10 @@ fixture = r'''
 #include <string.h>
 #include <sys/mman.h>
 typedef int NTSTATUS; typedef int BOOL; typedef unsigned int UINT32, PTR32, GLenum, GLuint; typedef float GLfloat;
+#define TRUE 1
+#define FALSE 0
+#define GL_VERTEX_PROGRAM_ARB 0x8620
+#define GL_FRAGMENT_PROGRAM_ARB 0x8804
 typedef unsigned short WCHAR;
 #define STATUS_SUCCESS 0
 #define STATUS_INVALID_PARAMETER ((NTSTATUS)0xc000000d)
@@ -84,11 +101,13 @@ typedef unsigned short WCHAR;
 typedef struct { void *glReserved1[29]; } TEB;
 static TEB teb;
 static TEB *NtCurrentTeb(void) { return &teb; }
-enum unix_funcs { unix_glBindTexture, unix_glProgramEnvParameter4fvARB, unix_glGetError, unix_flush_calls, funcs_count };
+enum unix_funcs { unix_glBindTexture, unix_glProgramEnvParameter4fvARB, unix_glGetError, unix_flush_calls, unix_glCallList,
+                  KEPT_CALLS funcs_count };
 struct flush_calls_params { TEB *teb; void *data; unsigned int size; };
 struct glBindTexture_params { TEB *teb; GLenum target; GLuint texture; };
 struct glProgramEnvParameter4fvARB_params { TEB *teb; GLenum target; GLuint index; const GLfloat *params; };
 struct glGetError_params { TEB *teb; GLenum ret; };
+struct glCallList_params { TEB *teb; GLuint list; };
 /* The batch below 4 GB, as a 32-bit program's heap is. */
 static void *low_calloc( size_t count, size_t size )
 {
@@ -136,7 +155,8 @@ static NTSTATUS env_parameter( void *args )
 }
 static NTSTATUS get_error( void *args ) { (void)args; note( "error" ); return STATUS_SUCCESS; }
 static NTSTATUS never( void *args ) { (void)args; abort(); }
-const unixlib_entry_t __wine_unix_call_wow64_funcs[funcs_count] = { bind_texture, env_parameter, get_error, never };
+static NTSTATUS call_list( void *args ) { (void)args; note( "list" ); return STATUS_SUCCESS; }
+const unixlib_entry_t __wine_unix_call_wow64_funcs[funcs_count] = { bind_texture, env_parameter, get_error, never, call_list };
 
 static NTSTATUS host_call( enum unix_funcs func, void *params )
 {
@@ -166,6 +186,18 @@ static void error_call(void)
 {
     struct glGetError_params args = { &teb, 0 };
     UNIX_CALL( glGetError, &args );
+}
+/* As the thunk of glProgramEnvParameter4fvARB is. */
+static void env_thunk( GLenum target, GLuint index, const GLfloat *v )
+{
+    struct glProgramEnvParameter4fvARB_params args = { &teb, target, index, v };
+    if (program_env_unchanged( target, index, v )) return;
+    assert( !UNIX_DEFER_DATA( glProgramEnvParameter4fvARB, &args, params, 4 * sizeof(GLfloat) ) );
+}
+static void list_call(void)
+{
+    struct glCallList_params args = { &teb, 1 };
+    UNIX_CALL( glCallList, &args );
 }
 static void reset(void) { seen[0] = 0; crossings = 0; }
 
@@ -211,6 +243,37 @@ int main( void )
     assert( nested == 1 && !strcmp( seen, "bind100998 bind100999 bind101000 bind101001 " ) );
     assert( !((struct call_batch *)teb.glReserved1[WINE_GL_RESERVED_CALL_BATCH])->used );
 
+    /* A program environment parameter set to what it holds goes nowhere, in
+     * either target; another value, another target or a parameter past the
+     * kept ones goes, and a call that may change them (a display list here)
+     * forgets them. Draws, glGetError and the deferred calls do not. */
+    reset();
+    {
+        static const GLfloat a[4] = { 1, 2, 3, 4 }, b[4] = { 1, 2, 3, 5 };
+        env_thunk( GL_VERTEX_PROGRAM_ARB, 3, a );
+        env_thunk( GL_VERTEX_PROGRAM_ARB, 3, a );
+        bind( 9 );
+        env_thunk( GL_VERTEX_PROGRAM_ARB, 3, a );
+        error_call();
+        env_thunk( GL_VERTEX_PROGRAM_ARB, 3, a );
+        env_thunk( GL_VERTEX_PROGRAM_ARB, 3, b );
+        env_thunk( GL_FRAGMENT_PROGRAM_ARB, 3, b );
+        env_thunk( GL_FRAGMENT_PROGRAM_ARB, 3, b );
+        env_thunk( GL_VERTEX_PROGRAM_ARB, PROGRAM_ENV_KEPT, a );
+        env_thunk( GL_VERTEX_PROGRAM_ARB, PROGRAM_ENV_KEPT, a );
+        env_thunk( 2, 3, a );
+        env_thunk( 2, 3, a );
+        assert( program_env_unchanged4( GL_VERTEX_PROGRAM_ARB, 3, 1, 2, 3, 5 ) );
+        assert( !program_env_unchanged4( GL_VERTEX_PROGRAM_ARB, 3, 1, 2, 3, 6 ) );
+        assert( program_env_unchanged4( GL_VERTEX_PROGRAM_ARB, 3, 1, 2, 3, 6 ) );
+        list_call();
+        env_thunk( GL_VERTEX_PROGRAM_ARB, 3, a );
+        env_thunk( GL_FRAGMENT_PROGRAM_ARB, 3, b );
+        flush_calls();
+    }
+    assert( !strcmp( seen, "env3=1,2,3,4 bind9 error env3=1,2,3,5 env3=1,2,3,5 env24=1,2,3,4 env24=1,2,3,4 "
+                           "env3=1,2,3,4 env3=1,2,3,4 list env3=1,2,3,4 env3=1,2,3,5 " ) );
+
     /* Batching off (WINE_NX_GL_BATCH=0): each call crosses by itself. */
     munmap( teb.glReserved1[WINE_GL_RESERVED_CALL_BATCH], sizeof(struct call_batch) );
     teb.glReserved1[WINE_GL_RESERVED_CALL_BATCH] = NULL;
@@ -221,7 +284,8 @@ int main( void )
 
     /* A batch that is not one is refused, and nothing past it is read. */
     {
-        static const unsigned int sizes[][3] = { { 0, 4, 16 }, { 0, 12, 16 }, { 0, 24, 16 }, { 3, 16, 16 }, { 9, 16, 16 }, { 0, 16, 12 } };
+        static const unsigned int sizes[][3] = { { 0, 4, 16 }, { 0, 12, 16 }, { 0, 24, 16 }, { 3, 16, 16 }, { funcs_count, 16, 16 },
+                                                 { funcs_count + 5, 16, 16 }, { 0, 16, 12 } };
         unsigned int k;
         for (k = 0; k < sizeof(sizes) / sizeof(sizes[0]); k++)
         {
@@ -237,6 +301,8 @@ int main( void )
 }
 '''
 
+extra = [k for k in kept if k not in ('glBindTexture', 'glProgramEnvParameter4fvARB', 'glGetError', 'glCallList')]
+fixture = fixture.replace('KEPT_CALLS', ''.join(f'unix_{k}, ' for k in extra))
 source = (fixture + 'typedef NTSTATUS (*unixlib_entry_t)( void *args );\n'
           'extern const unixlib_entry_t __wine_unix_call_wow64_funcs[funcs_count];\n' +
           header.replace('#undef UNIX_CALL\n#define UNIX_CALL( func, params ) (flush_calls(), WINE_UNIX_CALL( unix_ ## func, params ))\n',
@@ -253,4 +319,5 @@ with tempfile.TemporaryDirectory(prefix='wine-nx-gl-batch-') as directory:
     if run.returncode:
         raise SystemExit(run.stderr.strip()[-3000:])
 print(f'opengl32 call batches: {len(deferred)} deferred thunks; {run.stdout.strip()}; the host runs them in order, with their arrays as made, '
-      'across full batches, a missing array, a call made while a batch runs and batching off, and refuses broken batches')
+      'across full batches, a missing array, a call made while a batch runs and batching off, refuses broken batches, '
+      'and drops a program environment parameter set to what it holds')

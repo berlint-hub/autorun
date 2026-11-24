@@ -18068,6 +18068,7 @@ static void WINAPI glProgramEnvParameter4fARB( GLenum target, GLuint index, GLfl
     struct glProgramEnvParameter4fARB_params args = { .teb = NtCurrentTeb(), .target = target, .index = index, .x = x, .y = y, .z = z, .w = w };
     NTSTATUS status;
     TRACE( "target %d, index %d, x %f, y %f, z %f, w %f\n", target, index, x, y, z, w );
+    if (program_env_unchanged4( target, index, x, y, z, w )) return;
     if ((status = UNIX_DEFER( glProgramEnvParameter4fARB, &args ))) WARN( "glProgramEnvParameter4fARB returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }
@@ -18077,6 +18078,7 @@ static void WINAPI glProgramEnvParameter4fvARB( GLenum target, GLuint index, con
     struct glProgramEnvParameter4fvARB_params args = { .teb = NtCurrentTeb(), .target = target, .index = index, .params = params };
     NTSTATUS status;
     TRACE( "target %d, index %d, params %p\n", target, index, params );
+    if (program_env_unchanged( target, index, params )) return;
     if ((status = UNIX_DEFER_DATA( glProgramEnvParameter4fvARB, &args, params, 4 * sizeof(GLfloat) ))) WARN( "glProgramEnvParameter4fvARB returned %#lx\n", status );
     set_context_attribute( -1 /* unsupported */, NULL, 0 );
 }

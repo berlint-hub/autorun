@@ -194,6 +194,13 @@ my %deferred_calls =
      "glProgramLocalParameter4fARB" => "", "glProgramLocalParameter4fvARB" => "params:4 * sizeof(GLfloat)",
      "glColor3f" => "", "glColor3ub" => "",
     );
+# Deferred calls that go nowhere when they would set what is already set
+# (private.h, program_env_unchanged): Doom 3's program environment parameters.
+my %filtered_calls =
+    (
+     "glProgramEnvParameter4fvARB" => "program_env_unchanged( target, index, params )",
+     "glProgramEnvParameter4fARB" => "program_env_unchanged4( target, index, x, y, z, w )",
+    );
 my %manual_win_thunks =
     (
      "glCreateSyncFromCLeventARB" => 1,
@@ -920,6 +927,7 @@ sub generate_win_thunk($$)
         my ($field, $size) = split /:/, $deferred_calls{$name};
         die "$name is not a void function" unless is_void_func($func);
         die "$name has checks or post-call work" if $get_integer;
+        $ret .= "    if ($filtered_calls{$name}) return;\n" if defined $filtered_calls{$name};
         if ($field) { $ret .= "    if ((status = UNIX_DEFER_DATA( $name, &args, $field, $size ))) WARN( \"$name returned %#lx\\n\", status );\n"; }
         else { $ret .= "    if ((status = UNIX_DEFER( $name, &args ))) WARN( \"$name returned %#lx\\n\", status );\n"; }
     }
