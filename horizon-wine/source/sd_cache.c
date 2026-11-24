@@ -327,6 +327,16 @@ static long long sd_cache_write_out( void *ctx, void *key, long long offset, con
     return sd_cache_base_write( ctx, key, buf, size );
 }
 
+/* Held bytes the card did not take: the chunks of the file hold them
+ * (sd_cache_wrote), and are read from the card again. Called with the lock
+ * held. */
+static void sd_cache_lost_locked( const struct sd_write_buffer *wb )
+{
+    struct sd_cache_file *file = sd_cache_find( sd_cache_files, wb->key );
+
+    if (file) sd_cache_drop( file, &sd_cache_pool );
+}
+
 /* Sends what is held for one file. Called with the lock held. The failure of
  * bytes a program was already told were written can only show here. */
 static int sd_cache_flush_locked( struct _reent *r, struct sd_write_buffer *wb )
@@ -338,6 +348,7 @@ static int sd_cache_flush_locked( struct _reent *r, struct sd_write_buffer *wb )
     pos = wb->pos;
     r->_errno = 0;
     failed = sd_write_flush( wb, sd_cache_write_out, r );
+    if (failed) sd_cache_lost_locked( wb );
     if (failed && !r->_errno) r->_errno = EIO;
     err = failed ? r->_errno : err;
     /* The window goes, and the card's position becomes the one the program saw. */
@@ -358,7 +369,10 @@ static void sd_cache_send_locked( struct _reent *r, struct sd_write_buffer *wb )
     if (!sd_write_dirty( wb )) return;
     wine_nx_sd_flush_timer++;
     if (sd_write_flush( wb, sd_cache_write_out, r ))
+    {
+        sd_cache_lost_locked( wb );
         wine_nx_runtime_trace( "[FS] held writes to a file on the card failed" );
+    }
     r->_errno = err;
 }
 
@@ -460,19 +474,29 @@ static long long sd_cache_write_at( struct _reent *r, void *fd, const struct sd_
 
 static int sd_cache_open( struct _reent *r, void *fd, const char *path, int flags, int mode )
 {
-    int writable = (flags & O_ACCMODE) != O_RDONLY;
+    int writable = (flags & O_ACCMODE) != O_RDONLY, keep_whole = sd_cache_keeps_whole( path ), sized = 0;
     struct sd_cache_file *file;
+    struct stat st;
 
     /* The open may be of a file with bytes held, or may truncate one. */
     sd_cache_flush_path( r, path );
     if (sd_cache_base->open_r( r, fd, path, flags, mode ) == -1) return -1;
+    /* Where FEX's code cache ends, so the blocks it adds there are kept as
+     * they are written (sd_cache_wrote). */
+    if (keep_whole && sd_cache_base->fstat_r)
+    {
+        int err = r->_errno;
+
+        sized = !sd_cache_base->fstat_r( r, fd, &st );
+        r->_errno = err;
+    }
     pthread_mutex_lock( &sd_cache_mutex );
     if ((file = sd_cache_opened( &sd_cache_files, &sd_cache_pool, fd, path, writable )))
     {
         struct sd_cache_file *other;
 
         file->append = !!(flags & O_APPEND);
-        file->keep_whole = sd_cache_keeps_whole( path );
+        file->keep_whole = keep_whole;
         /* Held writes stay one file's own business only while nothing else has
          * the path open: another open reads and writes at positions of its own.
          * Settled here, as a check on every write cost the main thread of
@@ -490,6 +514,11 @@ static int sd_cache_open( struct _reent *r, void *fd, const char *path, int flag
     }
     if (flags & O_TRUNC) sd_cache_written( sd_cache_files, &sd_cache_pool, path );
     if (flags & (O_CREAT | O_TRUNC)) sd_stat_changed( path );
+    if (sized && st.st_size >= 0 && (file = sd_cache_find( sd_cache_files, fd )) && file->keep_whole && !file->shared)
+    {
+        file->size = st.st_size;
+        file->size_known = 1;
+    }
     pthread_mutex_unlock( &sd_cache_mutex );
     return 0;
 }
@@ -541,6 +570,42 @@ static void sd_cache_report_short_read( struct _reent *r, void *fd, long long go
     wine_nx_runtime_trace( message );
 }
 
+static long long sd_cache_fill_none( void *ctx, long long offset, char *buf, size_t size )
+{
+    (void)ctx;
+    (void)offset;
+    (void)buf;
+    (void)size;
+    return -1;
+}
+
+/* A read of a file that keeps every chunk, from them alone, with its own
+ * writes still held: they are in the chunks already (sd_cache_wrote). FEX
+ * stores each block it translates in its code cache, held, and looks blocks
+ * up in it on the thread that runs the game; sending the held bytes out
+ * first cost a card write for each block found, 12 ms on average, and with
+ * FEX_DISKCACHE Doom 3's main thread spent more time looking blocks up than
+ * translating them took without. The bytes read, or SD_CACHE_BYPASS when a
+ * chunk the read needs is not held. Called with the lock held. */
+static long long sd_cache_read_kept_locked( struct _reent *r, void *fd, struct sd_cache_file *file,
+                                            char *copy, size_t len )
+{
+    struct sd_write_buffer *wb = sd_write_find( sd_write_buffers, fd );
+    unsigned int fills = 0;
+    long long pos, got;
+
+    if (!file->keep_whole || file->shared || !file->cacheable || sd_cache_off) return SD_CACHE_BYPASS;
+    /* While bytes are held the position the program sees is kept with them. */
+    pos = wb && wb->len ? wb->pos : sd_cache_base->seek_r( r, fd, 0, SEEK_CUR );
+    if (pos < 0 || !sd_cache_whole_has( file, pos, len )) return SD_CACHE_BYPASS;
+    got = sd_cache_read( file, &sd_cache_pool, pos, copy, len, sd_cache_fill_none, NULL, &fills );
+    if (got < 0 || fills) return SD_CACHE_BYPASS;
+    file->asked += len;
+    if (wb && wb->len) sd_write_seek( wb, pos + got );
+    else sd_cache_base->seek_r( r, fd, (off_t)(pos + got), SEEK_SET );
+    return got;
+}
+
 static ssize_t sd_cache_read_file( struct _reent *r, void *fd, char *ptr, size_t len )
 {
     struct sd_cache_fill_ctx ctx = { r, fd };
@@ -555,7 +620,23 @@ static ssize_t sd_cache_read_file( struct _reent *r, void *fd, char *ptr, size_t
     if (__atomic_load_n( &sd_write_buffers, __ATOMIC_RELAXED ))
     {
         pthread_mutex_lock( &sd_cache_mutex );
-        if ((file = sd_cache_find( sd_cache_files, fd ))) sd_cache_flush_path_locked( r, file->path );
+        if ((file = sd_cache_find( sd_cache_files, fd )))
+        {
+            if (file->keep_whole && len && len < SD_CACHE_DIRECT && (copy = malloc( len )))
+            {
+                /* Copied out of the lock: the program's buffer may fault. */
+                if ((got = sd_cache_read_kept_locked( r, fd, file, copy, len )) >= 0)
+                {
+                    pthread_mutex_unlock( &sd_cache_mutex );
+                    memcpy( ptr, copy, (size_t)got );
+                    free( copy );
+                    __atomic_add_fetch( &wine_nx_sd_hits, 1, __ATOMIC_RELAXED );
+                    return (ssize_t)got;
+                }
+                free( copy );
+            }
+            sd_cache_flush_path_locked( r, file->path );
+        }
         else sd_cache_flush_locked( r, sd_write_find( sd_write_buffers, fd ) );
         pthread_mutex_unlock( &sd_cache_mutex );
     }
@@ -645,6 +726,9 @@ static ssize_t sd_cache_write_file( struct _reent *r, void *fd, const char *ptr,
                 held = sd_write_take( &sd_write_buffers, fd, at, ptr, len, sd_cache_write_out, r );
                 if (held == -1)
                 {
+                    /* Neither these bytes nor those held before are on the
+                     * card, and the chunks may hold both. */
+                    sd_cache_drop( file, &sd_cache_pool );
                     pthread_mutex_unlock( &sd_cache_mutex );
                     if (!r->_errno) r->_errno = EIO;
                     return -1;

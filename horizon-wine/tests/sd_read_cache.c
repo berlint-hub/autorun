@@ -666,13 +666,42 @@ static void test_keep_whole(void)
     sd_cache_wrote( &file, &pool, 4 * SD_CACHE_CHUNK - 3, "zzzzzz", 6 );
     assert( cached_read( &file, &pool, &f, 4 * SD_CACHE_CHUNK - 4, buf, 8 ) == 8 && f.requests == 21 );
     assert( !memcmp( buf, f.data + 4 * SD_CACHE_CHUNK - 4, 8 ) );
-    /* Past the end of the short last chunk: the file grew, and it is read again. */
-    f.data = realloc( f.data, (size_t)f.size + 1000 );
-    memset( f.data + f.size, 'q', 1000 );
-    sd_cache_wrote( &file, &pool, f.size, f.data + f.size, 1000 );
+    /* Where the file ends, as FEX adds what it translates: the short last
+     * chunk takes the bytes and a new chunk those past it, and neither is
+     * read back. */
+    assert( file.size_known && file.size == f.size );
+    f.data = realloc( f.data, (size_t)f.size + SD_CACHE_CHUNK + 1000 );
+    memset( f.data + f.size, 'q', SD_CACHE_CHUNK );
+    sd_cache_wrote( &file, &pool, f.size, f.data + f.size, SD_CACHE_CHUNK );
+    f.size += SD_CACHE_CHUNK;
+    assert( file.size_known && file.size == f.size && pool.used == 22 );
+    assert( sd_cache_whole_has( &file, f.size - SD_CACHE_CHUNK - 100, SD_CACHE_CHUNK + 100 ) );
+    assert( sd_cache_whole_has( &file, f.size - 10, 100 ) && sd_cache_whole_has( &file, f.size + 10, 100 ) );
+    assert( cached_read( &file, &pool, &f, f.size - SD_CACHE_CHUNK - 100, buf, 200 ) == 200 && f.requests == 21 );
+    assert( !memcmp( buf, f.data + f.size - SD_CACHE_CHUNK - 100, 200 ) );
+    assert( cached_read( &file, &pool, &f, f.size - 150, buf, 200 ) == 150 && f.requests == 21 );
+    assert( !memcmp( buf, f.data + f.size - 150, 150 ) );
+    /* Bytes after a gap past the end: the end is not known any more, the
+     * chunk they land in goes, and it is read again. */
+    memset( f.data + f.size, 0, 500 );
+    memset( f.data + f.size + 500, 'g', 500 );
+    sd_cache_wrote( &file, &pool, f.size + 500, f.data + f.size + 500, 500 );
     f.size += 1000;
+    assert( !file.size_known && pool.used == 21 && !sd_cache_whole_has( &file, f.size - 1000, 10 ) );
+    assert( sd_cache_whole_has( &file, 5 * SD_CACHE_CHUNK, 2 * SD_CACHE_CHUNK ) );
     assert( cached_read( &file, &pool, &f, f.size - 1100, buf, 200 ) == 200 && f.requests == 22 );
     assert( !memcmp( buf, f.data + f.size - 1100, 200 ) );
+    /* Bytes from before the end to past it, into a chunk not held: it is not
+     * made up from them, and is read again with them. */
+    sd_cache_line_free( &file.whole[21], &pool );
+    f.data = realloc( f.data, (size_t)f.size + 10 );
+    memset( f.data + f.size - 10, 'k', 20 );
+    sd_cache_wrote( &file, &pool, f.size - 10, f.data + f.size - 10, 20 );
+    f.size += 10;
+    assert( file.size_known && file.size == f.size && !file.whole[21].data );
+    assert( !sd_cache_whole_has( &file, 21 * SD_CACHE_CHUNK, 10 ) );
+    assert( cached_read( &file, &pool, &f, f.size - 30, buf, 30 ) == 30 && f.requests == 23 );
+    assert( !memcmp( buf, f.data + f.size - 30, 30 ) );
     /* A write at a place not known drops everything. */
     sd_cache_wrote( &file, &pool, -1, "x", 1 );
     assert( !pool.used && !pool.held && !file.whole );
