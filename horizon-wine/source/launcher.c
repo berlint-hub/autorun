@@ -1811,7 +1811,7 @@ static void draw_home( struct launcher *l )
 enum program_row
 {
     ROW_START, ROW_FAVORITE, ROW_ARTWORK, ROW_FORWARDER, ROW_LOCATE, ROW_TITLE, ROW_ARGS, ROW_VERBOSE, ROW_PROFILE,
-    ROW_WINDOWS, ROW_PICTURE, ROW_MODE_EMULATION, ROW_GL_OLD_EXTENSIONS, ROW_GL_THREAD, ROW_GRAPHICS_DRIVER, ROW_D3D9, ROW_VKD3D_VERSION, ROW_DXVK_VERSION, ROW_DXVK_OPTIONS, ROW_DXVK_HUD, ROW_FRAME_LIMIT, ROW_VSYNC,
+    ROW_WINDOWS, ROW_PICTURE, ROW_MODE_EMULATION, ROW_GL_OLD_EXTENSIONS, ROW_GL_THREAD, ROW_VIDEO_MEMORY, ROW_MEMORY, ROW_GRAPHICS_DRIVER, ROW_D3D9, ROW_VKD3D_VERSION, ROW_DXVK_VERSION, ROW_DXVK_OPTIONS, ROW_DXVK_HUD, ROW_FRAME_LIMIT, ROW_VSYNC,
     ROW_LSFG, ROW_LSFG_DLL, ROW_LSFG_PERFORMANCE, ROW_LSFG_FLOW,
     ROW_UPSCALING, ROW_UPSCALING_SHARPNESS,
     ROW_INPUT, ROW_INPUT_END = ROW_INPUT + INPUT_ROW_COUNT - 1, ROW_BOX64, ROW_FEX, ROW_SYNC, ROW_SERVER_POOL, ROW_CPU, ROW_FEX_BUILD, ROW_FOUR_CORES, ROW_LARGE_ADDRESS, ROW_ORCHESTRATOR, ROW_LOCK_BOOST, ROW_LAZY_FILE_VIEWS,
@@ -2058,6 +2058,24 @@ static int next_picture_state( int state, int direction )
 
     for (i = 0; i < 4 && order[i] != state; i++) {}
     return order[(i + (direction < 0 ? 4 : 1)) % 5];
+}
+
+/* A reported memory size: Auto, or so many MB or GB. */
+static const char *memory_text( int mb, char *buffer, size_t size )
+{
+    if (!mb) snprintf( buffer, size, "Auto" );
+    else if (mb % 1024) snprintf( buffer, size, "%d MB", mb );
+    else snprintf( buffer, size, "%d GB", mb / 1024 );
+    return buffer;
+}
+
+/* The next of a setting's memory sizes, round the list. */
+static int next_memory( const int *values, unsigned int count, int mb, int direction )
+{
+    int i = launcher_memory_index( values, count, mb );
+
+    if (i < 0) i = 0;
+    return values[(i + (direction < 0 ? (int)count - 1 : 1)) % (int)count];
 }
 
 static int address_space_fits( struct launcher *l, struct program *p )
@@ -2697,6 +2715,23 @@ static int program_menu_run( struct launcher *l, struct program *p, char *target
         row->on = p->settings.gl_old_extensions;
         snprintf( row->value, sizeof(row->value), "%s", p->settings.gl_old_extensions ? "Enabled" : "Disabled" );
 
+        ADD_ROW( ROW_VIDEO_MEMORY, SECTION_GRAPHICS, "Video memory",
+                 "How much video memory the game is told its graphics card has: what Windows, OpenGL and "
+                 "Wine's Direct3D report, which some games pick their texture detail by (Doom 3) or will not "
+                 "start below. The console's memory is the CPU's and the GPU's both, so nothing is set aside "
+                 "and nothing gets faster: only what the game is told changes. Auto reports 1 GB. A DXVK game "
+                 "is told by DXVK options, dxgi.maxDeviceMemory." );
+        row->adjustable = 1;
+        memory_text( p->settings.video_memory_mb, row->value, sizeof(row->value) );
+
+        ADD_ROW( ROW_MEMORY, SECTION_GRAPHICS, "System memory",
+                 "How much memory Windows tells the game the machine has. Auto is what the console gives "
+                 "Autorun. Less helps an old game that misreads a large figure and says there is too little "
+                 "(or crashes); more lets a game start that asks for more than that, but it does not get it, "
+                 "and one that tries to use it all may run out." );
+        row->adjustable = 1;
+        memory_text( p->settings.memory_mb, row->value, sizeof(row->value) );
+
         ADD_ROW( ROW_GL_THREAD, SECTION_GRAPHICS, "OpenGL thread",
                  "Runs an OpenGL game's graphics calls on a thread of their own, on a core the game leaves "
                  "idle, so its own thread has more time for the game. For an OpenGL game that keeps one core "
@@ -3200,6 +3235,20 @@ static int program_menu_run( struct launcher *l, struct program *p, char *target
 
         case ROW_GL_THREAD:
             p->settings.gl_thread = action == UI_ACTION_RESET ? 0 : !p->settings.gl_thread;
+            save_program_settings( l, p );
+            break;
+
+        case ROW_VIDEO_MEMORY:
+            p->settings.video_memory_mb = action == UI_ACTION_RESET ? 0 :
+                next_memory( launcher_video_memory_values, LAUNCHER_VIDEO_MEMORY_COUNT, p->settings.video_memory_mb,
+                             action == UI_ACTION_LEFT ? -1 : 1 );
+            save_program_settings( l, p );
+            break;
+
+        case ROW_MEMORY:
+            p->settings.memory_mb = action == UI_ACTION_RESET ? 0 :
+                next_memory( launcher_memory_values, LAUNCHER_MEMORY_COUNT, p->settings.memory_mb,
+                             action == UI_ACTION_LEFT ? -1 : 1 );
             save_program_settings( l, p );
             break;
 

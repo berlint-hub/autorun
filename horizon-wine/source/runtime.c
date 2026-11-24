@@ -774,6 +774,12 @@ static int runtime_gl_thread;
  * batches would not suit. On unless set off. */
 static int runtime_gl_batch_off;
 
+/* What a program is told of memory, in MB, 0 for what it is told without
+ * (video-memory and memory in its settings, launcher_settings.h): Wine's unix
+ * side reads WINE_NX_VIDEO_MEMORY_MB (win32u's GPU and WGL renderer) and
+ * WINE_NX_MEMORY_MB (ntdll's memory status). */
+static int runtime_video_memory_mb, runtime_memory_mb;
+
 /* Whether a thread's long quick run of yields (Sleep(0), SwitchToThread, a
  * wait that timed out, a message poll that found nothing) sleeps a little each
  * instead of keeping its core busy (dlls/ntdll/unix/horizon_yield_backoff.h,
@@ -5651,6 +5657,7 @@ int main( int argc, char **argv )
         wine_nx_gl_old_extensions = 0;
         runtime_gl_thread = 0;
         runtime_gl_batch_off = 0;
+        runtime_video_memory_mb = runtime_memory_mb = 0;
         if (target[1] != ':' &&
             launcher_program_settings_path( RUNTIME_DIR, target, settings_path, sizeof(settings_path) ) &&
             launcher_kv_load( &kv, settings_path ))
@@ -5663,6 +5670,8 @@ int main( int argc, char **argv )
             wine_nx_gl_old_extensions = settings.gl_old_extensions;
             runtime_gl_thread = settings.gl_thread;
             runtime_gl_batch_off = launcher_setting_state( &kv, "gl-batch" ) == 0;
+            runtime_video_memory_mb = settings.video_memory_mb;
+            runtime_memory_mb = settings.memory_mb;
             if (settings.mode_emulation) wine_nx_emulate_modeset = settings.mode_emulation > 0;
             {
                 int fpslocker = launcher_setting_state( &kv, "fpslocker" );
@@ -5849,6 +5858,24 @@ int main( int argc, char **argv )
         log_line( "[INIT] OpenGL call batches off (gl-batch=0): a 32-bit program's calls cross one by one" );
     }
     else unsetenv( "WINE_NX_GL_BATCH" );
+    {
+        char mb[16];
+
+        if (runtime_video_memory_mb)
+        {
+            snprintf( mb, sizeof(mb), "%d", runtime_video_memory_mb );
+            setenv( "WINE_NX_VIDEO_MEMORY_MB", mb, 1 );
+            log_line( "[INIT] video memory reported to the program: %d MB (video-memory)", runtime_video_memory_mb );
+        }
+        else unsetenv( "WINE_NX_VIDEO_MEMORY_MB" );
+        if (runtime_memory_mb)
+        {
+            snprintf( mb, sizeof(mb), "%d", runtime_memory_mb );
+            setenv( "WINE_NX_MEMORY_MB", mb, 1 );
+            log_line( "[INIT] memory reported to the program: %d MB (memory)", runtime_memory_mb );
+        }
+        else unsetenv( "WINE_NX_MEMORY_MB" );
+    }
     if (wine_nx_large_address_aware)
         log_line( "[INIT] large address aware (large-address-aware): a 32-bit program gets addresses up to 4 GB" );
     log_line( "[INIT] verbose traces %s (verbose.txt)", wine_nx_runtime_verbose ? "on" : "off" );

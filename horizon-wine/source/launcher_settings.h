@@ -213,6 +213,15 @@ struct launcher_settings
     /* OpenGL's calls go to a thread of their own, Mesa's glthread, on a core
      * the program's main thread leaves free (nxvk; source/runtime.c). */
     int gl_thread;
+    /* What the program is told of memory, in MB, 0 for what it is told
+     * without: the video memory its graphics card has (win32u's GPU in the
+     * registry, which WMI's Win32_VideoController gives on, and the WGL
+     * renderer wined3d asks; 1 GB without) and the memory Windows says the
+     * machine has (GlobalMemoryStatusEx, dlls/ntdll/unix). The console's
+     * memory is the CPU's and the GPU's both: nothing is set aside for
+     * either, only what is reported changes. Values from the lists below. */
+    int video_memory_mb;
+    int memory_mb;
     /* Carafe's two ways with threads, off unless asked for: its orchestrator
      * lays the busy threads out over the cores (source/orchestrator.c), and a
      * program thread waits for a runtime lock one priority higher
@@ -432,6 +441,33 @@ static inline int launcher_program_settings_path( const char *runtime_dir, const
     return length >= 0 && (size_t)length < size;
 }
 
+static const int launcher_video_memory_values[] = { 0, 128, 256, 512, 1024, 2048, 3072 };
+static const int launcher_memory_values[] = { 0, 512, 1024, 1536, 2048, 3072 };
+#define LAUNCHER_VIDEO_MEMORY_COUNT (sizeof(launcher_video_memory_values) / sizeof(launcher_video_memory_values[0]))
+#define LAUNCHER_MEMORY_COUNT (sizeof(launcher_memory_values) / sizeof(launcher_memory_values[0]))
+
+/* The index of mb in values, or -1 when it is none of them. */
+static inline int launcher_memory_index( const int *values, unsigned int count, int mb )
+{
+    unsigned int i;
+
+    for (i = 0; i < count; i++) if (values[i] == mb) return (int)i;
+    return -1;
+}
+
+/* A memory size in MB from key, one of values, or 0. */
+static inline int launcher_memory_setting( const struct launcher_kv *kv, const char *key,
+                                           const int *values, unsigned int count )
+{
+    char value[16], *end;
+    long mb;
+
+    if (!launcher_kv_get( kv, key, value, sizeof(value) )) return 0;
+    mb = strtol( value, &end, 10 );
+    if (end == value || *end || mb <= 0 || mb > 65536) return 0;
+    return launcher_memory_index( values, count, (int)mb ) >= 0 ? (int)mb : 0;
+}
+
 static inline int launcher_setting_state( const struct launcher_kv *kv, const char *key )
 {
     char value[16];
@@ -463,6 +499,9 @@ static inline void launcher_settings_read( const struct launcher_kv *kv, struct 
     settings->large_address_aware = launcher_setting_state( kv, "large-address-aware" ) == 1;
     settings->gl_old_extensions = launcher_setting_state( kv, "gl-old-extensions" ) == 1;
     settings->gl_thread = launcher_setting_state( kv, "gl-thread" ) == 1;
+    settings->video_memory_mb = launcher_memory_setting( kv, "video-memory", launcher_video_memory_values,
+                                                         LAUNCHER_VIDEO_MEMORY_COUNT );
+    settings->memory_mb = launcher_memory_setting( kv, "memory", launcher_memory_values, LAUNCHER_MEMORY_COUNT );
     settings->orchestrator = launcher_setting_state( kv, "orchestrator" ) == 1;
     settings->lock_boost = launcher_setting_state( kv, "lock-boost" ) == 1;
     settings->server_pool = launcher_setting_state( kv, "server-pool" ) == 1;
@@ -555,6 +594,13 @@ static inline void launcher_settings_read( const struct launcher_kv *kv, struct 
 static inline int launcher_settings_write( struct launcher_kv *kv, const struct launcher_settings *settings )
 {
     static const char *states[] = { NULL, "0", "1" };
+    char video_memory[16], memory[16];
+
+    if (launcher_memory_index( launcher_video_memory_values, LAUNCHER_VIDEO_MEMORY_COUNT,
+                               settings->video_memory_mb ) < 0 ||
+        launcher_memory_index( launcher_memory_values, LAUNCHER_MEMORY_COUNT, settings->memory_mb ) < 0) return 0;
+    snprintf( video_memory, sizeof(video_memory), "%d", settings->video_memory_mb );
+    snprintf( memory, sizeof(memory), "%d", settings->memory_mb );
 
     if (settings->graphics_driver < 0 || settings->graphics_driver >= LAUNCHER_GRAPHICS_COUNT ||
         settings->d3d < LAUNCHER_D3D_WINE || settings->d3d > LAUNCHER_D3D_DXVK_VKD3D ||
@@ -581,6 +627,8 @@ static inline int launcher_settings_write( struct launcher_kv *kv, const struct 
            launcher_kv_set( kv, "large-address-aware", settings->large_address_aware ? "1" : NULL ) &&
            launcher_kv_set( kv, "gl-old-extensions", settings->gl_old_extensions ? "1" : NULL ) &&
            launcher_kv_set( kv, "gl-thread", settings->gl_thread ? "1" : NULL ) &&
+           launcher_kv_set( kv, "video-memory", settings->video_memory_mb ? video_memory : NULL ) &&
+           launcher_kv_set( kv, "memory", settings->memory_mb ? memory : NULL ) &&
            launcher_kv_set( kv, "orchestrator", settings->orchestrator ? "1" : NULL ) &&
            launcher_kv_set( kv, "lock-boost", settings->lock_boost ? "1" : NULL ) &&
            launcher_kv_set( kv, "server-pool", settings->server_pool ? "1" : NULL ) &&

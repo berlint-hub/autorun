@@ -2772,7 +2772,7 @@ static void get_performance_info( SYSTEM_PERFORMANCE_INFORMATION *info )
     {
         unsigned long long used;
 
-        horizon_get_memory_info( &totalram, &used );
+        horizon_get_reported_memory_info( &totalram, &used );
         freeram = totalram - used;
 #ifdef WINE_NX_SWAP_POC
         extern void horizon_swap_get_memory_info( unsigned long long *, unsigned long long * );

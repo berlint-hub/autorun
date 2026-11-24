@@ -398,10 +398,12 @@ static void test_reset(void)
     load_text( &kv, "title=My Game\nhidden=1\ngame-fix-skip=vampire 3\nbutton-layout=xbox\n"
                     "sync=horizon\ncpu=box64\nfex-build=carafe\nfour-cores=0\nlazy-file-views=1\nlarge-address-aware=1\ngl-old-extensions=1\ngl-thread=1\n"
                     "orchestrator=1\nlock-boost=1\nserver-pool=1\nwindows=framebuffer\npicture=edges\n"
+                    "video-memory=512\nmemory=1536\n"
                     "mode-emulation=0\ngraphics-driver=zink\nd3d=wine\ndxvk-hud=fps\nvsync=0\nlsfg=1\n"
                     "large-pages=1\nyield-backoff=0\nfpslocker=0\nverbose=1\nprofile=0\nFEX_TSOENABLED=1\n" );
     launcher_settings_read( &kv, &settings );
     assert( settings.gl_thread == 1 && settings.gl_old_extensions == 1 );
+    assert( settings.video_memory_mb == 512 && settings.memory_mb == 1536 );
     assert( launcher_settings_reset( &kv ) );
     memset( &settings, 0, sizeof(settings) );  /* padding and unused bytes alike, for memcmp */
     memset( &defaults, 0, sizeof(defaults) );
@@ -417,12 +419,59 @@ static void test_reset(void)
     assert( !strstr( kv.text, "sync=" ) && !strstr( kv.text, "orchestrator" ) && !strstr( kv.text, "mode-emulation" ) &&
             !strstr( kv.text, "large-pages" ) && !strstr( kv.text, "yield-backoff" ) && !strstr( kv.text, "verbose" ) &&
             !strstr( kv.text, "fpslocker" ) && !strstr( kv.text, "large-address" ) && !strstr( kv.text, "gl-old" ) &&
-            !strstr( kv.text, "gl-thread" ) &&
+            !strstr( kv.text, "gl-thread" ) && !strstr( kv.text, "video-memory" ) && !strstr( kv.text, "memory=" ) &&
             !strstr( kv.text, "d3d=" ) && !strstr( kv.text, "cpu=" ) && !strstr( kv.text, "lsfg" ) );
 
     /* An empty file stays empty but for what the defaults always write. */
     kv = empty;
     assert( launcher_settings_reset( &kv ) && !strstr( kv.text, "title" ) && !strstr( kv.text, "hidden" ) );
+}
+
+/* What a program is told of memory: one of the sizes the menu offers, in MB,
+ * written as given and left out for Auto; anything else reads as Auto, and a
+ * settings structure holding another size is not written at all. */
+static void test_memory(void)
+{
+    struct launcher_kv kv;
+    struct launcher_settings settings;
+    char value[64];
+
+    load_text( &kv, "video-memory=2048\nmemory=512\n" );
+    launcher_settings_read( &kv, &settings );
+    assert( settings.video_memory_mb == 2048 && settings.memory_mb == 512 );
+    settings.video_memory_mb = 128;
+    settings.memory_mb = 0;
+    assert( launcher_settings_write( &kv, &settings ) );
+    assert( launcher_kv_get( &kv, "video-memory", value, sizeof(value) ) && !strcmp( value, "128" ) );
+    assert( !launcher_kv_get( &kv, "memory", value, sizeof(value) ) );
+
+    /* Sizes the menu does not offer, and what is not a size, are Auto. */
+    load_text( &kv, "video-memory=1000\nmemory=-1024\n" );
+    launcher_settings_read( &kv, &settings );
+    assert( !settings.video_memory_mb && !settings.memory_mb );
+    load_text( &kv, "video-memory=512MB\nmemory=99999999999\n" );
+    launcher_settings_read( &kv, &settings );
+    assert( !settings.video_memory_mb && !settings.memory_mb );
+    settings.video_memory_mb = 1000;
+    assert( !launcher_settings_write( &kv, &settings ) );
+    settings.video_memory_mb = 0;
+    settings.memory_mb = 4096;
+    assert( !launcher_settings_write( &kv, &settings ) );
+
+    /* Every size the menu offers goes round. */
+    for (unsigned int i = 0; i < LAUNCHER_VIDEO_MEMORY_COUNT; i++)
+        for (unsigned int j = 0; j < LAUNCHER_MEMORY_COUNT; j++)
+        {
+            struct launcher_settings back;
+
+            load_text( &kv, "" );
+            launcher_settings_read( &kv, &settings );
+            settings.video_memory_mb = launcher_video_memory_values[i];
+            settings.memory_mb = launcher_memory_values[j];
+            assert( launcher_settings_write( &kv, &settings ) );
+            launcher_settings_read( &kv, &back );
+            assert( back.video_memory_mb == settings.video_memory_mb && back.memory_mb == settings.memory_mb );
+        }
 }
 
 int main(void)
@@ -434,6 +483,7 @@ int main(void)
     test_set();
     test_settings( dir );
     test_reset();
+    test_memory();
     snprintf( command, sizeof(command), "rm -rf '%s'", dir );
     system( command );
     printf( "launcher_settings: all tests passed\n" );
