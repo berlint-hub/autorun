@@ -560,12 +560,65 @@ static void nx_fps_gl_draw( struct nx_osk_gl *osk, EGLint height )
     }
 }
 
+/* Where the overlays go: the program's context and its surface's size, as
+ * the program's thread has them at its swap. */
+struct nx_osk_target
+{
+    EGLContext context;
+    EGLint width, height;
+};
+
+static void nx_osk_draw_gl( const struct nx_osk_target *target );
+
+static void nx_osk_draw_hook( void *data )
+{
+    nx_osk_draw_gl( data );
+}
+
+/* nxvk's EGL (horizon-wine/nxvk-patches/0004): what to draw into the back
+ * buffer at the thread's next swap, called where the swap is made. With Mesa's
+ * glthread that is the GL thread, after the frame's commands: the program's
+ * state the overlays read and put back (a dozen glGet and glIsEnabled) is read
+ * there at once, where from the program's thread the first query waited for
+ * the GL thread to run the whole frame, some 20% of Doom 3's main thread with
+ * the frame rate shown. mesa-switch's EGL has no such call: the overlays are
+ * drawn here, as before. */
+extern void horizon_egl_next_swap_hook( void (*hook)(void *), void *data ) __attribute__((weak));
+
 static void nx_osk_draw( struct opengl_drawable *base )
+{
+    /* One swap may still be drawing while the next is set up: two targets, in turn. */
+    static struct nx_osk_target targets[2];
+    static unsigned int next_target;
+    struct nx_osk_target target = {0};
+    BOOL overlay_visible = wine_nx_osk_visible() || wine_nx_osk_map_visible();
+    int cursor_x = 0, cursor_y = 0, cursor_visible = 0;
+    BOOL cursor_on = !overlay_visible && wine_nx_cursor_state && wine_nx_cursor_bitmap &&
+                     wine_nx_cursor_state( &cursor_x, &cursor_y, &cursor_visible ) && cursor_visible;
+    BOOL fps_on = &wine_nx_fps_counter && wine_nx_fps_counter;
+
+    if (!overlay_visible && !cursor_on && !fps_on) return;
+    if (!funcs->p_eglQuerySurface( egl->display, base->surface, EGL_WIDTH, &target.width ) ||
+        !funcs->p_eglQuerySurface( egl->display, base->surface, EGL_HEIGHT, &target.height ) ||
+        !(target.context = funcs->p_eglGetCurrentContext()))
+        return;
+    if (horizon_egl_next_swap_hook)
+    {
+        struct nx_osk_target *slot = &targets[next_target++ % ARRAY_SIZE(targets)];
+
+        *slot = target;
+        horizon_egl_next_swap_hook( nx_osk_draw_hook, slot );
+        return;
+    }
+    nx_osk_draw_gl( &target );
+}
+
+static void nx_osk_draw_gl( const struct nx_osk_target *target )
 {
     struct wine_nx_osk_frame frame;
     struct nx_osk_gl *osk = NULL;
-    EGLint width = 0, height = 0;
-    EGLContext context;
+    EGLint width = target->width, height = target->height;
+    EGLContext context = target->context;
     GLint read_fb, draw_fb, texture, unpack_buffer, row_length, skip_pixels, skip_rows, alignment;
     GLboolean scissor, srgb;
     BOOL overlay_visible = wine_nx_osk_visible() || wine_nx_osk_map_visible();
@@ -576,10 +629,6 @@ static void nx_osk_draw( struct opengl_drawable *base )
     unsigned int i;
 
     if (!overlay_visible && !cursor_on && !fps_on) return;
-    if (!funcs->p_eglQuerySurface( egl->display, base->surface, EGL_WIDTH, &width ) ||
-        !funcs->p_eglQuerySurface( egl->display, base->surface, EGL_HEIGHT, &height ) ||
-        !(context = funcs->p_eglGetCurrentContext()))
-        return;
     if (overlay_visible && !wine_nx_osk_frame( width, height, &frame ))
     {
         overlay_visible = FALSE;
@@ -785,7 +834,6 @@ static BOOL nx_drawable_swap( struct opengl_drawable *base )
 
     if (!impl_from_opengl_drawable( base )->screen)
         return funcs->p_eglSwapBuffers( egl->display, base->surface );
-    __atomic_store_n( &nx_osk_shown, FALSE, __ATOMIC_RELAXED );
     nx_osk_draw( base );
     nx_fps_lock_frame( base );
     start = horizon_interrupt_time();
@@ -794,7 +842,9 @@ static BOOL nx_drawable_swap( struct opengl_drawable *base )
     __atomic_add_fetch( &wine_nx_gl_swap_time, start, __ATOMIC_RELAXED );
     __atomic_add_fetch( &wine_nx_gl_swaps, 1, __ATOMIC_RELAXED );
     if (ret && wine_nx_frame_presented) wine_nx_frame_presented( GetCurrentThreadId(), start );
-    if (__atomic_load_n( &nx_osk_shown, __ATOMIC_ACQUIRE ))
+    /* Taken, not just read: with nxvk the keyboard is drawn on the GL thread
+     * (nx_osk_draw), which may say so only after this swap returned. */
+    if (__atomic_exchange_n( &nx_osk_shown, FALSE, __ATOMIC_ACQ_REL ))
         __atomic_store_n( &nx_screen_clears, NX_SCREEN_CLEARS, __ATOMIC_RELAXED );
     if (ret && __atomic_load_n( &p_glBindFramebuffer, __ATOMIC_ACQUIRE ))
     {

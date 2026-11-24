@@ -1,0 +1,71 @@
+diff --git a/src/egl/drivers/horizon/egl_horizon.c b/src/egl/drivers/horizon/egl_horizon.c
+index ffece46..ec330c5 100644
+--- a/src/egl/drivers/horizon/egl_horizon.c
++++ b/src/egl/drivers/horizon/egl_horizon.c
+@@ -76,8 +76,29 @@ struct horizon_egl_surface {
+    struct util_queue_fence swapped;
+    struct st_context *swap_st;
+    bool swap_failed;
++   /* What the swap draws into the back buffer first (horizon_egl_next_swap_hook). */
++   void (*swap_hook)(void *data);
++   void *swap_hook_data;
+ };
+ 
++/* Something to draw into the back buffer at this thread's next swap, after
++ * the frame's own commands, in the context and on the thread the swap is made
++ * on: the GL thread with glthread on. Autorun's on-screen keyboard, cursor and
++ * frame rate are drawn so (Wine's winnx_opengl.c): the program's state they
++ * read and put back is read there at once, where from the program's thread
++ * each query would wait for the GL thread to run the whole frame. */
++static __thread void (*horizon_pending_hook)(void *data);
++static __thread void *horizon_pending_hook_data;
++
++void horizon_egl_next_swap_hook(void (*hook)(void *data), void *data);
++
++void
++horizon_egl_next_swap_hook(void (*hook)(void *data), void *data)
++{
++   horizon_pending_hook = hook;
++   horizon_pending_hook_data = data;
++}
++
+ static struct horizon_egl_surface *
+ horizon_surface_from_drawable(struct pipe_frontend_drawable *drawable)
+ {
+@@ -334,6 +355,16 @@ horizon_present(struct horizon_egl_surface *surf, struct st_context *st)
+    if (!back)
+       return false;
+ 
++   if (surf->swap_hook) {
++      void (*hook)(void *data) = surf->swap_hook;
++
++      surf->swap_hook = NULL;
++      hook(surf->swap_hook_data);
++      /* From the program's thread with glthread on, what the hook drew was
++       * only queued; on the GL thread this returns at once. */
++      horizon_glthread_finish(st);
++   }
++
+    /* flush_resource has to land after the pending GL work is submitted but
+     * before the pipe flush.
+     */
+@@ -369,7 +400,10 @@ horizon_swap_buffers(_EGLDisplay *disp, _EGLSurface *base)
+    struct horizon_egl_surface *surf = horizon_egl_surface(base);
+    struct horizon_egl_context *hctx =
+       horizon_egl_context(base->CurrentContext);
++   void (*hook)(void *data) = horizon_pending_hook;
++   void *hook_data = horizon_pending_hook_data;
+ 
++   horizon_pending_hook = NULL;
+    if (!hctx || !surf->att[ST_ATTACHMENT_BACK_LEFT])
+       return EGL_FALSE;
+ 
+@@ -388,6 +422,8 @@ horizon_swap_buffers(_EGLDisplay *disp, _EGLSurface *base)
+       return _eglError(EGL_BAD_SURFACE, "eglSwapBuffers");
+    }
+    surf->swap_st = st;
++   surf->swap_hook = hook;
++   surf->swap_hook_data = hook_data;
+    util_queue_fence_reset(&surf->swapped);
+    if (_mesa_glthread_flush_and_call(st->ctx, horizon_present_on_glthread,
+                                      surf))

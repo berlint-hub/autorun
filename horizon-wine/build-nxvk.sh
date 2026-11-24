@@ -30,7 +30,11 @@ image="autorun-nxvk:$commit"
 # when a thread waits on it. 0003 has the GL thread do eglSwapBuffers after the
 # frame's last commands, so the program's thread goes on with the next frame
 # instead of waiting for the GL thread to finish this one; it waits only for
-# the swap before. The package is kept for this commit and these patches.
+# the swap before. 0004 lets the runtime draw into the back buffer at the
+# swap, where the swap is made (the GL thread): Wine's keyboard, cursor and
+# frame rate, whose state queries from the program's thread would wait for the
+# GL thread to run the whole frame. The package is kept for this commit and
+# these patches.
 stamp="$commit"
 for patch in "$hw"/nxvk-patches/*.patch; do
     [ -f "$patch" ] || continue

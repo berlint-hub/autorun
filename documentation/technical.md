@@ -492,6 +492,12 @@ changes, and fails if the pinned text moves.
   Doom 3's heavier scenes some 6 ms of a 22 ms frame, 26% of its main
   thread). It waits only for the swap before, so the GL thread is at most a
   frame behind; a swapchain gone out of date is said at the next swap.
+  What win32u draws over the frame (the keyboard, the cursor, the frame rate)
+  is drawn there too, in the swap (`nxvk-patches/0004`,
+  `horizon_egl_next_swap_hook`): it reads and puts back a dozen pieces of the
+  program's state, and from the program's thread the first query waited for
+  the GL thread to run the whole frame, 18-28% of Doom 3's main thread with the
+  frame rate shown.
 - Every OpenGL call of a 32-bit program crosses from its x86 opengl32 into
   the unix side: FEX's bridge, the runtime's unix call dispatcher and its
   kernel state, some 17% of Doom 3's main thread at its 25000 calls a frame.
