@@ -58,7 +58,8 @@ typedef struct
     unsigned int NumberOfProcessors;
     unsigned int unknown;
 } SYSTEM_BASIC_INFORMATION;
-static void horizon_get_memory_info(unsigned long long *total, unsigned long long *used)
+/* What the program is told of the machine's memory (memory= in its settings). */
+static void horizon_get_reported_memory_info(unsigned long long *total, unsigned long long *used)
 {
     *total = 8ull << 30;
     *used = 1ull << 30;
