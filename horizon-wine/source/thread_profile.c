@@ -1114,7 +1114,7 @@ static void record( struct nx_prof_target *target, const ThreadContext *ctx, int
                     const uint64_t *callers, unsigned int count, const uint32_t *x86_callers, unsigned int x86_count )
 {
     uintptr_t pc = ctx->pc.x;
-    uint32_t sites[2] = { NX_PROF_NO_SITE, NX_PROF_NO_SITE };
+    uint32_t sites[4] = { NX_PROF_NO_SITE, NX_PROF_NO_SITE, NX_PROF_NO_SITE, NX_PROF_NO_SITE };
     int native = in_runtime( pc ), svc = -1;
     unsigned int i, n = 0;
     enum nx_prof_kind kind;
@@ -1148,12 +1148,17 @@ static void record( struct nx_prof_target *target, const ThreadContext *ctx, int
 
     /* The two calls outside the sample's own function: a system call's key
      * already names the stub's caller. */
-    for (i = kind == NX_PROF_SVC && count && callers[0] == ctx->lr ? 1 : 0; i < count && n < 2; i++)
+    for (i = kind == NX_PROF_SVC && count && callers[0] == ctx->lr ? 1 : 0; i < count && n < 4; i++)
     {
         if (!in_runtime( callers[i] )) break;
         sites[n++] = (uint32_t)(callers[i] - runtime_base);
     }
     nx_prof_add( &target->tables[NX_PROF_CHAIN], nx_prof_pair_key( sites[0], sites[1] ) );
+    /* A wait's "__syscall_cond_wait<u_cnd_monotonic_wait" says nothing of
+     * what is waited for: the two calls above it do (Mesa's glthread fence
+     * and who finishes the queue, say). */
+    if (kind == NX_PROF_SVC && n > 2)
+        nx_prof_add( &target->tables[NX_PROF_WAIT_CHAIN], nx_prof_pair_key( sites[2], sites[3] ) );
 }
 
 extern volatile int wine_nx_quit_requested __attribute__((weak));
@@ -1547,7 +1552,7 @@ static void report_stages( const struct nx_prof_target *target, char *line )
 static void profile_report( const struct nx_prof_row *rows, unsigned int count )
 {
     static const char *const table_names[NX_PROF_TABLES] = { "x86", "pe", "native", "svc", "callers", "x86 callers",
-                                                             "x86 frames" };
+                                                             "x86 frames", "waits from" };
     char line[NX_PROF_LINE + 24], name[128], outer[128];
     unsigned int i, j, k, shown, top[12];
     int len;
