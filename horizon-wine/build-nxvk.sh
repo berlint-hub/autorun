@@ -26,7 +26,11 @@ pkg="$src/switch/build/pkg"
 image="autorun-nxvk:$commit"
 # Autorun's changes to nxvk, applied in name order on the pinned commit:
 # 0001 starts Mesa's glthread when the runtime sets mesa_glthread (the program's
-# OpenGL thread setting). The package is kept for this commit and these patches.
+# OpenGL thread setting). 0002 has Mesa's job queues signal a condition only
+# when a thread waits on it. 0003 has the GL thread do eglSwapBuffers after the
+# frame's last commands, so the program's thread goes on with the next frame
+# instead of waiting for the GL thread to finish this one; it waits only for
+# the swap before. The package is kept for this commit and these patches.
 stamp="$commit"
 for patch in "$hw"/nxvk-patches/*.patch; do
     [ -f "$patch" ] || continue

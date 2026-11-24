@@ -486,6 +486,12 @@ changes, and fails if the pinned text moves.
   swap, a make-current and a context's or surface's end, as Mesa's DRI
   frontend does. `[INIT] OpenGL thread on` and a `Mesa queue gl` line in the
   log say it runs. A game that reads back from the GPU often can be slower.
+  The swap itself is the GL thread's (`nxvk-patches/0003`): it runs once the
+  frame's last batch has, and the game's thread goes on with the next frame
+  rather than waiting for the GL and driver threads to finish this one (in
+  Doom 3's heavier scenes some 6 ms of a 22 ms frame, 26% of its main
+  thread). It waits only for the swap before, so the GL thread is at most a
+  frame behind; a swapchain gone out of date is said at the next swap.
 - Every OpenGL call of a 32-bit program crosses from its x86 opengl32 into
   the unix side: FEX's bridge, the runtime's unix call dispatcher and its
   kernel state, some 17% of Doom 3's main thread at its 25000 calls a frame.
