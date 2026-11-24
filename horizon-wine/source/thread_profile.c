@@ -1626,35 +1626,94 @@ static void profile_report( const struct nx_prof_row *rows, unsigned int count )
 #define NX_PROF_SERVER_SAMPLE 8
 static pthread_mutex_t server_callers_mutex = PTHREAD_MUTEX_INITIALIZER;
 static struct nx_prof_table server_callers;
+/* And the runtime's code that made each sampled request, by the return
+ * addresses of its frame chain above the server call: the Nt function, what
+ * called it, and so on, named in the report from the symbol file. */
+static struct nx_prof_table server_natives;
 static unsigned int server_sequence;
 
 void wine_nx_prof_server_request( unsigned int code, void *teb )
 {
     uint32_t callers[NX_PROF_DEPTH];
-    unsigned int n, i;
+    uint64_t natives[8];
+    unsigned int n, i, count = 0;
 
     if (code >= NX_PROF_MAX_REQUESTS ||
         __atomic_add_fetch( &server_sequence, 1, __ATOMIC_RELAXED ) % NX_PROF_SERVER_SAMPLE) return;
     n = walk_x86( (uint64_t)(uintptr_t)teb, callers );
+    {
+        /* Frame records: [fp] the caller's fp, [fp + 8] the return address.
+         * The first two are this function's and wine_server_call's. */
+        uint64_t fp = (uint64_t)(uintptr_t)__builtin_frame_address( 0 );
+        unsigned int depth;
+        MemoryInfo info;
+
+        if (readable( fp, &info ))
+            for (depth = 0; depth < 2 + 8 && count < 8; depth++)
+            {
+                uint64_t next, ret;
+
+                if (fp < info.addr || fp + 16 > info.addr + info.size || (fp & 7)) break;
+                next = read_word( fp );
+                ret = read_word( fp + 8 );
+                if (depth >= 2 && in_runtime( ret )) natives[count++] = ret - runtime_base;
+                if (next <= fp) break;
+                fp = next;
+            }
+    }
     pthread_mutex_lock( &server_callers_mutex );
     if (!n) nx_prof_add( &server_callers, ((uint64_t)code << 32) | NX_PROF_NO_SITE );
     for (i = 0; i < n && i <= 3; i++) nx_prof_add( &server_callers, ((uint64_t)code << 32) | callers[i] );
+    for (i = 0; i < count; i++) nx_prof_add( &server_natives, ((uint64_t)code << 32) | (uint32_t)natives[i] );
     pthread_mutex_unlock( &server_callers_mutex );
 }
 
 /* For the most frequent requests of the interval, the guest code they came
  * from: about how many of them had each return address above them ("-" for
  * none: a request of the runtime's own, or of a thread with no x86 frame). */
-static void server_callers_report( const unsigned int *calls, unsigned int count )
+/* One line for one request: its six most frequent sites in table, x86
+ * return addresses (guest) or the runtime's (native). */
+static void server_sites_line( const struct nx_prof_table *table, unsigned int code, const char *request,
+                               unsigned int calls, int guest )
 {
-    static struct nx_prof_table table;
-    unsigned int codes[4], shown = 0, i, j, k;
+    unsigned int top[6] = {0}, found = 0, samples = 0, i, j;
     char line[NX_PROF_LINE + 24], name[96];
     int len;
 
+    for (i = 0; i < NX_PROF_BUCKETS; i++)
+    {
+        const struct nx_prof_bucket *bucket = &table->buckets[i];
+
+        if (!bucket->count || (bucket->key >> 32) != code) continue;
+        samples += bucket->count;
+        j = found < 6 ? found++ : 6;
+        for (; j > 0 && table->buckets[top[j - 1]].count < bucket->count; j--)
+            if (j < 6) top[j] = top[j - 1];
+        if (j < 6) top[j] = i;
+    }
+    if (!samples) return;
+    len = appendf( line, 0, "[SERVER] %s %u %s:", request ? request : "?", calls, guest ? "from" : "in" );
+    for (j = 0; j < found; j++)
+    {
+        const struct nx_prof_bucket *bucket = &table->buckets[top[j]];
+
+        if (guest) name_site( (uint32_t)bucket->key, 1, name, sizeof(name) );
+        else name_native( (uint32_t)bucket->key, name, sizeof(name) );
+        len = appendf( line, len, " %s ~%u", name, bucket->count * NX_PROF_SERVER_SAMPLE );
+    }
+    wine_nx_runtime_trace( line );
+}
+
+static void server_callers_report( const unsigned int *calls, unsigned int count )
+{
+    static struct nx_prof_table table, natives;
+    unsigned int codes[4], shown = 0, i, j, k;
+
     pthread_mutex_lock( &server_callers_mutex );
     table = server_callers;
+    natives = server_natives;
     memset( &server_callers, 0, sizeof(server_callers) );
+    memset( &server_natives, 0, sizeof(server_natives) );
     pthread_mutex_unlock( &server_callers_mutex );
     for (i = 0; i < count; i++)
     {
@@ -1666,30 +1725,10 @@ static void server_callers_report( const unsigned int *calls, unsigned int count
     }
     for (k = 0; k < shown; k++)
     {
-        unsigned int top[6] = {0}, found = 0, samples = 0;  /* samples: whether any */
         const char *request = &wine_nx_server_names ? __atomic_load_n( &wine_nx_server_names[codes[k]], __ATOMIC_RELAXED ) : NULL;
 
-        for (i = 0; i < NX_PROF_BUCKETS; i++)
-        {
-            const struct nx_prof_bucket *bucket = &table.buckets[i];
-
-            if (!bucket->count || (bucket->key >> 32) != codes[k]) continue;
-            samples += bucket->count;
-            j = found < 6 ? found++ : 6;
-            for (; j > 0 && table.buckets[top[j - 1]].count < bucket->count; j--)
-                if (j < 6) top[j] = top[j - 1];
-            if (j < 6) top[j] = i;
-        }
-        if (!samples) continue;
-        len = appendf( line, 0, "[SERVER] %s %u from:", request ? request : "?", calls[codes[k]] );
-        for (j = 0; j < found; j++)
-        {
-            const struct nx_prof_bucket *bucket = &table.buckets[top[j]];
-
-            name_site( (uint32_t)bucket->key, 1, name, sizeof(name) );
-            len = appendf( line, len, " %s ~%u", name, bucket->count * NX_PROF_SERVER_SAMPLE );
-        }
-        wine_nx_runtime_trace( line );
+        server_sites_line( &table, codes[k], request, calls[codes[k]], 1 );
+        server_sites_line( &natives, codes[k], request, calls[codes[k]], 0 );
     }
 }
 

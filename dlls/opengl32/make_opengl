@@ -185,6 +185,14 @@ my %deferred_calls =
      "glColor4f" => "", "glColor4fv" => "v:4 * sizeof(GLfloat)", "glColor4ub" => "", "glColor4ubv" => "v:4 * sizeof(GLubyte)",
      "glMatrixMode" => "", "glLoadIdentity" => "", "glLoadMatrixf" => "m:16 * sizeof(GLfloat)",
      "glTexEnvi" => "", "glTexEnvf" => "",
+     "glScissor" => "", "glDepthRange" => "", "glDepthBoundsEXT" => "", "glPolygonMode" => "",
+     "glActiveStencilFaceEXT" => "", "glStencilOpSeparate" => "", "glStencilFuncSeparate" => "",
+     "glStencilOpSeparateATI" => "", "glStencilFuncSeparateATI" => "",
+     "glBlendEquation" => "", "glBlendEquationEXT" => "",
+     "glClearColor" => "", "glClearDepth" => "", "glClearStencil" => "",
+     "glLineWidth" => "", "glPointSize" => "",
+     "glProgramLocalParameter4fARB" => "", "glProgramLocalParameter4fvARB" => "params:4 * sizeof(GLfloat)",
+     "glColor3f" => "", "glColor3ub" => "",
     );
 my %manual_win_thunks =
     (
