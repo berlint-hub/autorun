@@ -633,6 +633,72 @@ static void test_replay(void)
     assert( ahead.ms <= whole.ms * 1.05 );
 }
 
+/* A file that keeps every chunk (FEX's code cache) reads each chunk once,
+ * however many it reads, until the pool is full: then its chunks go oldest
+ * first like any other's, and the bytes stay right. A write lands in the
+ * chunks held; one that runs past a short last chunk lets it go. */
+static void test_keep_whole(void)
+{
+    struct sd_cache_pool pool = { .max = 64 }, small = { .max = 4 };
+    struct fake_file f = make_file( 20LL * SD_CACHE_CHUNK + 300 );
+    struct sd_cache_file file = { .cacheable = 1, .keep_whole = 1 };
+    char buf[200];
+    unsigned int i, seed = 3;
+
+    for (i = 0; i < 5000; i++)
+    {
+        long long at;
+
+        seed = seed * 1103515245 + 12345;
+        at = (long long)(seed % (unsigned int)(f.size - (long long)sizeof(buf)));
+        assert( cached_read( &file, &pool, &f, at, buf, sizeof(buf) ) == (long long)sizeof(buf) );
+        assert( !memcmp( buf, f.data + at, sizeof(buf) ) );
+    }
+    assert( f.requests == 21 && pool.used == 21 && !holding( &file ) );
+
+    /* In place: no request to read it back. */
+    memcpy( f.data + 3 * SD_CACHE_CHUNK + 10, "ABCDE", 5 );
+    sd_cache_wrote( &file, &pool, 3 * SD_CACHE_CHUNK + 10, "ABCDE", 5 );
+    assert( cached_read( &file, &pool, &f, 3 * SD_CACHE_CHUNK + 8, buf, 9 ) == 9 && f.requests == 21 );
+    assert( !memcmp( buf, f.data + 3 * SD_CACHE_CHUNK + 8, 9 ) );
+    /* Across two chunks. */
+    memset( f.data + 4 * SD_CACHE_CHUNK - 3, 'z', 6 );
+    sd_cache_wrote( &file, &pool, 4 * SD_CACHE_CHUNK - 3, "zzzzzz", 6 );
+    assert( cached_read( &file, &pool, &f, 4 * SD_CACHE_CHUNK - 4, buf, 8 ) == 8 && f.requests == 21 );
+    assert( !memcmp( buf, f.data + 4 * SD_CACHE_CHUNK - 4, 8 ) );
+    /* Past the end of the short last chunk: the file grew, and it is read again. */
+    f.data = realloc( f.data, (size_t)f.size + 1000 );
+    memset( f.data + f.size, 'q', 1000 );
+    sd_cache_wrote( &file, &pool, f.size, f.data + f.size, 1000 );
+    f.size += 1000;
+    assert( cached_read( &file, &pool, &f, f.size - 1100, buf, 200 ) == 200 && f.requests == 22 );
+    assert( !memcmp( buf, f.data + f.size - 1100, 200 ) );
+    /* A write at a place not known drops everything. */
+    sd_cache_wrote( &file, &pool, -1, "x", 1 );
+    assert( !pool.used && !pool.held && !file.whole );
+
+    /* A pool of four: the chunks go oldest first, the bytes stay right. */
+    for (i = 0; i < 2000; i++)
+    {
+        long long at;
+
+        seed = seed * 1103515245 + 12345;
+        at = (long long)(seed % (unsigned int)(f.size - (long long)sizeof(buf)));
+        assert( cached_read( &file, &small, &f, at, buf, sizeof(buf) ) == (long long)sizeof(buf) );
+        assert( !memcmp( buf, f.data + at, sizeof(buf) ) );
+        assert( small.used <= 4 );
+    }
+    sd_cache_drop( &file, &small );
+    assert( !small.used && !small.held && !file.whole );
+
+    /* A file that does not keep every chunk drops them all on a write. */
+    file.keep_whole = 0;
+    assert( cached_read( &file, &pool, &f, 5, buf, 10 ) == 10 && holding( &file ) == 1 );
+    sd_cache_wrote( &file, &pool, 5, "x", 1 );
+    assert( !holding( &file ) && !pool.used );
+    free( f.data );
+}
+
 int main(void)
 {
     test_sprite_reads();
@@ -646,8 +712,9 @@ int main(void)
     test_replay();
     test_open_files();
     test_shelf();
+    test_keep_whole();
     puts( "SD read cache: sprite reads, end of file, least recently used, failures, a full pool taking the "
           "oldest chunk of any file, 300 open files, a pool that grows and shrinks with the free heap, "
-          "readahead, and open files a program writes to, and a closed reader's chunks for the next open of its path passed" );
+          "readahead, and open files a program writes to, a closed reader's chunks for the next open of its path, and a file that keeps every chunk passed" );
     return 0;
 }

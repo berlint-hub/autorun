@@ -261,7 +261,13 @@ after the read cache, and `cache_mb` what that cache holds. The cache
 between 32 and 192 MB depending on the heap a game leaves free; a write to a
 file throws away what is held for it. A miss reads a whole 128 KB chunk; the
 cache can also read ahead from 16 KB (`fill_min`), which on The Sims 2 halved
-the bytes from the card but not the time. `code_mb` is the translated code the run
+the bytes from the card but not the time. FEX's code cache
+(`RWCacheDB_*.foz`, with `FEX_DISKCACHE`) is read a few kilobytes at a time
+all over while FEX adds what it translates at its end: it keeps every chunk
+it reads (`keep_whole`, up to 256 MB of it, as long as the pool has room) and
+a write goes into the chunks it lands in instead of throwing them all away.
+Before, each block found in the cache cost a 128 KB read from the card, 0.4 to
+7 ms, more than translating it again. `code_mb` is the translated code the run
 holds now over the code memory Horizon gave it, and `code_all_mb` every byte
 ever translated: Horizon grants ten code memory objects in all, so translated
 code that is never reused is what ends a long run in the interpreter
