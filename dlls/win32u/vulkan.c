@@ -3666,6 +3666,16 @@ static VkResult record_compute_cmd( struct vulkan_device *device, struct swapcha
 /* Counted in the runtime's [PROGRESS] frames. */
 unsigned int wine_nx_vk_presents;
 static LONG nx_present_logs;
+/* The runtime's [FRAMES] line (horizon-wine/source/frame_pacing.h). */
+extern void wine_nx_frame_presented( unsigned int tid, unsigned long long present_100ns ) __attribute__((weak));
+
+static unsigned long long nx_present_clock( void )
+{
+    struct timespec now;
+
+    if (clock_gettime( CLOCK_MONOTONIC, &now )) return 0;
+    return (unsigned long long)now.tv_sec * 10000000ull + now.tv_nsec / 100;
+}
 
 static void nx_vk_note_present( const VkSwapchainKHR *client_swapchains, uint32_t count, VkResult res )
 {
@@ -4746,6 +4756,7 @@ static VkResult win32u_vkQueuePresentKHR( VkQueue client_queue, const VkPresentI
 #ifdef __SWITCH__
     struct swapchain *blit_swapchain = NULL;
     struct fs_hack_image *blit_hack = NULL;
+    unsigned long long nx_present_time = 0;
 #endif
 
     TRACE( "queue %p, present_info %p\n", queue, present_info );
@@ -4859,6 +4870,9 @@ static VkResult win32u_vkQueuePresentKHR( VkQueue client_queue, const VkPresentI
         }
     }
 #endif
+#ifdef __SWITCH__
+    nx_present_time = nx_present_clock();
+#endif
 #ifdef WINE_NX_LSFG
     if (!present_info->swapchainCount ||
         !wine_nx_lsfg_present( swapchain_from_handle( client_swapchains[0] )->lsfg,
@@ -4866,6 +4880,9 @@ static VkResult win32u_vkQueuePresentKHR( VkQueue client_queue, const VkPresentI
                                !swapchain_from_handle( client_swapchains[0] )->lsfg_acquires, present_info, &res ))
 #endif
     res = device->p_vkQueuePresentKHR( queue->host.queue, present_info );
+#ifdef __SWITCH__
+    nx_present_time = nx_present_clock() - nx_present_time;
+#endif
     pthread_mutex_unlock( &present_lock );
 
     for (uint32_t i = 0; i < present_info->swapchainCount; i++)
@@ -4896,6 +4913,8 @@ static VkResult win32u_vkQueuePresentKHR( VkQueue client_queue, const VkPresentI
     }
 #ifdef __SWITCH__
     nx_vk_note_present( client_swapchains, present_info->swapchainCount, res );
+    if (wine_nx_frame_presented && present_info->swapchainCount && res >= VK_SUCCESS)
+        wine_nx_frame_presented( GetCurrentThreadId(), nx_present_time );
 #endif
 
     if (TRACE_ON( fps ))

@@ -231,6 +231,8 @@ static void nx_drawable_flush( struct opengl_drawable *base, UINT flags )
 extern unsigned long long horizon_interrupt_time(void);
 unsigned int wine_nx_gl_swaps;
 unsigned long long wine_nx_gl_swap_time;  /* 100 ns */
+/* The runtime's [FRAMES] line (horizon-wine/source/frame_pacing.h). */
+extern void wine_nx_frame_presented( unsigned int tid, unsigned long long present_100ns ) __attribute__((weak));
 
 /* The floating keyboard (horizon-wine/source/osk.c), put into the back
  * buffer just before it is shown: its picture in a texture of each context's
@@ -788,8 +790,10 @@ static BOOL nx_drawable_swap( struct opengl_drawable *base )
     nx_fps_lock_frame( base );
     start = horizon_interrupt_time();
     ret = funcs->p_eglSwapBuffers( egl->display, base->surface );
-    __atomic_add_fetch( &wine_nx_gl_swap_time, horizon_interrupt_time() - start, __ATOMIC_RELAXED );
+    start = horizon_interrupt_time() - start;
+    __atomic_add_fetch( &wine_nx_gl_swap_time, start, __ATOMIC_RELAXED );
     __atomic_add_fetch( &wine_nx_gl_swaps, 1, __ATOMIC_RELAXED );
+    if (wine_nx_frame_presented) wine_nx_frame_presented( GetCurrentThreadId(), start );
     if (__atomic_load_n( &nx_osk_shown, __ATOMIC_ACQUIRE ))
         __atomic_store_n( &nx_screen_clears, NX_SCREEN_CLEARS, __ATOMIC_RELAXED );
     if (ret && __atomic_load_n( &p_glBindFramebuffer, __ATOMIC_ACQUIRE ))

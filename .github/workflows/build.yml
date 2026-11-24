@@ -225,15 +225,17 @@ jobs:
           done
 
       - name: Reports, thread waits and the orchestrator
-        # Carafe's diagnostics (PORTING.md, stages 2 and 3): what the [WAITS]
-        # and [FEX] lines say, what a thread creation at the limit counts, the
+        # Carafe's diagnostics (PORTING.md, stages 2 and 3): what the [WAITS],
+        # [FEX] and [FRAMES] lines say, what a thread creation at the limit counts, the
         # fd queue's report, and the profiler's parts that need no kernel.
         run: |
           flags="-std=gnu11 -Wall -Wextra -Werror -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer"
           cd horizon-wine
           cc $flags -I tests/carafe-shims -I source tests/carafe_reports.c -o "$RUNNER_TEMP/carafe_reports"
+          cc $flags -I tests/carafe-shims -I source tests/frame_pacing.c -o "$RUNNER_TEMP/frame_pacing"
           cc $flags -I source tests/thread_profile.c -o "$RUNNER_TEMP/thread_profile"
           "$RUNNER_TEMP/carafe_reports"
+          "$RUNNER_TEMP/frame_pacing"
           "$RUNNER_TEMP/thread_profile"
           # Stage 4: what the orchestrator decides (Carafe's own test), that it
           # does nothing behind its switch, and how the two settings reach it.

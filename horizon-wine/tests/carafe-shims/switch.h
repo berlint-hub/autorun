@@ -1,6 +1,7 @@
 /* What Carafe's reports (source/carafe_waits.c, carafe_lock_boost.c,
- * carafe_fex_stats.c) use of libnx, for tests/carafe_reports.c: a clock the
- * test moves and one thread whose priority it reads back. */
+ * carafe_fex_stats.c, frame_pacing.c) use of libnx, for tests/carafe_reports.c
+ * and tests/frame_pacing.c: a clock the test moves and one thread whose
+ * priority it reads back. */
 #ifndef CARAFE_REPORTS_TEST_SWITCH_H
 #define CARAFE_REPORTS_TEST_SWITCH_H
 
@@ -28,6 +29,10 @@ extern unsigned int test_priority_sets;
 static inline u64 armGetSystemTick( void ) { return test_tick; }
 static inline u64 armTicksToNs( u64 tick ) { return tick * 625 / 12; }
 static inline Handle threadGetCurHandle( void ) { return test_thread; }
+/* One thread at a time in the tests. */
+typedef u32 Mutex;
+static inline void mutexLock( Mutex *mutex ) { (void)mutex; }
+static inline void mutexUnlock( Mutex *mutex ) { (void)mutex; }
 
 static inline Result svcGetThreadPriority( s32 *priority, Handle handle )
 {

@@ -11,6 +11,7 @@
 #include "carafe_fex_stats.h"
 #include "carafe_settings.h"
 #include "carafe_waits.h"
+#include "frame_pacing.h"
 
 #define NATIVE_KINDS 64
 #define BENCH_LOOPS 20000
@@ -348,6 +349,15 @@ static void reportFrames(void) {
     last_frames = frames;
 }
 
+/* How evenly the frames came and what took the time in the slowest
+ * (frame_pacing.h). */
+static void reportFramePacing(void) {
+    char line[1024];
+    if (wine_nx_frame_report(line, sizeof(line)) > 0) {
+        wine_nx_runtime_trace(line);
+    }
+}
+
 static unsigned int g_bench_mhz;
 
 static void* benchMain(void* arg) {
@@ -443,6 +453,7 @@ void __wrap_wine_nx_thread_report(void) {
         return;
     }
     reportFrames();
+    reportFramePacing();
     /* Always: what each core did, the system's threads included, and the
      * threads [THREADS] leaves out. Four hops between cores every report. */
     reportCoreIdle();

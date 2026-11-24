@@ -130,7 +130,7 @@ with tempfile.TemporaryDirectory(prefix='autorun-screen-fit-') as tmp:
 # After a swap, when the surface is the thread's draw surface, and only the screen's.
 swap = nx[nx.index('static BOOL nx_drawable_swap( struct opengl_drawable *base )\n{'):]
 swap = swap[:swap.index('\n}\n')]
-assert swap.index('p_eglSwapBuffers( egl->display, base->surface );\n    __atomic_add_fetch') < swap.index('if (ret) nx_screen_fit( base );')
+assert swap.index('ret = funcs->p_eglSwapBuffers( egl->display, base->surface );') < swap.index('if (ret) nx_screen_fit( base );')
 # A new surface is the screen's size again, and the window is when it goes back.
 create = nx[nx.index('static BOOL nx_surface_create('):]
 assert 'nx_screen_size.cx = 1280;' in create and 'nx_screen_refused.cx = nx_screen_refused.cy = 0;' in create

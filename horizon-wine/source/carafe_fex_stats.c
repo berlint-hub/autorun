@@ -90,25 +90,56 @@ static unsigned int microseconds(u64 ticks) {
     return (unsigned int)(armTicksToNs(ticks) / 1000);
 }
 
-void carafeFexStatsReport(void) {
-    if (&wine_nx_fex_stats_base == NULL || wine_nx_runtime_trace == NULL) {
-        return;
+static const FexStatsHeader* statsHeader(u32* size) {
+    if (&wine_nx_fex_stats_base == NULL) {
+        return NULL;
     }
     const u8* base = __atomic_load_n(&wine_nx_fex_stats_base, __ATOMIC_ACQUIRE);
-    u32 size = __atomic_load_n(&wine_nx_fex_stats_size, __ATOMIC_ACQUIRE);
-    if (base == NULL || size < sizeof(FexStatsHeader)) {
-        return;
+    *size = __atomic_load_n(&wine_nx_fex_stats_size, __ATOMIC_ACQUIRE);
+    if (base == NULL || *size < sizeof(FexStatsHeader)) {
+        return NULL;
     }
     const FexStatsHeader* header = (const FexStatsHeader*)base;
-    if (header->thread_stats_size != sizeof(FexThreadStats)) {
+    return header->thread_stats_size == sizeof(FexThreadStats) ? header : NULL;
+}
+
+int carafeFexStatsJitTicks(u32 tid, u64* thread, u64* all) {
+    u32 size;
+    const FexStatsHeader* header = statsHeader(&size);
+    *thread = *all = 0;
+    if (header == NULL) {
+        return 0;
+    }
+    const u8* base = (const u8*)header;
+    u32 offset = __atomic_load_n(&header->head, __ATOMIC_ACQUIRE);
+    for (unsigned int steps = 0; offset != 0 && steps < FEX_STATS_THREADS; steps++) {
+        if (offset < sizeof(FexStatsHeader) || offset > size || size - offset < sizeof(FexThreadStats)) {
+            break;
+        }
+        const FexThreadStats* stats = (const FexThreadStats*)(base + offset);
+        u64 jit = __atomic_load_n(&stats->jit_time, __ATOMIC_RELAXED);
+        *all += jit;
+        if (stats->tid == tid) {
+            *thread = jit;
+        }
+        offset = __atomic_load_n(&stats->next, __ATOMIC_RELAXED);
+    }
+    return 1;
+}
+
+void carafeFexStatsReport(void) {
+    u32 size;
+    const FexStatsHeader* header = wine_nx_runtime_trace != NULL ? statsHeader(&size) : NULL;
+    if (header == NULL) {
         return;
     }
+    const u8* base = (const u8*)header;
     for (unsigned int i = 0; i < g_row_count; i++) {
         memset(&g_rows[i].delta, 0, sizeof(g_rows[i].delta));
     }
     u32 offset = __atomic_load_n(&header->head, __ATOMIC_ACQUIRE);
     for (unsigned int steps = 0; offset != 0 && steps < FEX_STATS_THREADS; steps++) {
-        if (offset < sizeof(FexStatsHeader) || offset > size - sizeof(FexThreadStats)) {
+        if (offset < sizeof(FexStatsHeader) || offset > size || size - offset < sizeof(FexThreadStats)) {
             break;
         }
         FexThreadStats now;

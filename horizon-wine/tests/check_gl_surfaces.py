@@ -198,6 +198,9 @@ static void nx_screen_first_frame(struct nx_gl_drawable *gl, int format) { (void
 static unsigned long long horizon_interrupt_time(void) { static unsigned int ticks; return ++ticks; }
 static unsigned int wine_nx_gl_swaps;
 static unsigned long long wine_nx_gl_swap_time;
+/* The runtime's [FRAMES] line, not linked here. */
+static void (*wine_nx_frame_presented)(unsigned int, unsigned long long);
+static unsigned int GetCurrentThreadId(void) { return 1; }
 struct egl_platform { void *display; EGLConfig configs[2]; unsigned int config_count; };
 struct opengl_funcs {
     EGLSurface (*p_eglCreatePbufferSurface)(void *, EGLConfig, const EGLint *);

@@ -286,6 +286,15 @@ setting, Carafe's server thread pool, which needs `sync=horizon`), and
 `[BUDGET]`, at the first server request after each 30 s, counts the threads
 in use against the limit, with the pool as `pool=threads/idle/waiting`; it
 does not need the profiler.
+`[FRAMES]`, with every thread report and without the profiler, is the
+stutter: the median frame, the 99th percentile, the frames that took over
+twice the median (and 8 ms more) or over 100 ms, and for the three slowest
+what took the time within them: FEX translating code on the thread that
+presented and on all, the card reading, NAK compiling shaders (the nxvk
+runtime and NVK) and the present itself (`source/frame_pacing.c`). A gap of
+a second or more between frames is a loading screen or a menu and is counted
+apart. A slow frame mostly in `FEX translating` is code run for the first
+time, which FEX's disk cache (`FEX_DISKCACHE`) keeps for the next start.
 
 ## Building
 
