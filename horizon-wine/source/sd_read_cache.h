@@ -507,11 +507,43 @@ static inline void sd_cache_line_wrote( struct sd_cache_line *line, struct sd_ca
     if (from < to) memcpy( line->data + (from - line->start), data + (from - offset), (size_t)(to - from) );
 }
 
+/* Bytes written from offset, no further than the end the file is known to
+ * have, to past it: chunk index of a file that keeps every chunk takes them,
+ * and grows with them. A chunk not held is started from them only when the
+ * card has nothing of it yet; any other is read when it is asked for. */
+static inline void sd_cache_whole_grew( struct sd_cache_file *file, struct sd_cache_pool *pool, long long index,
+                                        long long offset, const char *data, size_t size )
+{
+    long long start = index * SD_CACHE_CHUNK, end = offset + (long long)size, from, to;
+    struct sd_cache_line *line = sd_cache_whole_line( file, start );
+
+    if (!line) return;
+    if (!line->data || line->start < 0)
+    {
+        if (start < file->size || !sd_cache_take_chunk( pool, line )) return;
+        line->start = start;
+        line->len = 0;
+        line->lru = 0x80000000u;
+        line->used_at = ++pool->clock;
+    }
+    else if (offset > line->start + (long long)line->len)
+    {
+        /* Bytes after a part the chunk does not hold: not to be made up. */
+        sd_cache_line_free( line, pool );
+        return;
+    }
+    from = offset > start ? offset : start;
+    to = end < start + SD_CACHE_CHUNK ? end : start + SD_CACHE_CHUNK;
+    memcpy( line->data + (from - start), data + (from - offset), (size_t)(to - from) );
+    if (to - start > (long long)line->len) line->len = (size_t)(to - start);
+}
+
 static inline void sd_cache_wrote( struct sd_cache_file *file, struct sd_cache_pool *pool, long long offset,
                                    const char *data, size_t size )
 {
-    long long index, last;
+    long long end = offset + (long long)size, index, last;
     unsigned int i;
+    int grows;
 
     if (!file->keep_whole || offset < 0)
     {
@@ -519,15 +551,45 @@ static inline void sd_cache_wrote( struct sd_cache_file *file, struct sd_cache_p
         return;
     }
     for (i = 0; i < SD_CACHE_LINES; i++) sd_cache_line_wrote( &file->lines[i], pool, offset, data, size );
-    if (file->whole && size)
+    /* FEX adds what it translates where the file ends: the chunk at the end
+     * and new ones after it take that as the card will, so a read of it finds
+     * it here without the bytes going out first (sd_cache_whole_has). */
+    grows = file->size_known && offset <= file->size && end > file->size;
+    if (size && (file->whole || grows))
     {
-        last = (offset + (long long)size - 1) / SD_CACHE_CHUNK;
+        last = (end - 1) / SD_CACHE_CHUNK;
         for (index = offset / SD_CACHE_CHUNK; index <= last && index < SD_CACHE_WHOLE_CHUNKS; index++)
-            sd_cache_line_wrote( &file->whole[index], pool, offset, data, size );
+        {
+            if (grows) sd_cache_whole_grew( file, pool, index, offset, data, size );
+            else sd_cache_line_wrote( &file->whole[index], pool, offset, data, size );
+        }
     }
-    if (file->size_known && offset + (long long)size > file->size) file->size_known = 0;
+    if (grows) file->size = end;
+    else if (file->size_known && end > file->size) file->size_known = 0;
     file->window = 0;
     file->fill_end = 0;
+}
+
+/* Whether a read of size bytes at offset of a file that keeps every chunk
+ * finds all it returns in the chunks held, asking the card nothing: the way
+ * through them sd_cache_read takes. */
+static inline int sd_cache_whole_has( const struct sd_cache_file *file, long long offset, size_t size )
+{
+    long long at = offset, end = offset + (long long)size;
+
+    if (!file->keep_whole || !file->whole || offset < 0) return 0;
+    while (at < end)
+    {
+        long long index = at / SD_CACHE_CHUNK;
+        const struct sd_cache_line *line;
+
+        if (file->size_known && at >= file->size) return 1;
+        if (index >= SD_CACHE_WHOLE_CHUNKS) return 0;
+        line = &file->whole[index];
+        if (!line->data || line->start < 0 || at >= line->start + (long long)line->len) return 0;
+        at = line->start + (long long)line->len;
+    }
+    return 1;
 }
 
 /* Copy size bytes at offset into buf, filling chunks through fill. Returns the

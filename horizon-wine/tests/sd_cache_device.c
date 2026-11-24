@@ -30,7 +30,7 @@ const devoptab_t *devoptab_list[1];
 
 static unsigned char data[15 * 1024 * 1024 + 17];
 static size_t data_size;
-static unsigned int card_reads;
+static unsigned int card_reads, card_writes;
 static int fail_open;
 static void (*during_write)(void);
 struct test_file { off_t pos; int flags; };
@@ -81,6 +81,7 @@ static ssize_t card_write( struct _reent *r, void *fd, const char *buf, size_t l
 {
     struct test_file *file = fd;
 
+    card_writes++;
     if ((file->flags & O_ACCMODE) == O_RDONLY) { r->_errno = EBADF; return -1; }
     if (during_write) during_write();
     if (file->flags & O_APPEND) file->pos = data_size;
@@ -135,7 +136,7 @@ static void reset(void)
     assert( !sd_cache_pool.used && !sd_cache_pool.held && !sd_write_buffers );
     sd_cache_pool.max = SD_CACHE_POOL_MIN;
     sd_cache_off = fail_open = 0;
-    card_reads = wine_nx_sd_reads = wine_nx_sd_hits = 0;
+    card_reads = card_writes = wine_nx_sd_reads = wine_nx_sd_hits = 0;
     sd_cache_settled_at = 0;
     during_write = NULL;
     data_size = sizeof(data);
@@ -391,9 +392,11 @@ static void test_fex_code_cache(void)
 {
     static const char path[] = "sdmc:/switch/wine/fex/cache/DiskCache/0123456789abcdef/RWCacheDB_0011223344556677.foz";
     const size_t chunks = 40;
-    char buf[3000], blob[2500];
-    unsigned int i, seed = 7, reads;
+    char buf[3000], blob[2500], stored_byte[3000 / 50];
+    off_t stored_at[3000 / 50];
+    unsigned int i, seed = 7, reads, stored = 0, flushed = 0;
     size_t size, end;
+    struct stat st;
 
     assert( sd_cache_keeps_whole( path ) && sd_cache_keeps_whole( "RWCacheDB_1.foz" ) );
     assert( !sd_cache_keeps_whole( "sdmc:/x/RWCacheDB_0011223344556677_idx.foz" ) );
@@ -413,20 +416,49 @@ static void test_fex_code_cache(void)
         assert( sd_cache_seek( &test_reent, &writer, at, SEEK_SET ) == at );
         assert( sd_cache_read_file( &test_reent, &writer, buf, size ) == (ssize_t)size );
         assert( !memcmp( buf, data + at, size ) );
-        /* A new block every so often, at the end, as FEX stores what it translates. */
+        /* A new block every so often, at the end, as FEX's FOZFile::WriteBlob
+         * stores what it translates: the size, then its pieces there. They
+         * are held, and read back from RAM with nothing sent to the card. */
         if (i % 50 == 49)
         {
-            end = data_size;
+            unsigned int writes = card_writes, at_end;
+
+            assert( !sd_cache_fstat( &test_reent, &writer, &st ) );
+            end = (size_t)st.st_size;
             memset( blob, (int)(i & 0x7f), sizeof(blob) );
-            assert( sd_cache_seek( &test_reent, &writer, 0, SEEK_END ) == (off_t)end );
-            assert( sd_cache_write_file( &test_reent, &writer, blob, sizeof(blob) ) == (ssize_t)sizeof(blob) );
-            assert( sd_cache_seek( &test_reent, &writer, end, SEEK_SET ) == (off_t)end );
+            assert( sd_cache_seek( &test_reent, &writer, (off_t)end, SEEK_SET ) == (off_t)end );
+            assert( sd_cache_write_file( &test_reent, &writer, blob, 16 ) == 16 );
+            assert( sd_cache_write_file( &test_reent, &writer, blob + 16, sizeof(blob) - 16 ) ==
+                    (ssize_t)(sizeof(blob) - 16) );
+            assert( sd_cache_seek( &test_reent, &writer, (off_t)end, SEEK_SET ) == (off_t)end );
             assert( sd_cache_read_file( &test_reent, &writer, buf, sizeof(blob) ) == (ssize_t)sizeof(blob) );
-            assert( !memcmp( buf, blob, sizeof(blob) ) && data_size == end + sizeof(blob) );
+            assert( !memcmp( buf, blob, sizeof(blob) ) );
+            /* The position moved past them, and a read there finds the end. */
+            assert( sd_cache_seek( &test_reent, &writer, 0, SEEK_CUR ) == (off_t)(end + sizeof(blob)) );
+            assert( !sd_cache_read_file( &test_reent, &writer, buf, 10 ) );
+            /* Only until the chunk at the end of the file is held: the first
+             * block read back from there sends what is held and reads it. */
+            if (card_writes != writes) flushed++;
+            else assert( data_size <= end );
+            /* An older block, from RAM as well. */
+            if (stored)
+            {
+                writes = card_writes;
+                at_end = (seed >> 3) % stored;
+                assert( sd_cache_seek( &test_reent, &writer, stored_at[at_end], SEEK_SET ) == stored_at[at_end] );
+                assert( sd_cache_read_file( &test_reent, &writer, buf, sizeof(blob) ) == (ssize_t)sizeof(blob) );
+                assert( buf[0] == stored_byte[at_end] && buf[sizeof(blob) - 1] == stored_byte[at_end] );
+                assert( card_writes == writes );
+            }
+            stored_at[stored] = (off_t)end;
+            stored_byte[stored++] = (char)(i & 0x7f);
         }
     }
-    /* Each chunk came from the card about once: not once a lookup. */
-    assert( card_reads <= chunks + 3000 / 50 + 2 );
+    /* Each chunk came from the card about once: not once a lookup, and not
+     * the blocks added, which never had to be read back. */
+    printf( "fex code cache: %u card reads, %u card writes for %u blocks added and read back\n", card_reads,
+            card_writes, stored );
+    assert( card_reads <= chunks + 2 && flushed <= 1 );
 
     /* A write in the middle goes into the chunk held: read back, no card read. */
     reads = card_reads;
@@ -435,7 +467,14 @@ static void test_fex_code_cache(void)
     assert( sd_cache_seek( &test_reent, &writer, 5 * SD_CACHE_CHUNK + 99, SEEK_SET ) == 5 * SD_CACHE_CHUNK + 99 );
     assert( sd_cache_read_file( &test_reent, &writer, buf, 5 ) == 5 );
     assert( buf[0] == (char)data[5 * SD_CACHE_CHUNK + 99] && !memcmp( buf + 1, "ABC", 3 ) );
-    assert( !memcmp( data + 5 * SD_CACHE_CHUNK + 100, "ABC", 3 ) && card_reads == reads );
+    assert( card_reads == reads );
+
+    /* What was held reaches the card, in place, when the file is closed. */
+    assert( !sd_cache_close( &test_reent, &writer ) );
+    assert( !memcmp( data + 5 * SD_CACHE_CHUNK + 100, "ABC", 3 ) );
+    assert( data_size == chunks * SD_CACHE_CHUNK - 1000 + stored * sizeof(blob) );
+    for (i = 0; i < stored; i++)
+        assert( data[stored_at[i]] == stored_byte[i] && data[stored_at[i] + sizeof(blob) - 1] == stored_byte[i] );
 }
 
 int main( int argc, char **argv )
