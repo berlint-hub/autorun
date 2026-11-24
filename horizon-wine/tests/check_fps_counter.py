@@ -72,7 +72,16 @@ with tempfile.TemporaryDirectory(prefix='autorun-fps-') as tmp:
 # keyboard is up, through the quad that keeps the program's state.
 winnx = (win32u / 'winnx_opengl.c').read_text()
 assert '#include "winnx_fps.h"' in winnx and 'extern int wine_nx_fps_counter __attribute__((weak));' in winnx
-draw = winnx[winnx.index('static void nx_osk_draw( struct opengl_drawable *base )'):]
+# With nxvk's EGL the drawing is a hook of the swap (nxvk-patches/0004), run
+# where the swap is made: the program's thread only says where it goes.
+setup = winnx[winnx.index('static void nx_osk_draw( struct opengl_drawable *base )'):]
+setup = setup[:setup.index('\n}\n')]
+assert 'extern void horizon_egl_next_swap_hook( void (*hook)(void *), void *data ) __attribute__((weak));' in winnx
+assert re.search(r'if \(horizon_egl_next_swap_hook\)\s*\{[^}]*horizon_egl_next_swap_hook\( nx_osk_draw_hook, slot \);\s*return;\s*\}\s*'
+                 r'nx_osk_draw_gl\( &target \);', setup)
+assert 'p_glGet' not in setup and 'p_glIsEnabled' not in setup
+assert 'static void nx_osk_draw_hook( void *data )\n{\n    nx_osk_draw_gl( data );\n}' in winnx
+draw = winnx[winnx.index('static void nx_osk_draw_gl( const struct nx_osk_target *target )\n{'):]
 draw = draw[:draw.index('\n}\n')]
 assert 'BOOL fps_on = &wine_nx_fps_counter && wine_nx_fps_counter;' in draw
 assert draw.count('if (!overlay_visible && !cursor_on && !fps_on) return;') == 2
