@@ -508,7 +508,9 @@ unsigned int dxvk_options_version( enum dxvk_source source, const char *text )
     }
     if (*p || !part[0]) return 0;
     version = part[0] * 10000 + part[1] * 100 + part[2];
-    if (source == DXVK_SOURCE_SAREK) return version <= 11300 ? version : 0;
+    /* Sarek 1.14.0 and 1.14.1 read what 1.13.0 does, and d3d9.splitSamplerSlots,
+     * which only MoltenVK needs and the menu leaves out. */
+    if (source == DXVK_SOURCE_SAREK) return version <= 11401 ? version : 0;
     if (source == DXVK_SOURCE_GPLASYNC && version < 20100) return 0;
     return version <= 30101 ? version : 0;
 }

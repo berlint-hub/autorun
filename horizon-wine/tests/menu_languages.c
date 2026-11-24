@@ -119,7 +119,7 @@ int main( int argc, char **argv )
             /* Every version a release can have: 1.0.0 to 3.1.1. */
             for (version = 10000; version <= 30101 && !read; version++)
             {
-                if (source == DXVK_SOURCE_SAREK && version > 11300) break;
+                if (source == DXVK_SOURCE_SAREK && version > 11401) break;
                 if (source == DXVK_SOURCE_GPLASYNC && version < 20100) continue;
                 read = dxvk_option_supported( &dxvk_options[k], source, version );
             }
