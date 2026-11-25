@@ -271,7 +271,10 @@ Before, each block found in the cache cost a 128 KB read from the card, 0.4 to
 last chunk, and new ones after it, from the end the file had when it was
 opened, so a read finds them in RAM while FEX's writes are still held and
 sends nothing to the card first: sending them cost a card write of about 12 ms
-for each block found, 528 in the first 19 seconds of Doom 3. `code_mb` is the translated code the run
+for each block found, 528 in the first 19 seconds of Doom 3. A chunk read from
+the card for it before the held bytes sends nothing out either, as the card
+has all of it; that was still 100 card writes in Doom 3's first 15 seconds.
+`code_mb` is the translated code the run
 holds now over the code memory Horizon gave it, and `code_all_mb` every byte
 ever translated: Horizon grants ten code memory objects in all, so translated
 code that is never reused is what ends a long run in the interpreter

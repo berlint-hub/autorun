@@ -689,6 +689,12 @@ static void test_keep_whole(void)
     f.size += 1000;
     assert( !file.size_known && pool.used == 21 && !sd_cache_whole_has( &file, f.size - 1000, 10 ) );
     assert( sd_cache_whole_has( &file, 5 * SD_CACHE_CHUNK, 2 * SD_CACHE_CHUNK ) );
+    /* Chunk 21 is read from the card: past bytes held from 21.5 chunks on,
+     * not past ones from 22 chunks on. */
+    assert( !sd_cache_whole_has_outside( &file, f.size - 1000, 10, 21 * SD_CACHE_CHUNK + SD_CACHE_CHUNK / 2,
+                                         22 * SD_CACHE_CHUNK ) );
+    assert( sd_cache_whole_has_outside( &file, f.size - 1000, 10, 22 * SD_CACHE_CHUNK, 22 * SD_CACHE_CHUNK + 5 ) );
+    assert( sd_cache_whole_has_outside( &file, 5 * SD_CACHE_CHUNK, 10, 5 * SD_CACHE_CHUNK, 6 * SD_CACHE_CHUNK ) );
     assert( cached_read( &file, &pool, &f, f.size - 1100, buf, 200 ) == 200 && f.requests == 22 );
     assert( !memcmp( buf, f.data + f.size - 1100, 200 ) );
     /* Bytes from before the end to past it, into a chunk not held: it is not

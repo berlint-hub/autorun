@@ -571,25 +571,39 @@ static inline void sd_cache_wrote( struct sd_cache_file *file, struct sd_cache_p
 }
 
 /* Whether a read of size bytes at offset of a file that keeps every chunk
- * finds all it returns in the chunks held, asking the card nothing: the way
- * through them sd_cache_read takes. */
-static inline int sd_cache_whole_has( const struct sd_cache_file *file, long long offset, size_t size )
+ * reads from the card nothing of the part from..to: the chunks it finds held
+ * serve as they are, and those it reads lie outside that part. The way through
+ * the chunks sd_cache_read takes. With from == to, whether it reads nothing at
+ * all. */
+static inline int sd_cache_whole_has_outside( const struct sd_cache_file *file, long long offset, size_t size,
+                                              long long from, long long to )
 {
     long long at = offset, end = offset + (long long)size;
 
-    if (!file->keep_whole || !file->whole || offset < 0) return 0;
+    if (!file->keep_whole || offset < 0) return 0;
     while (at < end)
     {
-        long long index = at / SD_CACHE_CHUNK;
+        long long index = at / SD_CACHE_CHUNK, start = index * SD_CACHE_CHUNK;
         const struct sd_cache_line *line;
 
         if (file->size_known && at >= file->size) return 1;
         if (index >= SD_CACHE_WHOLE_CHUNKS) return 0;
-        line = &file->whole[index];
-        if (!line->data || line->start < 0 || at >= line->start + (long long)line->len) return 0;
-        at = line->start + (long long)line->len;
+        line = file->whole ? &file->whole[index] : NULL;
+        if (line && line->data && line->start >= 0 && at < line->start + (long long)line->len)
+        {
+            at = line->start + (long long)line->len;
+            continue;
+        }
+        /* Read whole from the card. */
+        if (from == to || (start < to && start + SD_CACHE_CHUNK > from)) return 0;
+        at = start + SD_CACHE_CHUNK;
     }
     return 1;
+}
+
+static inline int sd_cache_whole_has( const struct sd_cache_file *file, long long offset, size_t size )
+{
+    return sd_cache_whole_has_outside( file, offset, size, 0, 0 );
 }
 
 /* Copy size bytes at offset into buf, filling chunks through fill. Returns the
