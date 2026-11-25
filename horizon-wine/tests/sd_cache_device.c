@@ -459,6 +459,9 @@ static void test_fex_code_cache(void)
     printf( "fex code cache: %u card reads, %u card writes for %u blocks added and read back\n", card_reads,
             card_writes, stored );
     assert( card_reads <= chunks + 2 && flushed <= 1 );
+    /* Chunks read from the card before what is held did not send it out:
+     * at most the one read where the held bytes land did. */
+    assert( card_writes <= 1 );
 
     /* A write in the middle goes into the chunk held: read back, no card read. */
     reads = card_reads;
