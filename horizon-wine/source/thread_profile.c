@@ -207,6 +207,19 @@ static int profiling;
 static uintptr_t runtime_base, runtime_end;
 static struct nx_prof_table jit_blocks;
 static struct nx_prof_bucket jit_pcs[NX_PROF_JIT_PCS];
+/* The last samples taken, of every thread sampled, with when: what a slow
+ * frame was made of on the thread that presented it (frame_pacing.c). 2048 at
+ * a round every 2 ms over at most four threads keep the last second or so.
+ * Written by the sampler under profile_mutex. */
+#define NX_PROF_RECENT 2048
+struct nx_prof_recent
+{
+    uint64_t tick, key;
+    unsigned int tid;
+    uint8_t kind;
+};
+static struct nx_prof_recent recent_samples[NX_PROF_RECENT];
+static unsigned int recent_written;
 static uint32_t jit_samples, jit_next_dump = NX_PROF_JIT_FIRST;
 
 __thread volatile int *wine_nx_stop_word;
@@ -1130,6 +1143,14 @@ static void record( struct nx_prof_target *target, const ThreadContext *ctx, int
     target->samples++;
     target->kinds[kind]++;
     nx_prof_add( &target->tables[kind], key );
+    {
+        struct nx_prof_recent *sample = &recent_samples[recent_written++ % NX_PROF_RECENT];
+
+        sample->tick = armGetSystemTick();
+        sample->key = key;
+        sample->tid = target->tid;
+        sample->kind = (uint8_t)kind;
+    }
     if (kind == NX_PROF_X86)
     {
         /* Who called the function running: which lock a spin loop is on, say. */
@@ -1359,6 +1380,59 @@ static void name_site( uint32_t site, int guest, char *buf, size_t size )
     if (site == NX_PROF_NO_SITE) snprintf( buf, size, "-" );
     else if (guest) name_address( site, buf, size );
     else name_native( site, buf, size );
+}
+
+/* The samples of thread tid taken after from and up to to (system ticks), the
+ * newest first, at most max (frame_pacing.c, for a slow frame). Their kinds
+ * are enum nx_prof_kind's, their keys the ones the profile's tables count. */
+unsigned int wine_nx_prof_frame_samples( unsigned int tid, unsigned long long from, unsigned long long to,
+                                         unsigned char *kinds, unsigned long long *keys, unsigned int max )
+{
+    unsigned int count = 0, seen;
+
+    if (!__atomic_load_n( &profiling, __ATOMIC_RELAXED )) return 0;
+    pthread_mutex_lock( &profile_mutex );
+    for (seen = 0; seen < NX_PROF_RECENT && seen < recent_written && count < max; seen++)
+    {
+        const struct nx_prof_recent *sample = &recent_samples[(recent_written - 1 - seen) % NX_PROF_RECENT];
+
+        if (sample->tick <= from) break;
+        if (sample->tid != tid || sample->tick > to) continue;
+        kinds[count] = sample->kind;
+        keys[count++] = sample->key;
+    }
+    pthread_mutex_unlock( &profile_mutex );
+    return count;
+}
+
+/* What a sample is part of, for adding up a slow frame: the module of guest
+ * code or of an ARM64 PE ("jit" outside them, FEX's code), the runtime's
+ * function, or the system call and the function that made it. */
+void wine_nx_prof_sample_group( unsigned int kind, unsigned long long key, char *buf, size_t size )
+{
+    char name[128];
+    char *plus;
+    void *base;
+
+    switch (kind)
+    {
+    case NX_PROF_X86:
+    case NX_PROF_IMAGE:
+        if (image_at( key, &base, name, sizeof(name) )) snprintf( buf, size, "%s", name[0] ? name : "exe" );
+        else snprintf( buf, size, "%s", kind == NX_PROF_IMAGE ? "jit" : "x86 outside images" );
+        return;
+    case NX_PROF_NATIVE:
+        name_native( key, name, sizeof(name) );
+        break;
+    default:
+        name_native( key & 0xffffffffffull, name, sizeof(name) );
+        break;
+    }
+    /* "function+0x40" adds up by function; a bare "+0x3e38a0" stays as it is. */
+    if ((plus = strrchr( name, '+' )) && plus != name) *plus = 0;
+    if (plus && plus > name && plus[-1] == '~') plus[-1] = 0;
+    if (kind == NX_PROF_NATIVE) snprintf( buf, size, "%s", name );
+    else snprintf( buf, size, "svc%#llx<%s", key >> 40, name );
 }
 
 /* Where every thread is standing, once nothing has moved for a while. A program

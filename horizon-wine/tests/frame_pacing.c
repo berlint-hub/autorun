@@ -29,6 +29,32 @@ unsigned int wine_nx_shader_compiles;
 unsigned long long wine_nx_gl_wait_ns;
 unsigned int wine_nx_program_faults;
 static unsigned long long gl_ticks, driver_ticks;
+
+/* The profiler's samples: those of the next frame, for any thread. */
+static unsigned int prof_count, prof_calls;
+static unsigned char prof_kinds[80];
+static unsigned long long prof_keys[80];
+unsigned int wine_nx_prof_frame_samples( unsigned int tid, unsigned long long from, unsigned long long to,
+                                         unsigned char *kinds, unsigned long long *keys, unsigned int max )
+{
+    unsigned int i;
+
+    (void)tid;
+    assert( from < to );
+    prof_calls++;
+    for (i = 0; i < prof_count && i < max; i++)
+    {
+        kinds[i] = prof_kinds[i];
+        keys[i] = prof_keys[i];
+    }
+    return i;
+}
+
+void wine_nx_prof_sample_group( unsigned int kind, unsigned long long key, char *buf, size_t size )
+{
+    if (kind == 0) snprintf( buf, size, "%s", key < 0x1000000 ? "exe" : "gamex86.dll" );
+    else snprintf( buf, size, "svc%#llx<condvarWaitTimeout", key >> 40 );
+}
 unsigned long long carafe_native_thread_ticks( const char *name )
 {
     return !strcmp( name, "gl" ) ? gl_ticks : !strcmp( name, "gdrv" ) ? driver_ticks : 0;
@@ -186,6 +212,45 @@ static void with_gl_thread( void )
     gl_ticks = driver_ticks = 0;
 }
 
+static void with_samples( void )
+{
+    unsigned int i;
+
+    /* A frame of 80 ms the profiler sampled 40 times: 24 in the game's exe,
+     * 10 in its game DLL, 6 waiting in a condition variable. */
+    for (i = 0; i < 40; i++)
+    {
+        prof_kinds[i] = i < 34 ? 0 : 3;
+        prof_keys[i] = i < 24 ? 0x4a0000 : i < 34 ? 0x20010000 : 0x1cull << 40;
+    }
+    frame( 4, 16.7, 0 );
+    frame( 4, 16.7, 0 );
+    prof_count = 40;
+    frame( 4, 80, 0 );
+    prof_count = 0;
+    assert( report() > 0 );
+    contains( "slowest 80.0 ms: card 0 ms, 0 shaders compiled in 0 ms, its thread in exe 48 ms, gamex86.dll 20 ms, "
+              "svc0x1c<condvarWaitTimeout 12 ms (40 samples), present 0 ms;" );
+    /* A frame longer than the samples kept: those it has, at 2 ms each. */
+    for (i = 0; i < 80; i++)
+    {
+        prof_kinds[i] = 0;
+        prof_keys[i] = 0x4a0000;
+    }
+    frame( 4, 16.7, 0 );
+    prof_count = 80;
+    frame( 4, 300, 0 );
+    prof_count = 0;
+    assert( report() > 0 );
+    contains( "slowest 300.0 ms: card 0 ms, 0 shaders compiled in 0 ms, its thread in exe 128 ms (the last 64 samples)," );
+    /* Only frames among the slowest ask for samples. */
+    prof_calls = 0;
+    frame( 4, 16.7, 0 );
+    for (i = 0; i < 20; i++) frame( 4, 16.7, 0 );
+    assert( prof_calls == 3 );
+    report();
+}
+
 static void many( void )
 {
     unsigned int i;
@@ -206,6 +271,7 @@ int main( void )
     without_fex();
     with_fex();
     with_gl_thread();
+    with_samples();
     many();
     printf( "frame_pacing: all passed\n" );
     return 0;

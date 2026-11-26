@@ -26,6 +26,17 @@ extern unsigned int wine_nx_shader_compiles __attribute__((weak));
 extern unsigned long long wine_nx_gl_wait_ns __attribute__((weak));
 extern unsigned long long carafe_native_thread_ticks( const char *name ) __attribute__((weak));
 extern unsigned int wine_nx_program_faults __attribute__((weak));
+/* The profiler's samples of the presenting thread within a slow frame
+ * (thread_profile.c), and what each is part of. */
+extern unsigned int wine_nx_prof_frame_samples( unsigned int tid, unsigned long long from, unsigned long long to,
+                                                unsigned char *kinds, unsigned long long *keys, unsigned int max )
+    __attribute__((weak));
+extern void wine_nx_prof_sample_group( unsigned int kind, unsigned long long key, char *buf, size_t size )
+    __attribute__((weak));
+
+/* A sample every 2 ms: 64 cover a frame of 128 ms, the newest of a longer one. */
+#define FRAME_SAMPLES 64
+#define FRAME_GROUPS_SHOWN 3
 
 struct frame_cost
 {
@@ -40,6 +51,9 @@ struct frame_cost
     unsigned int gl_us;       /* the GL thread running */
     unsigned int driver_us;   /* the driver's thread behind it running */
     unsigned int faults;      /* faults handed to the program */
+    unsigned int samples;     /* the profiler's of the presenting thread, the newest first */
+    unsigned char sample_kinds[FRAME_SAMPLES];
+    unsigned long long sample_keys[FRAME_SAMPLES];
 };
 
 struct frame_counters
@@ -128,6 +142,11 @@ void wine_nx_frame_presented( unsigned int tid, unsigned long long present_100ns
             if (now.gl > last.gl) cost.gl_us = ticks_us( now.gl - last.gl );
             if (now.driver > last.driver) cost.driver_us = ticks_us( now.driver - last.driver );
             cost.faults = now.faults - last.faults;
+            /* Where the presenting thread was, for a frame among the slowest. */
+            if (wine_nx_prof_frame_samples && last.tid == tid &&
+                (slowest_count < FRAMES_SLOWEST || cost.us > slowest[FRAMES_SLOWEST - 1].us))
+                cost.samples = wine_nx_prof_frame_samples( tid, last.tick, now.tick, cost.sample_kinds,
+                                                           cost.sample_keys, FRAME_SAMPLES );
             /* Only with a GL thread: without one Mesa's finish returns at once. */
             if (now.gl) have_gl = 1;
             frames++;
@@ -146,6 +165,49 @@ static int by_time( const void *a, const void *b )
     unsigned int x = *(const unsigned int *)a, y = *(const unsigned int *)b;
 
     return x < y ? -1 : x > y;
+}
+
+/* The places the presenting thread was sampled in a slow frame, added up by
+ * what they are part of (a module of the game, a function of the runtime, a
+ * system call), the three it was in most, as the time each stands for. */
+static int put_samples( char *line, size_t size, const struct frame_cost *cost )
+{
+    struct { char name[64]; unsigned int count; } groups[16], swap;
+    /* All the frame's samples stand for its time; past FRAME_SAMPLES only the
+     * last of them are kept, at their period. */
+    unsigned long long per_us = cost->samples < FRAME_SAMPLES ? cost->us / cost->samples : 2000;
+    unsigned int count = 0, i, j;
+    int used;
+
+    for (i = 0; i < cost->samples; i++)
+    {
+        char name[64];
+
+        wine_nx_prof_sample_group( cost->sample_kinds[i], cost->sample_keys[i], name, sizeof(name) );
+        for (j = 0; j < count && strcmp( groups[j].name, name ); j++) continue;
+        if (j == count)
+        {
+            if (count == sizeof(groups) / sizeof(groups[0])) continue;
+            snprintf( groups[count].name, sizeof(groups[count].name), "%s", name );
+            groups[count++].count = 0;
+        }
+        groups[j].count++;
+    }
+    for (i = 1; i < count; i++)
+        for (j = i; j > 0 && groups[j - 1].count < groups[j].count; j--)
+        {
+            swap = groups[j - 1];
+            groups[j - 1] = groups[j];
+            groups[j] = swap;
+        }
+    used = snprintf( line, size, " its thread in" );
+    for (i = 0; i < count && i < FRAME_GROUPS_SHOWN && used > 0 && (size_t)used < size; i++)
+        used += snprintf( line + used, size - (size_t)used, "%s %s %u ms", i ? "," : "", groups[i].name,
+                          (unsigned int)(groups[i].count * per_us / 1000) );
+    if (used > 0 && (size_t)used < size)
+        used += snprintf( line + used, size - (size_t)used, " (%s%u samples),",
+                          cost->samples < FRAME_SAMPLES ? "" : "the last ", cost->samples );
+    return used;
 }
 
 /* As 12.3 ms. */
@@ -213,6 +275,8 @@ int wine_nx_frame_report( char *line, size_t size )
             PUT( " waiting for the GL thread %u ms (it ran %u ms, the driver's thread %u ms),", cost->gl_wait_us / 1000,
                  cost->gl_us / 1000, cost->driver_us / 1000 );
         if (cost->faults) PUT( " %u faults to the program,", cost->faults );
+        if (cost->samples && wine_nx_prof_sample_group && used > 0 && (size_t)used < size)
+            used += put_samples( line + used, size - (size_t)used, cost );
         PUT( " present %u ms", cost->present_us / 1000 );
     }
 #undef PUT_MS
