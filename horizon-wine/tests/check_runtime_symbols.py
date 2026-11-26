@@ -99,6 +99,12 @@ cmake = (root / 'horizon-wine/CMakeLists.txt').read_text()
 assert '-Wl,--wrap=os_log_message' in cmake
 mesa = (root / 'horizon-wine/source/carafe_mesa.c').read_text()
 assert 'void __wrap_os_log_message(const char* message)' in mesa and '"[MESA] %.*s%s"' in mesa
+# The time the program's thread hands calls to Mesa's GL thread or waits for
+# it, for the [FRAMES] line: every way in is wrapped and adds to one counter.
+for symbol in ('_mesa_glthread_flush_batch', '_mesa_glthread_finish', '_mesa_glthread_finish_before'):
+    assert f'-Wl,--wrap={symbol}' in cmake, symbol
+    assert f'__wrap_{symbol}(struct gl_context* ctx' in mesa and f'__real_{symbol}(ctx' in mesa, symbol
+assert mesa.count('glWaited(start);') == 3
 runtime = (root / 'horizon-wine/source/runtime.c').read_text()
 assert 'devoptab_list[STD_ERR] = &native_stderr_device;' in runtime
 main = runtime[runtime.index('\nint main( int argc, char **argv )'):]

@@ -19526,6 +19526,10 @@ __thread int horizon_suspend_pending;
  * every time their number doubles. Misalignments are counted apart: FEX takes
  * one for every unaligned access it has yet to patch, by the hundred, and
  * would hide the access violation among them. */
+/* Every fault handed to the program, misalignments apart: the [FRAMES] line
+ * (frame_pacing.c) counts them in a slow frame. */
+unsigned int wine_nx_program_faults;
+
 static void horizon_trace_program_fault( const ThreadExceptionDump *ctx, const EXCEPTION_RECORD *rec, TEB *teb )
 {
     static unsigned long long last_ms[2];
@@ -19534,6 +19538,7 @@ static void horizon_trace_program_fault( const ThreadExceptionDump *ctx, const E
     unsigned int count, kind = rec->ExceptionCode == STATUS_DATATYPE_MISALIGNMENT;
     char buf[320];
 
+    if (!kind) __atomic_add_fetch( &wine_nx_program_faults, 1, __ATOMIC_RELAXED );
     if (now - __atomic_exchange_n( &last_ms[kind], now, __ATOMIC_RELAXED ) > 500)
         __atomic_store_n( &burst[kind], 0, __ATOMIC_RELAXED );
     count = __atomic_add_fetch( &burst[kind], 1, __ATOMIC_RELAXED );

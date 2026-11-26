@@ -605,6 +605,25 @@ static void* nativeMain(void* arg) {
     return result;
 }
 
+/* The time the runtime's threads of this name have run so far, in ticks: Mesa's
+ * GL thread ("gl") and its driver thread ("gdrv") for the [FRAMES] line
+ * (frame_pacing.c). A thread that ended takes its time with it. */
+unsigned long long carafe_native_thread_ticks(const char* name) {
+    unsigned long long sum = 0;
+    for (unsigned int i = 0; i < NATIVE_THREADS; i++) {
+        NativeThread* thread = &g_native_threads[i];
+        Handle handle = __atomic_load_n(&thread->handle, __ATOMIC_ACQUIRE);
+        u64 ticks;
+        if (handle == 0 || handle == UINT32_MAX || strncmp(thread->name, name, sizeof(thread->name)) != 0) {
+            continue;
+        }
+        if (nativeTicks(handle, &ticks)) {
+            sum += ticks;
+        }
+    }
+    return sum;
+}
+
 static void reportNativeThreads(void) {
     static u64 last_tick;
     u64 now = armGetSystemTick();

@@ -2,10 +2,48 @@
 #include <stdio.h>
 #include <string.h>
 
+#include <switch.h>
+
 bool __real_util_queue_init(void* queue, const char* name, unsigned max_jobs, unsigned num_threads, unsigned flags,
     void* context);
 void wine_nx_runtime_trace(const char* msg) __attribute__((weak));
 extern __thread const char* carafe_native_thread_name;
+
+/* The time the program's own thread spends handing its OpenGL calls to Mesa's
+ * GL thread or waiting for it to catch up, on any thread: the [FRAMES] line
+ * (frame_pacing.c) names it in a slow frame. _mesa_glthread_flush_batch hands
+ * a batch over and waits while the queue is full; _mesa_glthread_finish waits
+ * for the GL thread to finish all it has and runs the rest itself. Calls from
+ * inside glthread.c are not wrapped, so nothing is counted twice. Weak, in
+ * case a Mesa has no glthread of its own. */
+unsigned long long wine_nx_gl_wait_ns;
+
+struct gl_context;
+void __real__mesa_glthread_flush_batch(struct gl_context* ctx) __attribute__((weak));
+void __real__mesa_glthread_finish(struct gl_context* ctx) __attribute__((weak));
+void __real__mesa_glthread_finish_before(struct gl_context* ctx, const char* func) __attribute__((weak));
+
+static void glWaited(u64 start) {
+    __atomic_add_fetch(&wine_nx_gl_wait_ns, armTicksToNs(armGetSystemTick() - start), __ATOMIC_RELAXED);
+}
+
+void __wrap__mesa_glthread_flush_batch(struct gl_context* ctx) {
+    u64 start = armGetSystemTick();
+    __real__mesa_glthread_flush_batch(ctx);
+    glWaited(start);
+}
+
+void __wrap__mesa_glthread_finish(struct gl_context* ctx) {
+    u64 start = armGetSystemTick();
+    __real__mesa_glthread_finish(ctx);
+    glWaited(start);
+}
+
+void __wrap__mesa_glthread_finish_before(struct gl_context* ctx, const char* func) {
+    u64 start = armGetSystemTick();
+    __real__mesa_glthread_finish_before(ctx, func);
+    glWaited(start);
+}
 
 bool __wrap_util_queue_init(void* queue, const char* name, unsigned max_jobs, unsigned num_threads, unsigned flags,
     void* context) {

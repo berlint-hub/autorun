@@ -26,6 +26,13 @@ u32 wine_nx_fex_stats_size;
 unsigned long long wine_nx_sd_read_ns;
 unsigned long long wine_nx_shader_compile_ns;
 unsigned int wine_nx_shader_compiles;
+unsigned long long wine_nx_gl_wait_ns;
+unsigned int wine_nx_program_faults;
+static unsigned long long gl_ticks, driver_ticks;
+unsigned long long carafe_native_thread_ticks( const char *name )
+{
+    return !strcmp( name, "gl" ) ? gl_ticks : !strcmp( name, "gdrv" ) ? driver_ticks : 0;
+}
 
 #define TICKS_PER_MS 19200ull
 
@@ -138,6 +145,47 @@ static void with_fex( void )
     wine_nx_fex_stats_base = NULL;
 }
 
+static void with_gl_thread( void )
+{
+    unsigned int i;
+
+    /* No GL thread: nothing said of one, though Mesa's finish was called. */
+    wine_nx_gl_wait_ns += 1000;
+    frame( 4, 16.7, 0 );
+    frame( 4, 16.7, 0 );
+    assert( report() > 0 );
+    assert( !strstr( line, "GL thread" ) && !strstr( line, "faults" ) );
+
+    /* A door opens: a frame of 70 ms in which the program's thread waited
+     * 50 ms for the GL thread, which ran 45 ms and its driver thread 30 ms,
+     * and the program took 3 faults. */
+    gl_ticks = driver_ticks = 1;
+    frame( 4, 16.7, 0 );
+    for (i = 0; i < 10; i++)
+    {
+        gl_ticks += 5 * TICKS_PER_MS;
+        driver_ticks += 2 * TICKS_PER_MS;
+        frame( 4, 16.7, 0 );
+    }
+    wine_nx_gl_wait_ns += 50000000;
+    gl_ticks += 45 * TICKS_PER_MS;
+    driver_ticks += 30 * TICKS_PER_MS;
+    wine_nx_program_faults += 3;
+    frame( 4, 70, 0 );
+    assert( report() > 0 );
+    contains( "slowest 70.0 ms: card 0 ms, 0 shaders compiled in 0 ms, waiting for the GL thread 50 ms "
+              "(it ran 45 ms, the driver's thread 30 ms), 3 faults to the program, present 0 ms;" );
+    contains( "; 16.7 ms: card 0 ms, 0 shaders compiled in 0 ms, waiting for the GL thread 0 ms (it ran 5 ms, "
+              "the driver's thread 2 ms), present 0 ms" );
+    /* A GL thread that ended takes its time out of the sum: not a frame of
+     * negative time. */
+    gl_ticks = 1;
+    frame( 4, 16.7, 0 );
+    assert( report() > 0 );
+    contains( "(it ran 0 ms," );
+    gl_ticks = driver_ticks = 0;
+}
+
 static void many( void )
 {
     unsigned int i;
@@ -157,6 +205,7 @@ int main( void )
 {
     without_fex();
     with_fex();
+    with_gl_thread();
     many();
     printf( "frame_pacing: all passed\n" );
     return 0;
