@@ -1058,6 +1058,10 @@ if(WINE_NX_MESA_SWITCH_DIR)
     # The log says which thread pools Mesa starts and how large (source/carafe_mesa.c).
     target_sources(wine-nx-runtime PRIVATE source/carafe_mesa.c)
     target_link_options(wine-nx-runtime PRIVATE -Wl,--wrap=util_queue_init)
+    # How long the program's thread hands its OpenGL calls to Mesa's GL thread
+    # or waits for it, for the [FRAMES] line (carafe_mesa.c, frame_pacing.c).
+    target_link_options(wine-nx-runtime PRIVATE -Wl,--wrap=_mesa_glthread_flush_batch
+        -Wl,--wrap=_mesa_glthread_finish -Wl,--wrap=_mesa_glthread_finish_before)
     # Mesa's debug messages go into the runtime's log as well (carafe_mesa.c).
     target_link_options(wine-nx-runtime PRIVATE -Wl,--wrap=os_log_message)
     set_source_files_properties(source/vulkan_probe.c PROPERTIES

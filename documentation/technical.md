@@ -304,7 +304,11 @@ stutter: the median frame, the 99th percentile, the frames that took over
 twice the median (and 8 ms more) or over 100 ms, and for the three slowest
 what took the time within them: FEX translating code on the thread that
 presented and on all, the card reading, NAK compiling shaders (the nxvk
-runtime and NVK) and the present itself (`source/frame_pacing.c`). A gap of
+runtime and NVK) and the present itself (`source/frame_pacing.c`). With
+Mesa's GL thread it also says how long the program's thread spent handing
+it calls or waiting for it, and how long the GL thread and Zink's driver
+thread behind it (`gl`, `gdrv`) ran within the frame, and how many faults
+were handed to the program. A gap of
 a second or more between frames is a loading screen or a menu and is counted
 apart. A slow frame mostly in `FEX translating` is code run for the first
 time, which FEX's disk cache (`FEX_DISKCACHE`) keeps for the next start.

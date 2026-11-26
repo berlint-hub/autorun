@@ -20,6 +20,12 @@
 extern unsigned long long wine_nx_sd_read_ns __attribute__((weak));
 extern unsigned long long wine_nx_shader_compile_ns __attribute__((weak));
 extern unsigned int wine_nx_shader_compiles __attribute__((weak));
+/* With Mesa's GL thread (carafe_mesa.c, carafe_diag.c): the time the program's
+ * thread spent handing it calls or waiting for it, and what the GL thread and
+ * the driver's thread behind it ran. Faults handed to the program (horizon.c). */
+extern unsigned long long wine_nx_gl_wait_ns __attribute__((weak));
+extern unsigned long long carafe_native_thread_ticks( const char *name ) __attribute__((weak));
+extern unsigned int wine_nx_program_faults __attribute__((weak));
 
 struct frame_cost
 {
@@ -30,6 +36,10 @@ struct frame_cost
     unsigned int shader_us;   /* the shader compiler, any thread */
     unsigned int shaders;     /* shaders it compiled */
     unsigned int present_us;  /* the present itself */
+    unsigned int gl_wait_us;  /* handing calls to the GL thread, or waiting for it */
+    unsigned int gl_us;       /* the GL thread running */
+    unsigned int driver_us;   /* the driver's thread behind it running */
+    unsigned int faults;      /* faults handed to the program */
 };
 
 struct frame_counters
@@ -37,13 +47,14 @@ struct frame_counters
     u64 tick;
     unsigned int tid;
     u64 fex, fex_all;
-    unsigned long long card_ns, shader_ns;
-    unsigned int shaders;
+    unsigned long long card_ns, shader_ns, gl_wait_ns;
+    unsigned int shaders, faults;
+    u64 gl, driver;
 };
 
 static Mutex frames_lock;
 static struct frame_counters last;
-static int have_last, have_fex;
+static int have_last, have_fex, have_gl;
 static unsigned int frames, gaps, kept;
 static unsigned long long frames_us;
 static unsigned int frame_us[FRAMES_KEPT];
@@ -85,6 +96,13 @@ void wine_nx_frame_presented( unsigned int tid, unsigned long long present_100ns
         now.shader_ns = __atomic_load_n( &wine_nx_shader_compile_ns, __ATOMIC_RELAXED );
         now.shaders = __atomic_load_n( &wine_nx_shader_compiles, __ATOMIC_RELAXED );
     }
+    if (&wine_nx_gl_wait_ns) now.gl_wait_ns = __atomic_load_n( &wine_nx_gl_wait_ns, __ATOMIC_RELAXED );
+    if (carafe_native_thread_ticks)
+    {
+        now.gl = carafe_native_thread_ticks( "gl" );
+        now.driver = carafe_native_thread_ticks( "gdrv" );
+    }
+    if (&wine_nx_program_faults) now.faults = __atomic_load_n( &wine_nx_program_faults, __ATOMIC_RELAXED );
     mutexLock( &frames_lock );
     if (have_last && now.tick > last.tick)
     {
@@ -105,6 +123,13 @@ void wine_nx_frame_presented( unsigned int tid, unsigned long long present_100ns
             cost.shader_us = ns_us( now.shader_ns, last.shader_ns );
             cost.shaders = now.shaders - last.shaders;
             cost.present_us = (unsigned int)(present_100ns / 10);
+            cost.gl_wait_us = ns_us( now.gl_wait_ns, last.gl_wait_ns );
+            /* A thread that ended takes its time out of the sum. */
+            if (now.gl > last.gl) cost.gl_us = ticks_us( now.gl - last.gl );
+            if (now.driver > last.driver) cost.driver_us = ticks_us( now.driver - last.driver );
+            cost.faults = now.faults - last.faults;
+            /* Only with a GL thread: without one Mesa's finish returns at once. */
+            if (now.gl) have_gl = 1;
             frames++;
             frames_us += cost.us;
             if (kept < FRAMES_KEPT) frame_us[kept++] = cost.us;
@@ -135,7 +160,7 @@ int wine_nx_frame_report( char *line, size_t size )
     struct frame_cost worst[FRAMES_SLOWEST];
     unsigned int count, gap_count, stored, worst_count, median, high, stutters = 0, long_frames = 0, i;
     unsigned long long total_us;
-    int fex, used;
+    int fex, gl, used;
 
     mutexLock( &frames_lock );
     count = frames;
@@ -144,9 +169,10 @@ int wine_nx_frame_report( char *line, size_t size )
     stored = kept;
     worst_count = slowest_count;
     fex = have_fex;
+    gl = have_gl;
     memcpy( sorted, frame_us, stored * sizeof(*sorted) );
     memcpy( worst, slowest, sizeof(worst) );
-    frames = gaps = kept = slowest_count = have_fex = 0;
+    frames = gaps = kept = slowest_count = have_fex = have_gl = 0;
     frames_us = 0;
     mutexUnlock( &frames_lock );
 
@@ -183,6 +209,10 @@ int wine_nx_frame_report( char *line, size_t size )
         if (fex) PUT( " FEX translating %u ms (%u ms on all threads),", cost->fex_us / 1000, cost->fex_all_us / 1000 );
         PUT( " card %u ms,", cost->card_us / 1000 );
         if (&wine_nx_shader_compile_ns) PUT( " %u shaders compiled in %u ms,", cost->shaders, cost->shader_us / 1000 );
+        if (gl)
+            PUT( " waiting for the GL thread %u ms (it ran %u ms, the driver's thread %u ms),", cost->gl_wait_us / 1000,
+                 cost->gl_us / 1000, cost->driver_us / 1000 );
+        if (cost->faults) PUT( " %u faults to the program,", cost->faults );
         PUT( " present %u ms", cost->present_us / 1000 );
     }
 #undef PUT_MS
