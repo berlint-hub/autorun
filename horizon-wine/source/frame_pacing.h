@@ -14,7 +14,8 @@
  * GPU's shader compiler spent compiling, and the present took; with Mesa's
  * GL thread also the time the presenting thread spent handing it calls or
  * waiting for it, what the GL thread and the driver's thread ran, and the
- * faults handed to the program. A gap of a
+ * faults handed to the program; with the profiler, where the presenting
+ * thread was sampled within the frame. A gap of a
  * second or more is a loading screen or a menu, counted apart. */
 void wine_nx_frame_presented( unsigned int tid, unsigned long long present_100ns );
 /* Writes the line for the frames since the last one and starts counting
