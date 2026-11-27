@@ -31,12 +31,34 @@ enum input_mouse_code
 
 struct input_binding { uint16_t code[INPUT_CHORD_MAX]; unsigned int count; };
 struct input_source { const char *name, *label; uint64_t button; };
+
+/* A game's shortcuts: two or three of the controller's buttons together type
+ * keys (or click), in either input mode, F5 to save and F9 to load, say.
+ * buttons is the HID mask (input_sources' button); keys a binding of keys and
+ * mouse buttons, as a key.* one. A combination the runtime itself answers
+ * (- with A, B or Y; + and -; - + L R) cannot be one, nor can one made only
+ * of those buttons, which pressing the runtime's menu chord would type. */
+#define INPUT_SHORTCUT_MAX 8
+#define INPUT_SHORTCUT_CHOICES 18
+/* A - or + of a shortcut waits this long for the rest of it before the game
+ * sees it, and one tapped alone reaches the game for this long. */
+#define INPUT_SHORTCUT_WAIT_NS  250000000ull
+#define INPUT_SHORTCUT_PULSE_NS 80000000ull
+struct input_shortcut { uint64_t buttons; struct input_binding keys; };
+extern const uint64_t input_shortcut_choices[INPUT_SHORTCUT_CHOICES];
+/* Across polls: the - or + held back, and what was pressed meanwhile. */
+struct input_shortcut_state
+{
+    uint64_t last_held, waiting, waiting_since, others, spent, pulse, pulse_until;
+    int fired;
+};
 struct input_profile
 {
     struct input_binding pad[INPUT_SOURCE_COUNT], keys[INPUT_SOURCE_COUNT];
     int mode, face_layout, deadzone[2], keyboard_auto;
     unsigned int left_inherit, pad_custom;
     int mouse_speed;   /* percent of the built-in cursor speed; 100 is the default */
+    struct input_shortcut shortcuts[INPUT_SHORTCUT_MAX];
 };
 struct input_pad { uint64_t buttons; int axis[4]; };
 struct input_output
@@ -67,5 +89,18 @@ void input_map_keys( const struct input_profile *profile, const struct input_pad
 void input_key_edges_update( struct input_key_edges *edges, const uint64_t held[INPUT_KEY_WORDS] );
 void input_key_edges_take( struct input_key_edges *edges, struct input_key_edges *out );
 int input_key_modifier( unsigned int code );
+int input_shortcut_allowed( uint64_t buttons );
+int input_shortcut_parse( struct input_shortcut *shortcut, const char *text );
+int input_shortcut_save( struct launcher_kv *kv, unsigned int slot, const struct input_shortcut *shortcut );
+void input_shortcut_buttons_label( uint64_t buttons, char *out, size_t size );
+void input_shortcut_label( const struct input_shortcut *shortcut, char *out, size_t size );
+/* One poll of the controller: the keys and mouse buttons the shortcuts held
+ * type (added to keys and *mouse), the buttons the game must not see now
+ * (*hidden: a - or + waiting for the rest of a shortcut, and the buttons of
+ * one that fired until each is let go) and those it must see though let go
+ * (*extra: a - or + tapped alone, briefly). now in ns. */
+void input_shortcuts_step( const struct input_profile *profile, struct input_shortcut_state *state, uint64_t held,
+                           uint64_t now, uint64_t keys[INPUT_KEY_WORDS], unsigned int *mouse,
+                           uint64_t *hidden, uint64_t *extra );
 
 #endif

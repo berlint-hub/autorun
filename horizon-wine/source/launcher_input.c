@@ -258,7 +258,8 @@ static int neighbour( const SDL_Rect *rects, int count, int selected, int button
     return next;
 }
 
-static int binding_dialog( struct ui *ui, const struct input_art *art, int source, int controller, struct input_binding *binding )
+static int binding_dialog( struct ui *ui, const struct input_art *art, const char *heading, int source, int controller,
+                           struct input_binding *binding )
 {
     struct input_binding draft = *binding;
     struct ui_input input;
@@ -317,9 +318,8 @@ static int binding_dialog( struct ui *ui, const struct input_art *art, int sourc
         }
         ui_background( ui );
         ui_rounded( ui, panel.x, panel.y, panel.w, panel.h, 24, ui->panel );
-        char title[128], label[192];
-        snprintf( title, sizeof(title), "Map %s", input_sources[source].label );
-        ui_text( ui, ui->large, 76, 127, title, ui->value );
+        char label[192];
+        ui_text( ui, ui->large, 76, 127, heading, ui->value );
         input_binding_label( &draft, controller, label, sizeof(label) );
         ui_rounded( ui, 76, 205, 1108, 41, 10, ui->background );
         ui_text_fit( ui, ui->normal, 90, 210, 1080, label, ui->value, 1 );
@@ -483,7 +483,12 @@ void launcher_input_remap( struct ui *ui, const char *root, const char *program,
         struct input_binding binding = controller ? profile.pad[id] : profile.keys[id];
         if (reset) changed = input_binding_save(&kv, id, controller, NULL);
         else if (clear) { binding.count = 0; changed = input_binding_save(&kv, id, controller, &binding); }
-        else if (edit && binding_dialog(ui, &art, id, controller, &binding)) changed = input_binding_save(&kv, id, controller, &binding);
+        else if (edit)
+        {
+            char heading[128];
+            snprintf( heading, sizeof(heading), "Map %s", input_sources[id].label );
+            if (binding_dialog(ui, &art, heading, id, controller, &binding)) changed = input_binding_save(&kv, id, controller, &binding);
+        }
         if (changed == 0) ui_message(ui, "Controls", "The settings file is full.");
         else if (changed > 0 && !input_profile_save(&kv, path)) ui_message(ui, "Controls", "The control settings could not be saved.");
         ui_start_screen(ui);
@@ -509,11 +514,14 @@ static const struct
     { "left-deadzone", "Left stick deadzone", "Ignore small movements near the stick centre." },
     { "right-deadzone", "Right stick deadzone", "Ignore small movements near the stick centre." },
     { "mouse-speed", "Mouse speed", "How fast the analog stick moves the mouse pointer." },
+    { NULL, "Shortcuts",
+      "Two buttons together type keys, F5 to save and F9 to load, say, in either input mode. The game does not see "
+      "a shortcut's buttons; - or + alone still reaches it, a moment later." },
 };
 
 static int option_count( int row )
 {
-    if (row == INPUT_ROW_PAD || row == INPUT_ROW_KEYS || row == INPUT_ROW_PRESET) return 0;
+    if (row == INPUT_ROW_PAD || row == INPUT_ROW_KEYS || row == INPUT_ROW_PRESET || row == INPUT_ROW_SHORTCUTS) return 0;
     if (row == INPUT_ROW_MODE || row == INPUT_ROW_BUTTON_LAYOUT || row == INPUT_ROW_KEYBOARD) return 2;
     if (row == INPUT_ROW_MOUSE_SPEED) return INPUT_MOUSE_SPEED_COUNT;
     return 6;
@@ -529,6 +537,12 @@ static int option_value( int row, const struct input_profile *p )
     case INPUT_ROW_LEFT_ZONE: return p->deadzone[0];
     case INPUT_ROW_RIGHT_ZONE: return p->deadzone[1];
     case INPUT_ROW_MOUSE_SPEED: return p->mouse_speed;
+    case INPUT_ROW_SHORTCUTS:
+    {
+        int set = 0;
+        for (unsigned int i = 0; i < INPUT_SHORTCUT_MAX; i++) set += p->shortcuts[i].buttons != 0;
+        return set;
+    }
     default: return 0;
     }
 }
@@ -550,7 +564,77 @@ static void option_label( int row, int value, char *out, size_t size )
     else if (row == INPUT_ROW_KEYBOARD) snprintf(out, size, "%s", value ? "Automatic" : "Manual");
     else if (row == INPUT_ROW_PAD || row == INPUT_ROW_KEYS) snprintf(out, size, "Configure");
     else if (row == INPUT_ROW_PRESET) snprintf(out, size, "Choose");
+    else if (row == INPUT_ROW_SHORTCUTS) snprintf(out, size, value ? "%d set" : "None", value);
     else snprintf(out, size, "%d%%", value);
+}
+
+/* The game's shortcuts (input_profile.h): a slot, then its buttons, then the
+ * keys it types. A game's own file empties a slot the global controls have
+ * with "none", so that the global one does not come back. */
+static void edit_shortcuts( struct ui *ui, struct ui_list *list, const char *root, const char *program,
+                            int keyboard_auto )
+{
+    for (;;)
+    {
+        struct ui_row slots[INPUT_SHORTCUT_MAX], combos[INPUT_SHORTCUT_CHOICES + 1];
+        struct input_profile p, global;
+        struct input_shortcut shortcut;
+        struct launcher_kv kv, global_kv;
+        struct input_art art;
+        char path[768], global_path[768], label[192], heading[128];
+        int slot, combo, current = 0, changed;
+
+        if (!load_profile(root, program, keyboard_auto, &p, &kv, path, sizeof(path)))
+        { ui_message(ui, "Controls", "The control settings could not be read."); return; }
+        memset(slots, 0, sizeof(slots));
+        for (unsigned int i = 0; i < INPUT_SHORTCUT_MAX; i++)
+        {
+            input_shortcut_label(&p.shortcuts[i], label, sizeof(label));
+            snprintf(slots[i].label, sizeof(slots[i].label), "%u. %.88s", i + 1, label);
+        }
+        if ((slot = ui_settings_dropdown(ui, list, slots, INPUT_SHORTCUT_MAX, 0)) < 0) return;
+        memset(combos, 0, sizeof(combos));
+        snprintf(combos[0].label, sizeof(combos[0].label), "None");
+        for (unsigned int i = 0; i < INPUT_SHORTCUT_CHOICES; i++)
+        {
+            input_shortcut_buttons_label(input_shortcut_choices[i], combos[i + 1].label, sizeof(combos[i + 1].label));
+            if (input_shortcut_choices[i] == p.shortcuts[slot].buttons) current = i + 1;
+        }
+        if ((combo = ui_settings_dropdown(ui, list, combos, INPUT_SHORTCUT_CHOICES + 1, current)) < 0) continue;
+        if (!combo)
+        {
+            char key[32];
+            snprintf(key, sizeof(key), "shortcut.%d", slot + 1);
+            changed = program && input_profile_global(root, keyboard_auto, &global, &global_kv, global_path,
+                                                      sizeof(global_path)) && global.shortcuts[slot].buttons ?
+                      launcher_kv_set(&kv, key, "none") : input_shortcut_save(&kv, slot, NULL);
+        }
+        else
+        {
+            int taken = 0;
+            shortcut.buttons = input_shortcut_choices[combo - 1];
+            for (unsigned int i = 0; i < INPUT_SHORTCUT_MAX; i++)
+                taken |= (int)i != slot && p.shortcuts[i].buttons == shortcut.buttons;
+            input_shortcut_buttons_label(shortcut.buttons, label, sizeof(label));
+            if (taken)
+            {
+                char text[256];
+                snprintf(text, sizeof(text), "Another shortcut already uses %s.", label);
+                ui_message(ui, "Shortcuts", text);
+                continue;
+            }
+            shortcut.keys = p.shortcuts[slot].keys;
+            snprintf(heading, sizeof(heading), "Keys for %s", label);
+            load_art(ui, &art, 0);
+            changed = binding_dialog(ui, &art, heading, 0, 0, &shortcut.keys);
+            free_art(&art);
+            if (!changed) continue;
+            if (!shortcut.keys.count) { ui_message(ui, "Shortcuts", "Choose at least one key."); continue; }
+            changed = input_shortcut_save(&kv, slot, &shortcut);
+        }
+        if (!changed) ui_message(ui, "Controls", "The settings file is full.");
+        else if (!input_profile_save(&kv, path)) ui_message(ui, "Controls", "The control settings could not be saved.");
+    }
 }
 
 /* A preset (input_presets.h) for every key.* binding of the profile shown. */
@@ -614,6 +698,11 @@ void launcher_input_edit( struct ui *ui, struct ui_list *list, int row, enum ui_
     if (row == INPUT_ROW_PRESET)
     {
         if (action == UI_ACTION_CHOOSE) choose_preset(ui, list, root, program, keyboard_auto);
+        return;
+    }
+    if (row == INPUT_ROW_SHORTCUTS)
+    {
+        if (action == UI_ACTION_CHOOSE) edit_shortcuts(ui, list, root, program, keyboard_auto);
         return;
     }
     if (!options[row].key)

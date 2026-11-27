@@ -113,6 +113,181 @@ static int setting( const struct launcher_kv *kv, const char *key, int base, int
     return !errno && end != text && !*end && value >= low && value <= high ? value : base;
 }
 
+#define SHORTCUT_PLUS  (1ull << 10)
+#define SHORTCUT_MINUS (1ull << 11)
+#define SHORTCUT_L     (1ull << 6)
+#define SHORTCUT_R     (1ull << 7)
+#define SHORTCUT_UP    (1ull << 13)
+#define SHORTCUT_DOWN  (1ull << 15)
+#define SHORTCUT_LEFT  (1ull << 12)
+#define SHORTCUT_RIGHT (1ull << 14)
+
+/* What the controls offer: - or + and another button, none of them the
+ * runtime's own. */
+const uint64_t input_shortcut_choices[INPUT_SHORTCUT_CHOICES] =
+{
+    SHORTCUT_MINUS | (1ull << 2), SHORTCUT_MINUS | (1ull << 8), SHORTCUT_MINUS | (1ull << 9),
+    SHORTCUT_MINUS | SHORTCUT_UP, SHORTCUT_MINUS | SHORTCUT_DOWN, SHORTCUT_MINUS | SHORTCUT_LEFT,
+    SHORTCUT_MINUS | SHORTCUT_RIGHT, SHORTCUT_MINUS | (1ull << 4), SHORTCUT_MINUS | (1ull << 5),
+    SHORTCUT_PLUS | (1ull << 0), SHORTCUT_PLUS | (1ull << 1), SHORTCUT_PLUS | (1ull << 2),
+    SHORTCUT_PLUS | (1ull << 3), SHORTCUT_PLUS | (1ull << 8), SHORTCUT_PLUS | (1ull << 9),
+    SHORTCUT_PLUS | SHORTCUT_UP, SHORTCUT_PLUS | SHORTCUT_LEFT, SHORTCUT_PLUS | SHORTCUT_RIGHT,
+};
+
+/* The runtime's own combinations (runtime.c, xinput_unix.c): the keyboard,
+ * the controls, the tasks, quitting and its menu. */
+static const uint64_t shortcut_reserved[] =
+{
+    SHORTCUT_MINUS | (1ull << 1), SHORTCUT_MINUS | (1ull << 0), SHORTCUT_MINUS | (1ull << 3),
+    SHORTCUT_MINUS | SHORTCUT_PLUS,
+};
+#define SHORTCUT_MENU (SHORTCUT_MINUS | SHORTCUT_PLUS | SHORTCUT_L | SHORTCUT_R)
+
+static unsigned int shortcut_size( uint64_t buttons )
+{
+    return (unsigned int)__builtin_popcountll( buttons );
+}
+
+int input_shortcut_allowed( uint64_t buttons )
+{
+    uint64_t digital = 0;
+
+    for (unsigned int i = 0; i < INPUT_SOURCE_COUNT; i++) digital |= input_sources[i].button;
+    if ((buttons & ~digital) || shortcut_size( buttons ) < 2 || shortcut_size( buttons ) > 3) return 0;
+    for (unsigned int i = 0; i < sizeof(shortcut_reserved) / sizeof(shortcut_reserved[0]); i++)
+        if ((buttons & shortcut_reserved[i]) == shortcut_reserved[i]) return 0;
+    /* Part of the menu's chord: pressing the chord would type it. */
+    return (buttons & ~SHORTCUT_MENU) != 0;
+}
+
+/* "MINUS+X:0x74+0xa2": the buttons by name, then the keys as key.* has them. */
+int input_shortcut_parse( struct input_shortcut *shortcut, const char *text )
+{
+    struct input_shortcut parsed = {0};
+    const char *colon = text ? strchr( text, ':' ) : NULL, *p = text;
+
+    if (!colon) return 0;
+    while (p < colon)
+    {
+        const char *end = p;
+        unsigned int i;
+
+        while (end < colon && *end != '+') end++;
+        for (i = 0; i < INPUT_SOURCE_COUNT; i++)
+            if (input_sources[i].button && strlen( input_sources[i].name ) == (size_t)(end - p) &&
+                !strncasecmp( input_sources[i].name, p, end - p )) break;
+        if (i == INPUT_SOURCE_COUNT || (parsed.buttons & input_sources[i].button)) return 0;
+        parsed.buttons |= input_sources[i].button;
+        p = end < colon ? end + 1 : end;
+    }
+    if (!input_shortcut_allowed( parsed.buttons ) || !input_binding_parse( &parsed.keys, colon + 1, 0 ) ||
+        !parsed.keys.count) return 0;
+    *shortcut = parsed;
+    return 1;
+}
+
+int input_shortcut_save( struct launcher_kv *kv, unsigned int slot, const struct input_shortcut *shortcut )
+{
+    char key[32], value[160];
+    size_t len = 0;
+
+    if (slot >= INPUT_SHORTCUT_MAX) return 0;
+    snprintf( key, sizeof(key), "shortcut.%u", slot + 1 );
+    if (!shortcut || !shortcut->buttons) return launcher_kv_set( kv, key, NULL );
+    if (!input_shortcut_allowed( shortcut->buttons ) || !shortcut->keys.count ||
+        shortcut->keys.count > INPUT_CHORD_MAX) return 0;
+    for (unsigned int i = 0; i < INPUT_SOURCE_COUNT; i++)
+        if (input_sources[i].button & shortcut->buttons)
+            len += snprintf( value + len, sizeof(value) - len, "%s%s", len ? "+" : "", input_sources[i].name );
+    len += snprintf( value + len, sizeof(value) - len, ":" );
+    for (unsigned int i = 0; i < shortcut->keys.count; i++)
+        len += snprintf( value + len, sizeof(value) - len, "%s0x%x", i ? "+" : "", shortcut->keys.code[i] );
+    return len < sizeof(value) && launcher_kv_set( kv, key, value );
+}
+
+/* "- + X": - and + first, as they are held first. */
+void input_shortcut_buttons_label( uint64_t buttons, char *out, size_t size )
+{
+    static const unsigned int order[] = { 9, 8 };
+    size_t len = 0;
+
+    if (!size) return;
+    out[0] = 0;
+    for (unsigned int k = 0; k < 2; k++)
+        if (buttons & input_sources[order[k]].button)
+            len += snprintf( out + len, size > len ? size - len : 0, "%s%s", len ? " + " : "",
+                             input_sources[order[k]].label );
+    for (unsigned int i = 0; i < INPUT_SOURCE_COUNT; i++)
+        if (i != 8 && i != 9 && (buttons & input_sources[i].button))
+            len += snprintf( out + len, size > len ? size - len : 0, "%s%s", len ? " + " : "", input_sources[i].label );
+}
+
+void input_shortcut_label( const struct input_shortcut *shortcut, char *out, size_t size )
+{
+    char buttons[96], keys[160];
+
+    if (!shortcut->buttons)
+    {
+        snprintf( out, size, "Not set" );
+        return;
+    }
+    input_shortcut_buttons_label( shortcut->buttons, buttons, sizeof(buttons) );
+    input_binding_label( &shortcut->keys, 0, keys, sizeof(keys) );
+    snprintf( out, size, "%s: %s", buttons, keys );
+}
+
+void input_shortcuts_step( const struct input_profile *p, struct input_shortcut_state *s, uint64_t held,
+                           uint64_t now, uint64_t keys[INPUT_KEY_WORDS], unsigned int *mouse,
+                           uint64_t *hidden, uint64_t *extra )
+{
+    uint64_t modifiers = 0, pressed = held & ~s->last_held, released = s->last_held & ~held, active = 0;
+    /* While the runtime's menu chord is held, none of its buttons is a shortcut's. */
+    uint64_t match = (held & SHORTCUT_MENU) == SHORTCUT_MENU ? held & ~SHORTCUT_MENU : held;
+
+    for (unsigned int i = 0; i < INPUT_SHORTCUT_MAX; i++)
+        modifiers |= p->shortcuts[i].buttons & (SHORTCUT_MINUS | SHORTCUT_PLUS);
+    /* Larger combinations first: - + X + Y is not - + X as well. */
+    for (unsigned int size = 3; size >= 2; size--)
+        for (unsigned int i = 0; i < INPUT_SHORTCUT_MAX; i++)
+        {
+            const struct input_shortcut *shortcut = &p->shortcuts[i];
+
+            if (!shortcut->buttons || shortcut_size( shortcut->buttons ) != size ||
+                (match & shortcut->buttons) != shortcut->buttons || (active & shortcut->buttons)) continue;
+            active |= shortcut->buttons;
+            for (unsigned int k = 0; k < shortcut->keys.count; k++)
+            {
+                unsigned int code = shortcut->keys.code[k];
+
+                if (code && code < 256) keys[code / 64] |= 1ull << (code % 64);
+                else if (code >= INPUT_MOUSE_LEFT && code < INPUT_WHEEL_UP) *mouse |= 1u << (code - INPUT_MOUSE_LEFT);
+            }
+        }
+    /* A - or + that a shortcut starts with waits for the rest of it; what
+     * else is pressed meanwhile, with it or after, makes it no tap. */
+    if (pressed & modifiers & ~s->waiting)
+    {
+        if (!s->waiting) s->waiting_since = now, s->others = 0, s->fired = 0;
+        s->waiting |= pressed & modifiers;
+    }
+    if (s->waiting) s->others |= pressed & ~s->waiting;
+    if (active) s->fired = 1;
+    /* Tapped alone: the game gets it, briefly. */
+    if ((released & s->waiting) && !s->others && !s->fired)
+    {
+        s->pulse |= released & s->waiting;
+        s->pulse_until = now + INPUT_SHORTCUT_PULSE_NS;
+    }
+    s->waiting &= held;
+    if (s->waiting && !active && now - s->waiting_since >= INPUT_SHORTCUT_WAIT_NS) s->waiting = 0;
+    if (!s->waiting) s->waiting_since = 0, s->others = 0, s->fired = 0;
+    s->spent = (s->spent | active) & held;
+    if (s->pulse && now >= s->pulse_until) s->pulse = 0;
+    *hidden = s->waiting | s->spent;
+    *extra = s->pulse & ~held;
+    s->last_held = held;
+}
+
 void input_profile_apply( struct input_profile *p, const struct launcher_kv *kv )
 {
     char name[64], value[128];
@@ -164,6 +339,14 @@ void input_profile_apply( struct input_profile *p, const struct launcher_kv *kv 
     p->keyboard_auto = setting( kv, "keyboard-auto", p->keyboard_auto, 0, 1 );
     p->mouse_speed = setting( kv, "mouse-speed", p->mouse_speed,
                               INPUT_MOUSE_SPEED_MIN, INPUT_MOUSE_SPEED_MAX );
+    /* A slot the file has replaces the one before it; "none" empties it. */
+    for (unsigned int i = 0; i < INPUT_SHORTCUT_MAX; i++)
+    {
+        snprintf( name, sizeof(name), "shortcut.%u", i + 1 );
+        if (!launcher_kv_get( kv, name, value, sizeof(value) )) continue;
+        if (!strcasecmp( value, "none" )) memset( &p->shortcuts[i], 0, sizeof(p->shortcuts[i]) );
+        else input_shortcut_parse( &p->shortcuts[i], value );
+    }
 }
 
 int input_profile_global( const char *root, int keyboard_auto, struct input_profile *profile,

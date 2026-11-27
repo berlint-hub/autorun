@@ -7,6 +7,7 @@
 
 struct input_profile wine_nx_input_profile;
 uint64_t wine_nx_input_swallowed;
+uint64_t wine_nx_input_shortcut_hidden, wine_nx_input_shortcut_extra;
 
 static int mock_connected;
 static u64 mock_buttons, mock_tick;
@@ -106,6 +107,22 @@ int main(void)
         wine_nx_xinput_unix_funcs[nx_xinput_get_state](&state);
         assert(!state.state.Gamepad.wButtons && state.state.Gamepad.bRightTrigger == 255);
         wine_nx_input_swallowed = 0;
+        /* A shortcut's buttons are not the program's; a - tapped alone
+         * reaches it a moment after it was let go. */
+        wine_nx_input_shortcut_hidden = NX_PAD_B;
+        wine_nx_xinput_unix_funcs[nx_xinput_get_state](&state);
+        assert(!state.state.Gamepad.wButtons && state.state.Gamepad.bRightTrigger == 255);
+        wine_nx_input_shortcut_hidden = 0;
+        mock_buttons = NX_PAD_ZR;  /* B held too would be - + B, the keyboard's */
+        wine_nx_input_shortcut_extra = NX_PAD_MINUS;
+        wine_nx_xinput_unix_funcs[nx_xinput_get_state](&state);
+        assert(state.state.Gamepad.wButtons == XINPUT_GAMEPAD_BACK);
+        wine_nx_input_swallowed = NX_PAD_MINUS;  /* not while a panel has the controller */
+        wine_nx_xinput_unix_funcs[nx_xinput_get_state](&state);
+        assert(!state.state.Gamepad.wButtons);
+        wine_nx_input_swallowed = 0;
+        wine_nx_input_shortcut_extra = 0;
+        mock_buttons = NX_PAD_B | NX_PAD_ZR;
         wine_nx_input_profile.mode = INPUT_KEYBOARD_MOUSE;
         wine_nx_xinput_unix_funcs[nx_xinput_get_state](&state);
         assert(!state.connected);

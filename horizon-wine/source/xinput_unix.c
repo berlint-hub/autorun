@@ -17,6 +17,7 @@
 extern struct input_profile wine_nx_input_profile;
 extern void wine_nx_input_profile_get( struct input_profile *out ) __attribute__((weak));
 extern uint64_t wine_nx_input_swallowed;
+extern uint64_t wine_nx_input_shortcut_hidden, wine_nx_input_shortcut_extra;
 
 static void nx_xinput_profile( struct input_profile *out )
 {
@@ -92,7 +93,14 @@ static void nx_xinput_read( struct nx_xinput_state_params *params )
         const u64 tasks = HidNpadButton_Minus | HidNpadButton_Y;
         const u64 menu = HidNpadButton_Minus | HidNpadButton_Plus | HidNpadButton_L | HidNpadButton_R;
 
-        raw.buttons &= ~__atomic_load_n( &wine_nx_input_swallowed, __ATOMIC_RELAXED );
+        {
+            uint64_t swallowed = __atomic_load_n( &wine_nx_input_swallowed, __ATOMIC_RELAXED );
+
+            /* A shortcut's buttons are the shortcut's, and a - tapped alone
+             * arrives a moment late (runtime.c, input_shortcuts_step). */
+            raw.buttons = (raw.buttons & ~swallowed & ~__atomic_load_n( &wine_nx_input_shortcut_hidden, __ATOMIC_RELAXED )) |
+                          (__atomic_load_n( &wine_nx_input_shortcut_extra, __ATOMIC_RELAXED ) & ~swallowed);
+        }
         if ((raw.buttons & menu) == menu) raw.buttons &= ~menu;
         if ((raw.buttons & keyboard) == keyboard) raw.buttons &= ~keyboard;
         if ((raw.buttons & controls) == controls) raw.buttons &= ~controls;

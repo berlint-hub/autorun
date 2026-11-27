@@ -256,9 +256,135 @@ static void presets(void)
     assert(!input_preset_write(&(struct launcher_kv){{0}, 0}, INPUT_PRESET_COUNT));
 }
 
+#define MS 1000000ull
+#define B_A (1ull << 0)
+#define B_B (1ull << 1)
+#define B_X (1ull << 2)
+#define B_L (1ull << 6)
+#define B_R (1ull << 7)
+#define B_PLUS (1ull << 10)
+#define B_MINUS (1ull << 11)
+
+struct step_result { uint64_t keys[INPUT_KEY_WORDS], hidden, extra; unsigned int mouse; };
+
+static struct step_result step( const struct input_profile *p, struct input_shortcut_state *s, uint64_t held,
+                                uint64_t now_ms )
+{
+    struct step_result r = {0};
+    input_shortcuts_step(p, s, held, now_ms * MS, r.keys, &r.mouse, &r.hidden, &r.extra);
+    return r;
+}
+
+static void shortcuts(void)
+{
+    struct input_profile p;
+    struct input_shortcut sc;
+    struct input_shortcut_state st = {0};
+    struct launcher_kv kv = {0};
+    struct step_result r;
+    char label[160], value[160];
+
+    /* What may be one: - or + with another button; the runtime's own and the
+     * buttons of its menu chord alone may not. */
+    for (unsigned int i = 0; i < INPUT_SHORTCUT_CHOICES; i++) assert(input_shortcut_allowed(input_shortcut_choices[i]));
+    assert(!input_shortcut_allowed(B_MINUS | B_B) && !input_shortcut_allowed(B_MINUS | B_A));
+    assert(!input_shortcut_allowed(B_MINUS | (1ull << 3)) && !input_shortcut_allowed(B_MINUS | B_PLUS));
+    assert(!input_shortcut_allowed(B_MINUS | B_L) && !input_shortcut_allowed(B_L | B_R) &&
+           !input_shortcut_allowed(B_MINUS | B_B | B_X));
+    assert(!input_shortcut_allowed(B_X) && !input_shortcut_allowed(B_X | B_A | B_B | B_L));
+    assert(input_shortcut_allowed(B_L | B_R | B_X));
+    assert(input_shortcut_parse(&sc, "MINUS+X:0x74") && sc.buttons == (B_MINUS | B_X) &&
+           sc.keys.count == 1 && sc.keys.code[0] == 0x74);
+    assert(input_shortcut_parse(&sc, "plus+zr:0xa2+0x53") && sc.keys.count == 2);
+    assert(!input_shortcut_parse(&sc, "MINUS+B:0x74") && !input_shortcut_parse(&sc, "MINUS+X:") &&
+           !input_shortcut_parse(&sc, "MINUS+X") && !input_shortcut_parse(&sc, "MINUS+Q:0x74") &&
+           !input_shortcut_parse(&sc, "MINUS+MINUS:0x74") && !input_shortcut_parse(&sc, "X:0x74") &&
+           !input_shortcut_parse(&sc, "LUP+MINUS:0x74"));
+
+    /* Into the file and back, by slot; "none" empties one a wider file set. */
+    input_profile_defaults(&p, 1);
+    assert(input_shortcut_parse(&sc, "MINUS+X:0x74"));
+    assert(input_shortcut_save(&kv, 0, &sc));
+    assert(input_shortcut_parse(&sc, "PLUS+RIGHT:0x78"));
+    assert(input_shortcut_save(&kv, 7, &sc));
+    assert(launcher_kv_get(&kv, "shortcut.1", value, sizeof(value)) && !strcmp(value, "X+MINUS:0x74"));
+    input_profile_apply(&p, &kv);
+    assert(p.shortcuts[0].buttons == (B_MINUS | B_X) && p.shortcuts[7].buttons == (B_PLUS | (1ull << 14)));
+    input_shortcut_label(&p.shortcuts[0], label, sizeof(label));
+    assert(!strcmp(label, "- + X: F5"));
+    input_shortcut_label(&p.shortcuts[1], label, sizeof(label));
+    assert(!strcmp(label, "Not set"));
+    assert(launcher_kv_set(&kv, "shortcut.8", "none"));
+    input_profile_apply(&p, &kv);
+    assert(!p.shortcuts[7].buttons);
+    assert(input_shortcut_save(&kv, 0, NULL) && !launcher_kv_get(&kv, "shortcut.1", value, sizeof(value)));
+    assert(!input_shortcut_save(&kv, INPUT_SHORTCUT_MAX, &sc));
+
+    /* - then X: the game sees neither, F5 is held while both are. */
+    input_profile_defaults(&p, 1);
+    assert(input_shortcut_parse(&p.shortcuts[0], "MINUS+X:0x74"));
+    r = step(&p, &st, B_MINUS, 0);
+    assert(r.hidden == B_MINUS && !held(r.keys, 0x74) && !r.extra);
+    r = step(&p, &st, B_MINUS | B_X, 50);
+    assert(held(r.keys, 0x74) && r.hidden == (B_MINUS | B_X));
+    r = step(&p, &st, B_MINUS | B_X, 400);  /* held past the wait: still the shortcut */
+    assert(held(r.keys, 0x74) && r.hidden == (B_MINUS | B_X));
+    r = step(&p, &st, B_MINUS, 450);        /* X let go: F5 up, - still not the game's */
+    assert(!held(r.keys, 0x74) && r.hidden == B_MINUS);
+    r = step(&p, &st, 0, 500);
+    assert(!r.hidden && !r.extra);
+    /* X held again without -: the game's. */
+    r = step(&p, &st, B_X, 600);
+    assert(!r.hidden && !held(r.keys, 0x74));
+    r = step(&p, &st, 0, 650);
+
+    /* - tapped alone: the game gets it after, briefly. */
+    r = step(&p, &st, B_MINUS, 1000);
+    assert(r.hidden == B_MINUS);
+    r = step(&p, &st, 0, 1100);
+    assert(!r.hidden && r.extra == B_MINUS);
+    r = step(&p, &st, 0, 1150);
+    assert(r.extra == B_MINUS);
+    r = step(&p, &st, 0, 1200);
+    assert(!r.extra);
+
+    /* - held alone past the wait: the game's from then on. */
+    r = step(&p, &st, B_MINUS, 2000);
+    assert(r.hidden == B_MINUS);
+    r = step(&p, &st, B_MINUS, 2300);
+    assert(!r.hidden);
+    r = step(&p, &st, 0, 2350);
+    assert(!r.extra);
+
+    /* - with a button of no shortcut (the runtime's - + A, say): no tap after. */
+    r = step(&p, &st, B_MINUS, 3000);
+    r = step(&p, &st, B_MINUS | B_A, 3050);
+    assert(r.hidden == B_MINUS && !held(r.keys, 0x74));
+    r = step(&p, &st, 0, 3100);
+    assert(!r.extra && !r.hidden);
+
+    /* The runtime's menu chord: none of its buttons types, X or not. */
+    r = step(&p, &st, B_MINUS | B_PLUS | B_L | B_R | B_X, 4000);
+    assert(!held(r.keys, 0x74));
+    r = step(&p, &st, 0, 4400);
+    assert(!r.extra);
+
+    /* A mouse button, and the larger of two shortcuts held. */
+    assert(input_shortcut_parse(&p.shortcuts[1], "L+R+X:0x101"));
+    r = step(&p, &st, B_L | B_R | B_X, 5000);
+    assert(r.mouse == 2 && !held(r.keys, 0x74) && r.hidden == (B_L | B_R | B_X));
+    r = step(&p, &st, 0, 5050);
+
+    /* A game without a shortcut of -: - is never held back. */
+    input_profile_defaults(&p, 1);
+    memset(&st, 0, sizeof(st));
+    r = step(&p, &st, B_MINUS, 6000);
+    assert(!r.hidden);
+}
+
 int main(void)
 {
-    mapping(); transitions(); persistence(); presets();
-    puts("Input profiles: mapping, deadzones, chords, transitions, inheritance and presets passed");
+    mapping(); transitions(); persistence(); presets(); shortcuts();
+    puts("Input profiles: mapping, deadzones, chords, transitions, inheritance, presets and shortcuts passed");
     return 0;
 }
