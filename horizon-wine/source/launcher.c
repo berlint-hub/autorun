@@ -2845,9 +2845,10 @@ static int program_menu_run( struct launcher *l, struct program *p, char *target
             row->choices = LAUNCHER_ANTI_ALIASING_COUNT;
 
             ADD_ROW( ROW_UPSCALING, SECTION_GRAPHICS, "Upscaling",
-                     "How a Vulkan or DXVK game drawing fewer pixels than the screen is enlarged. FSR 1.0 is "
-                     "AMD's edge-aware upscaler with sharpening; over an OpenGL game's picture it sharpens. "
-                     "Integer enlarges by whole steps with square pixels for pixel art, leaving wider black bars." );
+                     "How a game drawing fewer pixels than the screen is enlarged. FSR 1.0 is AMD's edge-aware "
+                     "upscaler with sharpening, also for an OpenGL game set to a lower resolution of its own, "
+                     "and it sharpens one at the screen's. Integer enlarges a Vulkan or DXVK game by whole steps "
+                     "with square pixels for pixel art, leaving wider black bars." );
             row->kind = UI_ROW_DROPDOWN;
             snprintf( row->value, sizeof(row->value), "%s", launcher_upscaling_labels[p->settings.upscaling] );
             row->choices = LAUNCHER_UPSCALING_COUNT;

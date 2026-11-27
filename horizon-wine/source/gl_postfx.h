@@ -1,22 +1,27 @@
 /* Copyright 2026 Wine-NX contributors. LGPL-2.1-or-later. */
 /*
  * Post-processing of an OpenGL program's frame at its swap: anti-aliasing
- * (FXAA) and AMD FidelityFX FSR 1's sharpening pass (RCAS), drawn over the
- * back buffer before it is shown, with the program's own context current.
- * win32u calls it where it draws its overlays (winnx_opengl.c, nx_osk_draw_gl):
- * on nxvk at the swap made on Mesa's GL thread, after the frame's commands.
+ * (FXAA) and AMD FidelityFX FSR 1, its upscaling (EASU) and its sharpening
+ * (RCAS), drawn over the back buffer before it is shown, with the program's
+ * own context current. win32u calls it where it draws its overlays
+ * (winnx_opengl.c, nx_osk_draw_gl): on nxvk at the swap made on Mesa's GL
+ * thread, after the frame's commands.
  *
- * The frame is copied into a texture of the surface's size, and each pass
- * draws a triangle over the whole surface: FXAA into a second texture when
- * RCAS follows, RCAS (or FXAA alone) into the back buffer. Everything the
- * passes set is put back as the program left it: what is bound, enabled and
- * masked, the viewport and the clip origin. No GL error is raised for the
- * program to find, and none of its errors is taken from it.
+ * The program's picture is the back buffer's bottom-left corner: all of it,
+ * or for EASU a smaller one, where a program in a display mode below the
+ * screen's draws on a surface kept at the screen's size. It is copied into a
+ * texture of its size, and each pass draws a triangle over its target: FXAA
+ * at the picture's size, EASU from it over the whole surface, RCAS over the
+ * whole surface, the last of them into the back buffer and each before it
+ * into a texture. Everything the passes set is put back as the program left
+ * it: what is bound, enabled and masked, the viewport and the clip origin. No
+ * GL error is raised for the program to find, and none of its errors is
+ * taken from it.
  *
  * Self-contained, without GL headers, so that tests/gl_postfx.c runs it over
  * Mesa on the host. FXAA follows Timothy Lottes' FXAA 3.11 quality algorithm
- * (preset 12); RCAS follows tools/fsr1/ffx_fsr1.h (FsrRcasF, MIT), as the
- * Vulkan presentation's tools/fshack_rcas.comp does.
+ * (preset 12); EASU and RCAS follow tools/fsr1/ffx_fsr1.h (FsrEasuF and
+ * FsrRcasF, MIT), as the Vulkan presentation's tools/fshack_*.comp do.
  */
 #ifndef WINE_NX_GL_POSTFX_H
 #define WINE_NX_GL_POSTFX_H
@@ -83,12 +88,14 @@ struct gl_postfx_funcs
 struct gl_postfx
 {
     int failed;                     /* the passes could not be built here */
-    int width, height;              /* of the textures */
-    unsigned int scene, mid;        /* the frame, and FXAA's result for RCAS */
-    unsigned int scene_fb, mid_fb;
+    int width, height;              /* of the picture's copy */
+    int mid_width, mid_height;      /* of FXAA's result */
+    int up_width, up_height;        /* of EASU's, for RCAS */
+    unsigned int scene, mid, up;    /* the picture, FXAA's result, and EASU's */
+    unsigned int scene_fb, mid_fb, up_fb;
     unsigned int array;
-    unsigned int fxaa, rcas;        /* programs */
-    int fxaa_rcp, rcas_sharpness;   /* their uniforms */
+    unsigned int fxaa, easu, rcas;  /* programs */
+    int fxaa_rcp, easu_scale, easu_offset, rcas_sharpness;  /* their uniforms */
 };
 
 #define GLPFX_TEXTURE_2D                0x0DE1
@@ -232,6 +239,91 @@ static const char gl_postfx_fxaa[] =
     "    color = vec4(textureLod(frame, pos, 0.0).rgb, 1.0);\n"
     "}\n";
 
+/* FSR 1's EASU: each pixel of the surface from the 12 texels around where it
+ * falls in the picture, a Lanczos-like kernel stretched along the edge the
+ * picture's luma has there, the result held within the nearest four. scale
+ * is the picture's size over the surface's, offset half of it less half a
+ * texel (FsrEasuCon's con0). The texels are read one by one, clamped to the
+ * picture, where FSR gathers them; the reciprocals FSR approximates are
+ * exact. */
+static const char gl_postfx_easu[] =
+    "#version 130\n"
+    "uniform sampler2D frame;\n"
+    "uniform vec2 scale, offset;\n"
+    "out vec4 color;\n"
+    "ivec2 last;\n"
+    "vec3 at(ivec2 p) { return texelFetch(frame, clamp(p, ivec2(0), last), 0).rgb; }\n"
+    "float luma(vec3 c) { return c.b * 0.5 + (c.r * 0.5 + c.g); }\n"
+    "void edge(inout vec2 dir, inout float len, float w, float lA, float lB, float lC, float lD, float lE)\n"
+    "{\n"
+    "    float lenX = 1.0 / max(max(abs(lD - lC), abs(lC - lB)), 1.0 / 32768.0);\n"
+    "    float dirX = lD - lB;\n"
+    "    dir.x += dirX * w;\n"
+    "    lenX = clamp(abs(dirX) * lenX, 0.0, 1.0);\n"
+    "    len += lenX * lenX * w;\n"
+    "    float lenY = 1.0 / max(max(abs(lE - lC), abs(lC - lA)), 1.0 / 32768.0);\n"
+    "    float dirY = lE - lA;\n"
+    "    dir.y += dirY * w;\n"
+    "    lenY = clamp(abs(dirY) * lenY, 0.0, 1.0);\n"
+    "    len += lenY * lenY * w;\n"
+    "}\n"
+    "void tap(inout vec3 aC, inout float aW, vec2 off, vec2 dir, vec2 len, float lob, float clp, vec3 c)\n"
+    "{\n"
+    "    vec2 v = vec2(off.x * dir.x + off.y * dir.y, off.y * dir.x - off.x * dir.y) * len;\n"
+    "    float d2 = min(dot(v, v), clp);\n"
+    "    float wB = 2.0 / 5.0 * d2 - 1.0, wA = lob * d2 - 1.0;\n"
+    "    wB *= wB;\n"
+    "    wA *= wA;\n"
+    "    wB = 25.0 / 16.0 * wB - (25.0 / 16.0 - 1.0);\n"
+    "    aC += c * (wB * wA);\n"
+    "    aW += wB * wA;\n"
+    "}\n"
+    "void main()\n"
+    "{\n"
+    "    last = textureSize(frame, 0) - 1;\n"
+    "    vec2 pp = floor(gl_FragCoord.xy) * scale + offset, fp = floor(pp);\n"
+    "    ivec2 q = ivec2(fp);\n"
+    "    pp -= fp;\n"
+    "    vec3 b = at(q + ivec2(0, -1)), c = at(q + ivec2(1, -1));\n"
+    "    vec3 e = at(q + ivec2(-1, 0)), f = at(q), g = at(q + ivec2(1, 0)), h = at(q + ivec2(2, 0));\n"
+    "    vec3 i = at(q + ivec2(-1, 1)), j = at(q + ivec2(0, 1)), k = at(q + ivec2(1, 1)), l = at(q + ivec2(2, 1));\n"
+    "    vec3 n = at(q + ivec2(0, 2)), o = at(q + ivec2(1, 2));\n"
+    "    float bL = luma(b), cL = luma(c), eL = luma(e), fL = luma(f), gL = luma(g), hL = luma(h);\n"
+    "    float iL = luma(i), jL = luma(j), kL = luma(k), lL = luma(l), nL = luma(n), oL = luma(o);\n"
+    "    vec2 dir = vec2(0.0);\n"
+    "    float len = 0.0;\n"
+    "    edge(dir, len, (1.0 - pp.x) * (1.0 - pp.y), bL, eL, fL, gL, jL);\n"
+    "    edge(dir, len, pp.x * (1.0 - pp.y), cL, fL, gL, hL, kL);\n"
+    "    edge(dir, len, (1.0 - pp.x) * pp.y, fL, iL, jL, kL, nL);\n"
+    "    edge(dir, len, pp.x * pp.y, gL, jL, kL, lL, oL);\n"
+    "    float dirR = dot(dir, dir);\n"
+    "    bool zero = dirR < 1.0 / 32768.0;\n"
+    "    dirR = zero ? 1.0 : inversesqrt(dirR);\n"
+    "    if (zero) dir.x = 1.0;\n"
+    "    dir *= dirR;\n"
+    "    len *= 0.5;\n"
+    "    len *= len;\n"
+    "    float stretch = dot(dir, dir) / max(abs(dir.x), abs(dir.y));\n"
+    "    vec2 len2 = vec2(1.0 + (stretch - 1.0) * len, 1.0 - 0.5 * len);\n"
+    "    float lob = 0.5 + ((1.0 / 4.0 - 0.04) - 0.5) * len, clp = 1.0 / lob;\n"
+    "    vec3 min4 = min(min(f, g), min(j, k)), max4 = max(max(f, g), max(j, k));\n"
+    "    vec3 aC = vec3(0.0);\n"
+    "    float aW = 0.0;\n"
+    "    tap(aC, aW, vec2(0.0, -1.0) - pp, dir, len2, lob, clp, b);\n"
+    "    tap(aC, aW, vec2(1.0, -1.0) - pp, dir, len2, lob, clp, c);\n"
+    "    tap(aC, aW, vec2(-1.0, 1.0) - pp, dir, len2, lob, clp, i);\n"
+    "    tap(aC, aW, vec2(0.0, 1.0) - pp, dir, len2, lob, clp, j);\n"
+    "    tap(aC, aW, vec2(0.0, 0.0) - pp, dir, len2, lob, clp, f);\n"
+    "    tap(aC, aW, vec2(-1.0, 0.0) - pp, dir, len2, lob, clp, e);\n"
+    "    tap(aC, aW, vec2(1.0, 1.0) - pp, dir, len2, lob, clp, k);\n"
+    "    tap(aC, aW, vec2(2.0, 1.0) - pp, dir, len2, lob, clp, l);\n"
+    "    tap(aC, aW, vec2(2.0, 0.0) - pp, dir, len2, lob, clp, h);\n"
+    "    tap(aC, aW, vec2(1.0, 0.0) - pp, dir, len2, lob, clp, g);\n"
+    "    tap(aC, aW, vec2(1.0, 2.0) - pp, dir, len2, lob, clp, o);\n"
+    "    tap(aC, aW, vec2(0.0, 2.0) - pp, dir, len2, lob, clp, n);\n"
+    "    color = vec4(min(max4, max(min4, aC / aW)), 1.0);\n"
+    "}\n";
+
 /* FSR 1's RCAS: the four neighbours' range limits how far the centre may be
  * pushed from them, so it sharpens without ringing. sharpness is FSR's con.x,
  * 2 to the minus the stops below the strongest. Reads clamp to the frame. */
@@ -336,16 +428,21 @@ static unsigned int gl_postfx_program( const struct gl_postfx_funcs *f, const ch
  * never made, so each is checked before use and made again. */
 static int gl_postfx_prepare( const struct gl_postfx_funcs *f, struct gl_postfx *fx, char *error, size_t size )
 {
-    if (fx->fxaa && f->IsProgram( fx->fxaa ) && fx->rcas && f->IsProgram( fx->rcas ) &&
-        fx->array && f->IsVertexArray( fx->array ))
+    if (fx->fxaa && f->IsProgram( fx->fxaa ) && fx->easu && f->IsProgram( fx->easu ) &&
+        fx->rcas && f->IsProgram( fx->rcas ) && fx->array && f->IsVertexArray( fx->array ))
         return 1;
     if (!(fx->fxaa = gl_postfx_program( f, gl_postfx_fxaa, error, size )) ||
+        !(fx->easu = gl_postfx_program( f, gl_postfx_easu, error, size )) ||
         !(fx->rcas = gl_postfx_program( f, gl_postfx_rcas, error, size )))
         return 0;
     fx->fxaa_rcp = f->GetUniformLocation( fx->fxaa, "rcp" );
+    fx->easu_scale = f->GetUniformLocation( fx->easu, "scale" );
+    fx->easu_offset = f->GetUniformLocation( fx->easu, "offset" );
     fx->rcas_sharpness = f->GetUniformLocation( fx->rcas, "sharpness" );
     f->UseProgram( fx->fxaa );
     f->Uniform1i( f->GetUniformLocation( fx->fxaa, "frame" ), 0 );
+    f->UseProgram( fx->easu );
+    f->Uniform1i( f->GetUniformLocation( fx->easu, "frame" ), 0 );
     f->UseProgram( fx->rcas );
     f->Uniform1i( f->GetUniformLocation( fx->rcas, "frame" ), 0 );
     f->GenVertexArrays( 1, &fx->array );
@@ -353,7 +450,7 @@ static int gl_postfx_prepare( const struct gl_postfx_funcs *f, struct gl_postfx 
     return 1;
 }
 
-/* A texture of the surface's size and a framebuffer drawing into it. */
+/* A texture of width x height and a framebuffer drawing into it. */
 static void gl_postfx_target( const struct gl_postfx_funcs *f, unsigned int *texture, unsigned int *framebuffer,
                               int width, int height, int resized )
 {
@@ -457,19 +554,36 @@ static void gl_postfx_pass( const struct gl_postfx_funcs *f, unsigned int progra
     f->DrawArrays( GLPFX_TRIANGLES, 0, 3 );
 }
 
+/* Draws a pass over a target of width x height. */
+static void gl_postfx_pass_sized( const struct gl_postfx_funcs *f, unsigned int program, unsigned int texture,
+                                  unsigned int framebuffer, int width, int height )
+{
+    f->Viewport( 0, 0, width, height );
+    gl_postfx_pass( f, program, texture, framebuffer );
+}
+
 /* The passes over the back buffer of a surface of width x height, the
- * program's context current: aa one of enum gl_postfx_aa, rcas_strength FSR's
- * (gl_postfx_rcas_strength), 0 for none. 1 when the frame was processed; 0
- * when there was nothing to do or the passes could not be built in this
- * context, which error then says the first time. */
-static int gl_postfx_apply( const struct gl_postfx_funcs *f, struct gl_postfx *fx, int width, int height,
-                            int aa, float rcas_strength, char *error, size_t error_size )
+ * program's context current, its picture the bottom-left picture_width x
+ * picture_height of it (the whole of it, or for EASU less): aa one of enum
+ * gl_postfx_aa, upscale nonzero for EASU where the picture is smaller than
+ * the surface, rcas_strength FSR's (gl_postfx_rcas_strength), 0 for none. 1
+ * when the frame was processed; 0 when there was nothing to do or the passes
+ * could not be built in this context, which error then says the first time. */
+static int gl_postfx_apply_scaled( const struct gl_postfx_funcs *f, struct gl_postfx *fx, int width, int height,
+                                   int picture_width, int picture_height, int aa, int upscale,
+                                   float rcas_strength, char *error, size_t error_size )
 {
     struct gl_postfx_saved saved;
-    int fxaa = aa == GL_POSTFX_AA_FXAA, rcas = rcas_strength > 0, resized;
+    int fxaa = aa == GL_POSTFX_AA_FXAA, rcas = rcas_strength > 0, easu, resized;
+    unsigned int picture;
 
     if (error_size) error[0] = 0;
-    if ((!fxaa && !rcas) || fx->failed || width <= 0 || height <= 0) return 0;
+    if (picture_width <= 0 || picture_height <= 0 || picture_width > width || picture_height > height)
+        picture_width = width, picture_height = height;
+    /* EASU only enlarges: a picture of the surface's size keeps it. */
+    easu = upscale && (picture_width < width || picture_height < height);
+    if (!easu) picture_width = width, picture_height = height;
+    if ((!fxaa && !rcas && !easu) || fx->failed || width <= 0 || height <= 0) return 0;
     gl_postfx_save( f, &saved );
     if (!gl_postfx_prepare( f, fx, error, error_size ))
     {
@@ -477,15 +591,27 @@ static int gl_postfx_apply( const struct gl_postfx_funcs *f, struct gl_postfx *f
         gl_postfx_restore( f, &saved );
         return 0;
     }
-    resized = fx->width != width || fx->height != height;
-    fx->width = width;
-    fx->height = height;
+    resized = fx->width != picture_width || fx->height != picture_height;
+    fx->width = picture_width;
+    fx->height = picture_height;
 
     f->BindBuffer( GLPFX_PIXEL_UNPACK_BUFFER, 0 );
     f->ActiveTexture( GLPFX_TEXTURE0 );
     if (f->BindSampler) f->BindSampler( 0, 0 );
-    gl_postfx_target( f, &fx->scene, &fx->scene_fb, width, height, resized );
-    if (fxaa && rcas) gl_postfx_target( f, &fx->mid, &fx->mid_fb, width, height, resized );
+    gl_postfx_target( f, &fx->scene, &fx->scene_fb, picture_width, picture_height, resized );
+    if (fxaa && (rcas || easu))
+    {
+        gl_postfx_target( f, &fx->mid, &fx->mid_fb, picture_width, picture_height,
+                          fx->mid_width != picture_width || fx->mid_height != picture_height );
+        fx->mid_width = picture_width;
+        fx->mid_height = picture_height;
+    }
+    if (easu && rcas)
+    {
+        gl_postfx_target( f, &fx->up, &fx->up_fb, width, height, fx->up_width != width || fx->up_height != height );
+        fx->up_width = width;
+        fx->up_height = height;
+    }
     f->BindVertexArray( fx->array );
     if (saved.clip_origin == GLPFX_UPPER_LEFT) f->ClipControl( GLPFX_LOWER_LEFT, saved.clip_depth );
     f->Disable( GLPFX_BLEND );
@@ -497,28 +623,47 @@ static int gl_postfx_apply( const struct gl_postfx_funcs *f, struct gl_postfx *f
     f->Disable( GLPFX_FRAMEBUFFER_SRGB );
     f->Disable( GLPFX_COLOR_LOGIC_OP );
     f->ColorMask( 1, 1, 1, 1 );
-    f->Viewport( 0, 0, width, height );
 
-    /* The frame, as it is in the back buffer. */
+    /* The picture, as it is in the back buffer. */
     f->BindFramebuffer( GLPFX_READ_FRAMEBUFFER, 0 );
     f->ReadBuffer( GLPFX_BACK );
     f->BindFramebuffer( GLPFX_DRAW_FRAMEBUFFER, fx->scene_fb );
-    f->BlitFramebuffer( 0, 0, width, height, 0, 0, width, height, GLPFX_COLOR_BUFFER_BIT, GLPFX_NEAREST );
+    f->BlitFramebuffer( 0, 0, picture_width, picture_height, 0, 0, picture_width, picture_height,
+                        GLPFX_COLOR_BUFFER_BIT, GLPFX_NEAREST );
+    picture = fx->scene;
 
     if (fxaa)
     {
         f->UseProgram( fx->fxaa );
-        f->Uniform2f( fx->fxaa_rcp, 1.0f / width, 1.0f / height );
-        gl_postfx_pass( f, fx->fxaa, fx->scene, rcas ? fx->mid_fb : 0 );
+        f->Uniform2f( fx->fxaa_rcp, 1.0f / picture_width, 1.0f / picture_height );
+        gl_postfx_pass_sized( f, fx->fxaa, picture, rcas || easu ? fx->mid_fb : 0, picture_width, picture_height );
+        picture = fx->mid;
+    }
+    if (easu)
+    {
+        float scale_x = (float)picture_width / width, scale_y = (float)picture_height / height;
+
+        f->UseProgram( fx->easu );
+        f->Uniform2f( fx->easu_scale, scale_x, scale_y );
+        f->Uniform2f( fx->easu_offset, 0.5f * scale_x - 0.5f, 0.5f * scale_y - 0.5f );
+        gl_postfx_pass_sized( f, fx->easu, picture, rcas ? fx->up_fb : 0, width, height );
+        picture = fx->up;
     }
     if (rcas)
     {
         f->UseProgram( fx->rcas );
         f->Uniform1f( fx->rcas_sharpness, rcas_strength );
-        gl_postfx_pass( f, fx->rcas, fxaa ? fx->mid : fx->scene, 0 );
+        gl_postfx_pass_sized( f, fx->rcas, picture, 0, width, height );
     }
     gl_postfx_restore( f, &saved );
     return 1;
+}
+
+/* The passes over the whole back buffer of a surface of width x height. */
+static inline int gl_postfx_apply( const struct gl_postfx_funcs *f, struct gl_postfx *fx, int width, int height,
+                                   int aa, float rcas_strength, char *error, size_t error_size )
+{
+    return gl_postfx_apply_scaled( f, fx, width, height, width, height, aa, 0, rcas_strength, error, error_size );
 }
 
 #endif

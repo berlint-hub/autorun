@@ -568,27 +568,36 @@ struct nx_osk_target
 {
     EGLContext context;
     EGLint width, height;
+    SIZE picture;  /* FSR's upscaling: the program's picture in the surface's corner; 0 for all of it */
 };
 
 static void nx_osk_draw_gl( const struct nx_osk_target *target );
 
 /* An OpenGL program's post-processing (gl_postfx.h), from its settings
- * (runtime.c): FXAA, and with Upscaling on FSR 1.0 FSR's sharpening (RCAS),
- * over its frame at the swap, under the overlays. */
-static int nx_postfx_aa;
+ * (runtime.c): FXAA, and with Upscaling on FSR 1.0 FSR's upscaling (EASU) of
+ * a picture smaller than the screen and its sharpening (RCAS), over its frame
+ * at the swap, under the overlays. */
+static int nx_postfx_aa, nx_postfx_upscale;
 static float nx_postfx_rcas;
 static struct gl_postfx_funcs nx_postfx_funcs;
 static int nx_postfx_loaded;  /* 1 loaded, -1 the driver lacks an entry point */
+/* With FSR's upscaling, a program in a display mode below the screen's draws
+ * its picture, of this size, into the bottom-left corner of a surface kept at
+ * the screen's size, and EASU enlarges it over the whole of it at the swap
+ * (nx_screen_fit). 0 for none: the surface is the picture. The swapping
+ * thread's. */
+static SIZE nx_easu_picture;
 
 void wine_nx_gl_postfx_configure( int anti_aliasing, int upscaling, float sharpness )
 {
     nx_postfx_aa = anti_aliasing > 0 && anti_aliasing < GL_POSTFX_AA_COUNT ? anti_aliasing : GL_POSTFX_AA_OFF;
+    nx_postfx_upscale = upscaling == 1;
     nx_postfx_rcas = upscaling == 1 ? gl_postfx_rcas_strength( sharpness ) : 0;
 }
 
 static BOOL nx_postfx_wanted( void )
 {
-    return nx_postfx_aa != GL_POSTFX_AA_OFF || nx_postfx_rcas > 0;
+    return nx_postfx_aa != GL_POSTFX_AA_OFF || nx_postfx_rcas > 0 || (nx_postfx_upscale && nx_easu_picture.cx);
 }
 
 static void *nx_postfx_get( const char *name )
@@ -597,9 +606,11 @@ static void *nx_postfx_get( const char *name )
 }
 
 /* With nx_osk_gl_lock held, the program's context current. */
-static void nx_postfx_draw( struct nx_osk_gl *osk, EGLint width, EGLint height )
+static void nx_postfx_draw( struct nx_osk_gl *osk, EGLint width, EGLint height, SIZE picture )
 {
-    static BOOL logged;
+    static SIZE logged;
+    BOOL easu = nx_postfx_upscale && picture.cx > 0 && picture.cy > 0 && picture.cx <= width &&
+                picture.cy <= height && (picture.cx < width || picture.cy < height);
     char error[256];
 
     if (!nx_postfx_loaded)
@@ -608,16 +619,20 @@ static void nx_postfx_draw( struct nx_osk_gl *osk, EGLint width, EGLint height )
         if (nx_postfx_loaded < 0) nx_log( "[NXGL] post-processing off: the OpenGL driver lacks what it needs" );
     }
     if (nx_postfx_loaded < 0) return;
-    if (gl_postfx_apply( &nx_postfx_funcs, &osk->postfx, width, height, nx_postfx_aa, nx_postfx_rcas,
-                         error, sizeof(error) ))
+    if (!easu) picture.cx = width, picture.cy = height;
+    if (gl_postfx_apply_scaled( &nx_postfx_funcs, &osk->postfx, width, height, picture.cx, picture.cy,
+                                nx_postfx_aa, easu, nx_postfx_rcas, error, sizeof(error) ))
     {
-        if (!logged)
+        /* Once, and again for each picture of another size. */
+        if (logged.cx != picture.cx || logged.cy != picture.cy)
         {
-            logged = TRUE;
-            nx_log( "[NXGL] post-processing over the frame at its swap: %s%s%s, %dx%d",
+            logged = picture;
+            nx_log( "[NXGL] post-processing over the frame at its swap: %s%s%s%s%s, %dx%d to %dx%d",
                     nx_postfx_aa == GL_POSTFX_AA_FXAA ? "FXAA" : "",
-                    nx_postfx_aa != GL_POSTFX_AA_OFF && nx_postfx_rcas > 0 ? " then " : "",
-                    nx_postfx_rcas > 0 ? "FSR sharpening (RCAS)" : "", (int)width, (int)height );
+                    nx_postfx_aa != GL_POSTFX_AA_OFF && (easu || nx_postfx_rcas > 0) ? " then " : "",
+                    easu ? "FSR upscaling (EASU)" : "", easu && nx_postfx_rcas > 0 ? " then " : "",
+                    nx_postfx_rcas > 0 ? "FSR sharpening (RCAS)" : "", (int)picture.cx, (int)picture.cy,
+                    (int)width, (int)height );
         }
     }
     else if (error[0]) nx_log( "[NXGL] post-processing off for this context: %s", error );
@@ -655,6 +670,7 @@ static void nx_osk_draw( struct opengl_drawable *base )
         !funcs->p_eglQuerySurface( egl->display, base->surface, EGL_HEIGHT, &target.height ) ||
         !(target.context = funcs->p_eglGetCurrentContext()))
         return;
+    target.picture = nx_easu_picture;
     if (horizon_egl_next_swap_hook)
     {
         struct nx_osk_target *slot = &targets[next_target++ % ARRAY_SIZE(targets)];
@@ -679,7 +695,9 @@ static void nx_osk_draw_gl( const struct nx_osk_target *target )
     BOOL cursor_on = !overlay_visible && wine_nx_cursor_state && wine_nx_cursor_bitmap &&
                      wine_nx_cursor_state( &cursor_x, &cursor_y, &cursor_visible ) && cursor_visible;
     BOOL fps_on = &wine_nx_fps_counter && wine_nx_fps_counter;
-    BOOL postfx_on = nx_postfx_wanted();
+    /* The picture to enlarge is the one the program's thread saw at its swap. */
+    BOOL postfx_on = nx_postfx_aa != GL_POSTFX_AA_OFF || nx_postfx_rcas > 0 ||
+                     (nx_postfx_upscale && target->picture.cx);
     unsigned int i;
 
     if (!overlay_visible && !cursor_on && !fps_on && !postfx_on) return;
@@ -724,7 +742,7 @@ static void nx_osk_draw_gl( const struct nx_osk_target *target )
         osk->context = context;
     }
     /* The game's picture first; the overlays go over it untouched. */
-    if (postfx_on) nx_postfx_draw( osk, width, height );
+    if (postfx_on) nx_postfx_draw( osk, width, height, target->picture );
 
     funcs->p_glGetIntegerv( GL_READ_FRAMEBUFFER_BINDING, &read_fb );
     funcs->p_glGetIntegerv( GL_DRAW_FRAMEBUFFER_BINDING, &draw_fb );
@@ -925,7 +943,14 @@ static BOOL nx_drawable_swap( struct opengl_drawable *base )
  * thread's draw surface, which it is after a swap). The picture is stretched,
  * and win32u's mapping of a finger's points says the same
  * (source_virt_to_raw_ratios); own size leaves it as it was. The overlays
- * (keyboard, menu, cursor, frame rate) already measure the surface. */
+ * (keyboard, menu, cursor, frame rate) already measure the surface.
+ *
+ * With FSR's upscaling the surface keeps the screen's size instead, for a
+ * mode below it: the program draws into its bottom-left corner, at its own
+ * size, as it did before the resize, and FSR's EASU stretches that over the
+ * whole surface at the swap (nx_postfx_draw), where the console's scaler
+ * would have stretched it bilinearly. The picture and the mapping of a
+ * finger's points are the same either way. */
 extern int wine_nx_picture_mode __attribute__((weak));  /* runtime.c */
 typedef EGLBoolean (*PFN_eglResizeSurfaceMESA)( EGLDisplay display, EGLSurface surface, EGLint width, EGLint height );
 static SIZE nx_screen_size = { 1280, 720 };    /* of the screen's surface; the swapping thread's */
@@ -935,8 +960,9 @@ static void nx_screen_fit( struct opengl_drawable *base )
 {
     static PFN_eglResizeSurfaceMESA resize;
     static BOOL looked;
-    SIZE want = { 1280, 720 };
+    SIZE want = { 1280, 720 }, screen = { 1280, 720 }, picture = { 0, 0 };
 
+    nx_easu_picture = picture;
     if (emulate_modeset) return;
     if (&wine_nx_picture_mode && wine_nx_picture_mode == 3) return;
     /* A window over the whole screen in a mode of its own; anything else
@@ -945,6 +971,22 @@ static void nx_screen_fit( struct opengl_drawable *base )
         base->virtual_size.cx >= 320 && base->virtual_size.cy >= 200 &&
         base->virtual_size.cx <= 4096 && base->virtual_size.cy <= 4096)
         want = base->virtual_size;
+    /* FSR's upscaling: a mode below the screen's is drawn in a corner of a
+     * surface of the screen's size, and EASU enlarges it there. */
+    if (base->monitor_size.cx >= 1280 && base->monitor_size.cy >= 720 &&
+        base->monitor_size.cx <= 4096 && base->monitor_size.cy <= 4096)
+        screen = base->monitor_size;
+    if (nx_postfx_upscale && want.cx <= screen.cx && want.cy <= screen.cy &&
+        (want.cx < screen.cx || want.cy < screen.cy))
+    {
+        picture = want;
+        want = screen;
+    }
+    /* The surface already has the size, or will after the resize below:
+     * the next frame is drawn into its corner. One it refused keeps the
+     * picture its size, and nothing is enlarged. */
+    if (picture.cx && !(want.cx == nx_screen_refused.cx && want.cy == nx_screen_refused.cy))
+        nx_easu_picture = picture;
     if (want.cx == nx_screen_size.cx && want.cy == nx_screen_size.cy) return;
     if (want.cx == nx_screen_refused.cx && want.cy == nx_screen_refused.cy) return;
     if (!looked)
@@ -953,11 +995,20 @@ static void nx_screen_fit( struct opengl_drawable *base )
         looked = TRUE;
         if (!resize) nx_log( "[NXGL] this Mesa cannot resize the screen's surface: a program's picture stays at its own size" );
     }
-    if (!resize) return;
+    if (!resize)
+    {
+        nx_easu_picture.cx = nx_easu_picture.cy = 0;
+        return;
+    }
     if (resize( egl->display, base->surface, want.cx, want.cy ))
     {
-        nx_log( "[NXGL] the screen's surface is %dx%d, was %dx%d: the console stretches the program's picture over the screen",
-                (int)want.cx, (int)want.cy, (int)nx_screen_size.cx, (int)nx_screen_size.cy );
+        if (picture.cx)
+            nx_log( "[NXGL] the screen's surface is %dx%d, was %dx%d: the program draws %dx%d into its corner and FSR "
+                    "enlarges it over the screen", (int)want.cx, (int)want.cy, (int)nx_screen_size.cx,
+                    (int)nx_screen_size.cy, (int)picture.cx, (int)picture.cy );
+        else
+            nx_log( "[NXGL] the screen's surface is %dx%d, was %dx%d: the console stretches the program's picture over the screen",
+                    (int)want.cx, (int)want.cy, (int)nx_screen_size.cx, (int)nx_screen_size.cy );
         nx_screen_size = want;
         nx_screen_refused.cx = nx_screen_refused.cy = 0;
     }
@@ -967,6 +1018,7 @@ static void nx_screen_fit( struct opengl_drawable *base )
                 (int)nx_screen_size.cx, (int)nx_screen_size.cy, (int)want.cx, (int)want.cy,
                 (unsigned int)funcs->p_eglGetError() );
         nx_screen_refused = want;
+        nx_easu_picture.cx = nx_easu_picture.cy = 0;
     }
 }
 
@@ -1116,6 +1168,7 @@ static BOOL nx_surface_create( struct client_surface *client, int format, struct
     nx_screen_size.cx = 1280;   /* and it is the screen's size (wine_nx_gl_acquire_window) */
     nx_screen_size.cy = 720;
     nx_screen_refused.cx = nx_screen_refused.cy = 0;
+    nx_easu_picture.cx = nx_easu_picture.cy = 0;  /* its first frame is its own size */
     if (!previous) nx_screen_first_frame( gl, format );
 
     TRACE( "created drawable %s with EGL surface %p\n", debugstr_opengl_drawable( &gl->base ), gl->base.surface );

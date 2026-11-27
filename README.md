@@ -175,9 +175,10 @@ The touchscreen works everywhere too.
   arguments, and download its artwork;
 - make a HOME menu shortcut that starts it directly;
 - pick how its graphics are drawn (Wine's Direct3D or DXVK), how a picture
-  smaller than the screen is enlarged (FSR 1.0, or whole-pixel steps for pixel
-  art), anti-aliasing (FXAA) and FSR's sharpening over an OpenGL game's
-  picture, and **Frame Generation**;
+  smaller than the screen is enlarged (FSR 1.0, also for an OpenGL game set to
+  a lower resolution, or whole-pixel steps for pixel art), anti-aliasing
+  (FXAA) and FSR's sharpening over an OpenGL game's picture, and **Frame
+  Generation**;
 - pick the CPU translator (FEX or Box64), and give it its own controls;
 - **Run another program** from the game's folder, such as its configuration
   tool or its setup (see below);
