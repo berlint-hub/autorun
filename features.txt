@@ -1,0 +1,3 @@
+iface:opengl32.dll:bfd9eec06c88
+unixlib32:opengl32.dll
+unixlib:opengl32.dll
