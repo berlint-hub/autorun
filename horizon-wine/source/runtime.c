@@ -828,6 +828,10 @@ int wine_nx_swkbd_auto_enabled = 1;
 struct input_profile wine_nx_input_profile;
 static pthread_mutex_t wine_nx_input_profile_mutex = PTHREAD_MUTEX_INITIALIZER;
 uint64_t wine_nx_input_swallowed;
+/* The game's shortcuts (input_profile.h): the buttons the game must not see
+ * now, and those it must see though let go (a - tapped alone), for the pad
+ * xinput_unix.c reports as well. */
+uint64_t wine_nx_input_shortcut_hidden, wine_nx_input_shortcut_extra;
 
 void wine_nx_input_profile_get( struct input_profile *out )
 {
@@ -1549,6 +1553,8 @@ int wine_nx_pointer_poll( int *x, int *y, unsigned int *buttons )
     struct input_pad raw = {0};
     struct input_output output = {0};
     struct input_profile profile;
+    uint64_t shortcut_keys[INPUT_KEY_WORDS] = {0};
+    unsigned int shortcut_mouse = 0;
     u64 now, held, all_held, elapsed;
     int moved = 0, keyboard = 0, on_keyboard = 0, leave = 0, emulate;
     int controls_were_open = 0, tasks_were_open = 0, finger_down = 0;
@@ -1718,6 +1724,21 @@ int wine_nx_pointer_poll( int *x, int *y, unsigned int *buttons )
      * [POINTER] line is said where it is set (wine_nx_input_profile_set). */
     wine_nx_input_profile_get( &profile );
     emulate = !keyboard && !controls_open && !tasks_open && profile.mode == INPUT_KEYBOARD_MOUSE;
+    /* The game's shortcuts, in either mode: the keys they type, and their
+     * buttons kept from its pad and its other keys. Not while the keyboard
+     * or a panel has the controller. */
+    {
+        static struct input_shortcut_state shortcut_state;
+        uint64_t hidden = 0, extra = 0;
+
+        if (!keyboard && !controls_open && !tasks_open && !wine_nx_osk_visible())
+            input_shortcuts_step( &profile, &shortcut_state, held, armTicksToNs( now ), shortcut_keys,
+                                  &shortcut_mouse, &hidden, &extra );
+        else memset( &shortcut_state, 0, sizeof(shortcut_state) );
+        __atomic_store_n( &wine_nx_input_shortcut_hidden, hidden, __ATOMIC_RELAXED );
+        __atomic_store_n( &wine_nx_input_shortcut_extra, extra, __ATOMIC_RELAXED );
+        raw.buttons = (raw.buttons & ~hidden) | (extra & ~swallowed);
+    }
 
     /* A mouse plugged into the dock reports relative deltas and wheel turns so
      * mouse-look games (SetCursorPos / ClipCursor) keep turning freely; a
@@ -1864,6 +1885,8 @@ int wine_nx_pointer_poll( int *x, int *y, unsigned int *buttons )
         wine_nx_pointer.speed = POINTER_CURSOR_SPEED * profile.mouse_speed / 100.0;
         moved |= pointer_cursor_step( &wine_nx_pointer, output.mouse_x, output.mouse_y, elapsed );
     }
+    for (unsigned int i = 0; i < INPUT_KEY_WORDS; i++) output.keys[i] |= shortcut_keys[i];
+    output.buttons |= shortcut_mouse;
     input_key_edges_update( &runtime_key_edges, output.keys );
     if (output.wheels && (output.wheels != last_wheels || now >= wheel_next))
     {

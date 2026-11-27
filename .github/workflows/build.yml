@@ -216,11 +216,12 @@ jobs:
           cd horizon-wine
           cc $flags -I source tests/launcher_settings.c -o "$RUNNER_TEMP/launcher_settings"
           cc $flags -I source tests/launcher_shortcut.c -o "$RUNNER_TEMP/launcher_shortcut"
+          cc $flags tests/input_profile.c source/input_profile.c -lm -o "$RUNNER_TEMP/input_profile"
           cc $flags tests/fex_options.c -o "$RUNNER_TEMP/fex_options"
           cc $flags tests/dxvk_options.c source/dxvk_options.c -o "$RUNNER_TEMP/dxvk_options"
           cc $flags -I tests/graphics-shims tests/dxvk_releases.c -lcurl -lzstd -lz -o "$RUNNER_TEMP/dxvk_releases"
           cd "$RUNNER_TEMP"
-          for test in launcher_settings launcher_shortcut fex_options dxvk_options dxvk_releases; do
+          for test in launcher_settings launcher_shortcut input_profile fex_options dxvk_options dxvk_releases; do
             ./$test || { echo "::error::horizon-wine/tests/$test.c failed"; exit 1; }
           done
 

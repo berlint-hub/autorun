@@ -356,6 +356,13 @@ positions and Nintendo A/B/X/Y labels), and **Picture of another mode**
 controls how non-native display modes fill the screen (**Whole**, **Edges
 cropped**, **Stretched**, or **Own size**).
 
+**Shortcuts** in the same Controls menu make two buttons together type keys,
+in either input mode: **−** or **+** with another button, eight of them a
+game, such as **− + X** for F5 to quick-save and **− + D-pad right** for F9 to
+load. The game does not see a shortcut's buttons, and **−** or **+** pressed
+alone still reaches it, a moment later. The runtime's own combinations below
+cannot be shortcuts.
+
 **Hold + and − together for a second** to close a game.
 
 **Minus + B** opens the on-screen keyboard over the game (it
