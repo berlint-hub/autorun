@@ -705,7 +705,7 @@ struct __server_request_info {
     unsigned data_count;
     void *reply_data;
 };
-static int reads, calls, quitting, quit_calls;
+static int reads, calls, quitting, quit_calls, refuse;
 static int horizon_fast_sync_enabled = 1;
 volatile int wine_nx_quit_requested;
 static jmp_buf quit_jump;
@@ -720,37 +720,46 @@ static int horizon_server_sync_call(unsigned tid, const void *r, const void *d,
     const struct request_header *header = r;
     assert(tid == 42 && size == header->request_size);
     (void)d; (void)extra; *(unsigned *)reply = 0; calls++;
-    return 1;
+    return !refuse;
 }
 '''
 client_tests = r'''
 int main(void)
 {
     struct __server_request_info req = { .u.req.request_header.req = REQ_event_op };
-    assert(horizon_sync_call(&req) && reads == 1 && calls == 1);
+    const char *why = "unset";
+    assert(horizon_sync_call(&req, &why) && reads == 1 && calls == 1 && !why);
     req.u.req.request_header.req = REQ_other;
-    assert(!horizon_sync_call(&req) && reads == 1);
+    assert(!horizon_sync_call(&req, &why) && reads == 1 && !why);
+    /* A select whose data is more than the APC result and the wait: the
+     * context of a thread being suspended. */
     req.u.req.request_header.req = REQ_select;
-    assert(!horizon_sync_call(&req) && reads == 1);
+    assert(!horizon_sync_call(&req, &why) && reads == 1 && !strcmp(why, "it carried a thread context"));
     req.u.req.request_header.req = REQ_event_op;
     req.u.req.request_header.request_size = 1025;
-    assert(!horizon_sync_call(&req) && reads == 1);
+    assert(!horizon_sync_call(&req, &why) && reads == 1 && !strcmp(why, "it was too large"));
     req.u.req.request_header.request_size = 1;
-    assert(!horizon_sync_call(&req) && reads == 1);
+    assert(!horizon_sync_call(&req, &why) && reads == 1 && !strcmp(why, "its data did not add up"));
     req.u.req.request_header.request_size = 0;
     req.u.req.request_header.req = REQ_get_handle_fd;
-    assert(horizon_sync_call(&req) && calls == 2);
+    assert(horizon_sync_call(&req, &why) && calls == 2 && !why);
+    /* The reply took the request's place. */
+    req.u.req.request_header.req = REQ_get_handle_fd;
+    refuse = 1;
+    assert(!horizon_sync_call(&req, &why) && calls == 3 && !strcmp(why, "the in-thread server turned it down"));
+    refuse = 0;
     req.u.req.request_header.req = REQ_event_op;
     wine_nx_quit_requested = 1;
     quitting = 1;
-    if (!setjmp(quit_jump)) { horizon_sync_call(&req); assert(0); }
-    assert(quit_calls == 1 && reads == 2 && calls == 2);
+    if (!setjmp(quit_jump)) { horizon_sync_call(&req, &why); assert(0); }
+    assert(quit_calls == 1 && reads == 3 && calls == 3);
     horizon_fast_sync_enabled = 0;
-    assert(!horizon_sync_call(&req) && quit_calls == 1 && reads == 2);
+    assert(!horizon_sync_call(&req, &why) && quit_calls == 1 && reads == 3 && !why);
     horizon_fast_sync_enabled = 1;
     quitting = 0;
-    assert(horizon_sync_call(&req) && quit_calls == 2 && reads == 3);
-    puts("Horizon direct sync client: teardown before TEB access, cancelled quit, mode and payload bounds passed");
+    assert(horizon_sync_call(&req, &why) && quit_calls == 2 && reads == 4);
+    puts("Horizon direct sync client: teardown before TEB access, cancelled quit, mode, payload bounds and "
+         "the reasons a call goes to the server's thread passed");
 }
 '''
 with tempfile.TemporaryDirectory(prefix="wine-nx-sync-client-") as tmp:

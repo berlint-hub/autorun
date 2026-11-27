@@ -76,6 +76,8 @@ extern int horizon_server_pool_wanted;
 extern int horizon_server_profile_enabled;
 extern int horizon_server_sync_call( unsigned int tid, const void *request, const void *data,
                                      unsigned int data_size, void *reply, void *reply_data );
+extern void horizon_server_describe_select( const void *op_data, unsigned int size, long long timeout,
+                                            long long elapsed, char *buf, size_t buf_size );
 
 /* Horizon address arbitration used as a futex; timeout_ns < 0 waits forever. */
 extern int horizon_futex_wait( const int *addr, int value, long long timeout_ns );
