@@ -17758,6 +17758,143 @@ static unsigned int horizon_server_select_status( const struct horizon_select_re
     }
 }
 
+/* A handle's object by its kind, for horizon_server_describe_select. */
+static const char *horizon_server_handle_kind_locked( unsigned int handle )
+{
+    static const char * const kinds[] =
+    {
+        [HORIZON_SERVER_OBJECT_RESERVE] = "reserve object",
+        [HORIZON_SERVER_OBJECT_REG_KEY] = "registry key",
+        [HORIZON_SERVER_OBJECT_EVENT] = "event",
+        [HORIZON_SERVER_OBJECT_KEYED_EVENT] = "keyed event",
+        [HORIZON_SERVER_OBJECT_MUTEX] = "mutex",
+        [HORIZON_SERVER_OBJECT_SEMAPHORE] = "semaphore",
+        [HORIZON_SERVER_OBJECT_TIMER] = "timer",
+        [HORIZON_SERVER_OBJECT_FILE] = "file",
+        [HORIZON_SERVER_OBJECT_MAPPING] = "mapping",
+        [HORIZON_SERVER_OBJECT_PROCESS] = "process",
+        [HORIZON_SERVER_OBJECT_THREAD] = "thread",
+        [HORIZON_SERVER_OBJECT_SOCK] = "socket",
+        [HORIZON_SERVER_OBJECT_WINSTATION] = "window station",
+        [HORIZON_SERVER_OBJECT_DESKTOP] = "desktop",
+        [HORIZON_SERVER_OBJECT_MSG_QUEUE] = "message queue",
+        [HORIZON_SERVER_OBJECT_DIRECTORY] = "directory",
+        [HORIZON_SERVER_OBJECT_COMPLETION] = "completion port",
+        [HORIZON_SERVER_OBJECT_COMPLETION_WAIT] = "completion wait",
+        [HORIZON_SERVER_OBJECT_NAMED_PIPE] = "named pipe",
+        [HORIZON_SERVER_OBJECT_NSI] = "nsi",
+        [HORIZON_SERVER_OBJECT_DEVICE] = "device",
+    };
+    struct horizon_server_handle_entry *entry = horizon_server_find_handle_locked( handle );
+    int type;
+
+    if (!entry || !entry->object) return NULL;
+    type = entry->object->type;
+    if (type <= 0 || type >= (int)(sizeof(kinds) / sizeof(kinds[0])) || !kinds[type]) return "object";
+    return kinds[type];
+}
+
+/* What a select a client made waited for, for the runtime's report of a slow
+ * server call (server.c): "wait for 2: event, message queue; no timeout".
+ * The call has ended: elapsed (100 ns) is how long it took, which with the
+ * deadline left gives the timeout it was made with. */
+void horizon_server_describe_select( const void *op_data, unsigned int size, long long timeout,
+                                     long long elapsed, char *buf, size_t buf_size )
+{
+    int used = 0, op = HORIZON_SELECT_NONE;
+    unsigned int handles[3] = {0}, count = 0, total = 0, i;
+
+#define DESCRIBE(...) do { if (used >= 0 && (size_t)used < buf_size) \
+        used += snprintf( buf + used, buf_size - (size_t)used, __VA_ARGS__ ); } while (0)
+    if (!buf_size) return;
+    buf[0] = 0;
+    if (op_data && size >= sizeof(op)) memcpy( &op, op_data, sizeof(op) );
+    switch (op)
+    {
+    case HORIZON_SELECT_WAIT:
+    case HORIZON_SELECT_WAIT_ALL:
+        if (size < offsetof( struct horizon_select_wait_op, handles[1] )) break;
+        total = (size - offsetof( struct horizon_select_wait_op, handles )) / sizeof(handles[0]);
+        for (count = 0; count < total && count < 3; count++)
+            memcpy( &handles[count], (const unsigned char *)op_data + offsetof( struct horizon_select_wait_op, handles ) +
+                    count * sizeof(handles[0]), sizeof(handles[0]) );
+        break;
+    case HORIZON_SELECT_SIGNAL_AND_WAIT:
+        if (size < sizeof(struct horizon_select_signal_and_wait_op)) break;
+        memcpy( &handles[0], (const unsigned char *)op_data +
+                offsetof( struct horizon_select_signal_and_wait_op, signal ), sizeof(handles[0]) );
+        memcpy( &handles[1], (const unsigned char *)op_data +
+                offsetof( struct horizon_select_signal_and_wait_op, wait ), sizeof(handles[0]) );
+        count = total = 2;
+        break;
+    }
+    if (count) pthread_mutex_lock( &horizon_server_objects_mutex );
+    switch (op)
+    {
+    case HORIZON_SELECT_WAIT:
+    case HORIZON_SELECT_WAIT_ALL:
+        if (!total)
+        {
+            DESCRIBE( "a wait for nothing" );
+            break;
+        }
+        DESCRIBE( "wait for %s%u:", op == HORIZON_SELECT_WAIT_ALL ? "all of " : "", total );
+        for (i = 0; i < count; i++)
+        {
+            const char *kind = horizon_server_handle_kind_locked( handles[i] );
+
+            if (kind) DESCRIBE( "%s %s", i ? "," : "", kind );
+            else DESCRIBE( "%s handle %#x", i ? "," : "", handles[i] );
+        }
+        if (total > count) DESCRIBE( ", ..." );
+        break;
+    case HORIZON_SELECT_SIGNAL_AND_WAIT:
+        if (count < 2)
+        {
+            DESCRIBE( "signal and wait" );
+            break;
+        }
+        {
+            const char *signal = horizon_server_handle_kind_locked( handles[0] );
+            const char *wait = horizon_server_handle_kind_locked( handles[1] );
+
+            DESCRIBE( "signal %s and wait for %s", signal ? signal : "a handle", wait ? wait : "a handle" );
+        }
+        break;
+    case HORIZON_SELECT_KEYED_EVENT_WAIT:
+        DESCRIBE( "a keyed event wait" );
+        break;
+    case HORIZON_SELECT_KEYED_EVENT_RELEASE:
+        DESCRIBE( "a keyed event release" );
+        break;
+    default:
+        if (size) DESCRIBE( "an unknown wait %d", op );
+        else DESCRIBE( "no objects" );
+        break;
+    }
+    if (count) pthread_mutex_unlock( &horizon_server_objects_mutex );
+    if (timeout == 0x7fffffffffffffffLL) DESCRIBE( "; no timeout" );
+    else if (!timeout) DESCRIBE( "; a poll" );
+    else
+    {
+        LARGE_INTEGER now;
+        long long left;
+
+        if (timeout < 0)
+        {
+            NtQueryPerformanceCounter( &now, NULL );
+            left = -timeout - now.QuadPart;
+        }
+        else
+        {
+            NtQuerySystemTime( &now );
+            left = timeout - now.QuadPart;
+        }
+        DESCRIBE( "; timeout %lld ms", (left + elapsed) / 10000 );
+    }
+#undef DESCRIBE
+}
+
 static void horizon_sync_unqueue_locked( struct horizon_sync_waiter *waiter )
 {
     if (waiter->queued)

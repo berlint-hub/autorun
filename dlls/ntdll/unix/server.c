@@ -365,21 +365,33 @@ unsigned long long wine_nx_server_ticks[REQ_NB_REQUESTS];
 const char *wine_nx_server_names[REQ_NB_REQUESTS];
 /* The runtime's profiler, which records which x86 code made the request. */
 extern void wine_nx_prof_server_request( unsigned int code, void *teb ) __attribute__((weak));
+/* And the calls that took HORIZON_SLOW_CALL_MS or longer, for the [FRAMES]
+ * line of a slow frame (thread_profile.c): what each was, how it was served
+ * and, a select, what it waited for. */
+extern void wine_nx_prof_slow_server_call( unsigned int tid, const char *name, const char *how, void *teb,
+                                           unsigned long long start, unsigned long long end ) __attribute__((weak));
+#define HORIZON_SLOW_CALL_MS 4
 
-static int horizon_sync_call( struct __server_request_info *req )
+/* Serves req in the calling thread where it can. Where it cannot, *declined
+ * says why, for a sync request: the server's thread serves it instead. */
+static int horizon_sync_call( struct __server_request_info *req, const char **declined )
 {
     extern volatile int wine_nx_quit_requested __attribute__((weak));
     extern void wine_nx_quit_point(void) __attribute__((weak));
     union { unsigned long long align; unsigned char bytes[1024]; } data;
     unsigned int size = 0;
 
+    *declined = NULL;
     if (!horizon_fast_sync_enabled) return 0;
     if (&wine_nx_quit_requested && wine_nx_quit_requested && &wine_nx_quit_point) wine_nx_quit_point();
     switch (req->u.req.request_header.req)
     {
     case REQ_select:
         if (req->u.req.request_header.request_size != sizeof(union apc_result) + req->u.req.select_request.size)
+        {
+            *declined = "it carried a thread context";
             return 0;
+        }
         break;
     case REQ_event_op:
     case REQ_query_event:
@@ -392,6 +404,7 @@ static int horizon_sync_call( struct __server_request_info *req )
     default:
         return 0;
     }
+    *declined = "it was too large";
     if (req->u.req.request_header.request_size > sizeof(data.bytes)) return 0;
     for (unsigned int i = 0; i < req->data_count; i++)
     {
@@ -399,9 +412,37 @@ static int horizon_sync_call( struct __server_request_info *req )
         if (req->data[i].size) memcpy( data.bytes + size, req->data[i].ptr, req->data[i].size );
         size += req->data[i].size;
     }
+    *declined = "its data did not add up";
     if (size != req->u.req.request_header.request_size) return 0;
-    return horizon_server_sync_call( get_thread_data()->tid,
-                                     &req->u.req, data.bytes, size, &req->u.reply, req->reply_data );
+    *declined = "the in-thread server turned it down";
+    if (!horizon_server_sync_call( get_thread_data()->tid,
+                                   &req->u.req, data.bytes, size, &req->u.reply, req->reply_data ))
+        return 0;
+    *declined = NULL;
+    return 1;
+}
+
+/* A slow call for the runtime's report: "in its thread" or "by the server's
+ * thread" (and why, for a sync request), and for a select what it waited for. */
+static void horizon_report_slow_call( const char *name, int fast, const char *declined, unsigned int code,
+                                      const void *select_op, unsigned int select_size, long long select_timeout,
+                                      u64 start, u64 end )
+{
+    char how[224];
+    int used;
+
+    used = snprintf( how, sizeof(how), "%s%s%s", fast ? "in its thread" : "by the server's thread",
+                     declined ? " as " : "", declined ? declined : "" );
+    if (code == REQ_select && used > 0 && (size_t)used + 3 < sizeof(how))
+    {
+        how[used++] = ':';
+        how[used++] = ' ';
+        horizon_server_describe_select( select_op, select_op ? select_size : 0, select_timeout,
+                                        (long long)(armTicksToNs( end - start ) / 100),
+                                        how + used, sizeof(how) - (size_t)used );
+    }
+    wine_nx_prof_slow_server_call( HandleToULong( NtCurrentTeb()->ClientId.UniqueThread ), name, how,
+                                   NtCurrentTeb(), start, end );
 }
 #endif
 
@@ -413,10 +454,17 @@ unsigned int server_call_unlocked( void *req_ptr )
 #ifdef __SWITCH__
     unsigned int code = req->u.req.request_header.req;
     u64 start = horizon_server_profile_enabled ? armGetSystemTick() : 0;
+    /* The reply takes the request's place: what a select waits for, kept
+     * for a slow call's report. */
+    const void *select_op = code == REQ_select && req->data_count > 1 ? req->data[1].ptr : NULL;
+    unsigned int select_size = code == REQ_select ? req->u.req.select_request.size : 0;
+    long long select_timeout = code == REQ_select ? req->u.req.select_request.timeout : 0;
+    const char *declined;
+    int fast;
 #endif
 
 #ifdef __SWITCH__
-    if (horizon_sync_call( req )) ret = req->u.reply.reply_header.error;
+    if ((fast = horizon_sync_call( req, &declined ))) ret = req->u.reply.reply_header.error;
     else
 #endif
     if (!(ret = send_request( data->request_fd, req )))
@@ -424,10 +472,15 @@ unsigned int server_call_unlocked( void *req_ptr )
 #ifdef __SWITCH__
     if (horizon_server_profile_enabled && code < REQ_NB_REQUESTS)
     {
+        u64 end = armGetSystemTick();
+
         __atomic_store_n( &wine_nx_server_names[code], req->name, __ATOMIC_RELAXED );
         __atomic_add_fetch( &wine_nx_server_calls[code], 1, __ATOMIC_RELAXED );
-        __atomic_add_fetch( &wine_nx_server_ticks[code], armGetSystemTick() - start, __ATOMIC_RELAXED );
+        __atomic_add_fetch( &wine_nx_server_ticks[code], end - start, __ATOMIC_RELAXED );
         if (wine_nx_prof_server_request) wine_nx_prof_server_request( code, NtCurrentTeb() );
+        if (wine_nx_prof_slow_server_call && armTicksToNs( end - start ) >= HORIZON_SLOW_CALL_MS * 1000000ull)
+            horizon_report_slow_call( req->name, fast, declined, code, select_op, select_size, select_timeout,
+                                      start, end );
     }
 #endif
     return ret;

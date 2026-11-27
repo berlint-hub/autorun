@@ -69,6 +69,29 @@ static void sample( unsigned int at, unsigned int tid, unsigned char kind, unsig
     prof_keys[at] = key;
     prof_chains[at] = chain;
 }
+/* The slow server calls of the next frame, as the profiler would give them. */
+static unsigned int call_count, call_total, call_asks;
+static struct wine_nx_slow_call calls_given[4];
+unsigned int wine_nx_prof_frame_server_calls( unsigned long long from, unsigned long long to, unsigned int tid,
+                                              struct wine_nx_slow_call *calls, unsigned int max,
+                                              unsigned int *total )
+{
+    unsigned int i;
+
+    assert( from < to );
+    call_asks++;
+    *total = 0;
+    if (tid != 4) return 0;
+    for (i = 0; i < call_count && i < max; i++) calls[i] = calls_given[i];
+    *total = call_total;
+    return i;
+}
+
+void wine_nx_prof_name_x86( unsigned int address, char *buf, size_t size )
+{
+    snprintf( buf, size, "exe+%#x", address - 0x400000 );
+}
+
 unsigned long long carafe_native_thread_ticks( const char *name )
 {
     return !strcmp( name, "gl" ) ? gl_ticks : !strcmp( name, "gdrv" ) ? driver_ticks : 0;
@@ -83,7 +106,7 @@ static struct
     FexThreadStats threads[2];
 } fex_area;
 
-static char line[1024];
+static char line[8192];
 
 static void frame( unsigned int tid, double ms, unsigned long long present_100ns )
 {
@@ -265,6 +288,40 @@ static void with_samples( void )
     report();
 }
 
+static void with_server_calls( void )
+{
+    unsigned int i;
+
+    /* A frame of 64 ms in which the presenting thread waited 44 ms for an
+     * event through the server's thread, and 5 ms for a message; a third
+     * call of the frame is not shown. */
+    calls_given[0] = (struct wine_nx_slow_call){ .start = 0, .end = 44 * TICKS_PER_MS, .name = "select",
+        .callers = 2, .caller = { 0x50e50f, 0x50d38c },
+        .how = "by the server's thread as it carried a thread context: wait for 1: event; no timeout" };
+    calls_given[1] = (struct wine_nx_slow_call){ .start = 0, .end = 5 * TICKS_PER_MS, .name = "get_message",
+        .how = "by the server's thread" };
+    frame( 4, 16.7, 0 );
+    frame( 4, 16.7, 0 );
+    call_count = 2;
+    call_total = 3;
+    frame( 4, 64, 0 );
+    call_count = call_total = 0;
+    assert( report() > 0 );
+    contains( "\n[FRAMES] slow frame 64.0 ms: card 0 ms, 0 shaders compiled in 0 ms, present 0 ms\n"
+              "[FRAMES]  its server calls of 4 ms or more: 3, select 44 ms by the server's thread as it carried "
+              "a thread context: wait for 1: event; no timeout, from exe+0x10e50f<exe+0x10d38c; get_message 5 ms "
+              "by the server's thread\n" );
+    /* The frames with none have no line for them. */
+    assert( !strstr( strstr( line, "server calls" ) + 1, "server calls" ) );
+    contains( "\n[FRAMES] slow frame 16.7 ms: card 0 ms, 0 shaders compiled in 0 ms, present 0 ms" );
+    /* Only frames among the slowest ask for them. */
+    call_asks = 0;
+    frame( 4, 16.7, 0 );
+    for (i = 0; i < 20; i++) frame( 4, 16.7, 0 );
+    assert( call_asks == 3 );
+    report();
+}
+
 static void many( void )
 {
     unsigned int i;
@@ -286,6 +343,7 @@ int main( void )
     with_fex();
     with_gl_thread();
     with_samples();
+    with_server_calls();
     many();
     printf( "frame_pacing: all passed\n" );
     return 0;

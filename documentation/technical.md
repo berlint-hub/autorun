@@ -325,7 +325,12 @@ that presented was sampled within the frame, by module of the game, function
 of the runtime or system call (with the two calls a wait is made from), the
 three it was in most, and the same for the other thread sampled most in the
 frame, the one it may have waited for. Each slow frame has a line of its own,
-`[FRAMES] slow frame`. A gap of
+`[FRAMES] slow frame`. With the profiler, the server calls of 4 ms or more the
+presenting thread made in the frame follow on a line of their own, the three
+longest: the request, whether the thread served it itself or the server's
+thread did (and why a wait went there), for a select the objects it waited
+for and the timeout it was made with (`horizon_server_describe_select`), and
+the x86 code it came from. A gap of
 a second or more between frames is a loading screen or a menu and is counted
 apart. A slow frame mostly in `FEX translating` is code run for the first
 time, which FEX's disk cache (`FEX_DISKCACHE`) keeps for the next start.

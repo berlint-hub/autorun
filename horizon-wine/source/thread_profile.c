@@ -27,6 +27,7 @@
 #include <switch.h>
 
 #include "thread_profile.h"
+#include "frame_pacing.h"
 
 #define NX_PROF_MAX_THREADS  128
 #define WINE_NX_STOP_SUSPEND 1
@@ -1769,6 +1770,73 @@ void wine_nx_prof_server_request( unsigned int code, void *teb )
     for (i = 0; i < n && i <= 3; i++) nx_prof_add( &server_callers, ((uint64_t)code << 32) | callers[i] );
     for (i = 0; i < count; i++) nx_prof_add( &server_natives, ((uint64_t)code << 32) | (uint32_t)natives[i] );
     pthread_mutex_unlock( &server_callers_mutex );
+}
+
+/* The last server calls of 4 ms or more (server.c), of every thread: what a
+ * slow frame's thread waited for in the server (frame_pacing.c). The threads
+ * that wait there all the time, a timer's or the sound mixer's, make a
+ * hundred or two of them a second; 256 keep the last second or so. */
+#define NX_PROF_SLOW_CALLS 256
+static pthread_mutex_t slow_calls_mutex = PTHREAD_MUTEX_INITIALIZER;
+static struct { unsigned int tid; struct wine_nx_slow_call call; } slow_calls[NX_PROF_SLOW_CALLS];
+static unsigned int slow_calls_written;
+
+void wine_nx_prof_slow_server_call( unsigned int tid, const char *name, const char *how, void *teb,
+                                    unsigned long long start, unsigned long long end )
+{
+    uint32_t callers[NX_PROF_DEPTH];
+    struct wine_nx_slow_call *call;
+    unsigned int n, i;
+
+    if (!__atomic_load_n( &profiling, __ATOMIC_RELAXED )) return;
+    n = walk_x86( (uint64_t)(uintptr_t)teb, callers );
+    pthread_mutex_lock( &slow_calls_mutex );
+    slow_calls[slow_calls_written % NX_PROF_SLOW_CALLS].tid = tid;
+    call = &slow_calls[slow_calls_written++ % NX_PROF_SLOW_CALLS].call;
+    call->start = start;
+    call->end = end;
+    call->name = name;
+    for (i = 0; i < n && i < FRAME_CALL_CALLERS; i++) call->caller[i] = callers[i];
+    call->callers = i;
+    snprintf( call->how, sizeof(call->how), "%s", how ? how : "" );
+    pthread_mutex_unlock( &slow_calls_mutex );
+}
+
+/* The server calls of 4 ms or more of thread tid that ended after from and
+ * began before to (system ticks), the longest first, at most max; the number
+ * of them all (frame_pacing.c, for a slow frame). */
+unsigned int wine_nx_prof_frame_server_calls( unsigned long long from, unsigned long long to, unsigned int tid,
+                                              struct wine_nx_slow_call *calls, unsigned int max,
+                                              unsigned int *total )
+{
+    unsigned int count = 0, seen, at;
+
+    *total = 0;
+    if (!__atomic_load_n( &profiling, __ATOMIC_RELAXED )) return 0;
+    pthread_mutex_lock( &slow_calls_mutex );
+    for (seen = 0; seen < NX_PROF_SLOW_CALLS && seen < slow_calls_written; seen++)
+    {
+        unsigned int index = (slow_calls_written - 1 - seen) % NX_PROF_SLOW_CALLS;
+        const struct wine_nx_slow_call *call = &slow_calls[index].call;
+
+        if (slow_calls[index].tid != tid || call->end <= from || call->start >= to) continue;
+        (*total)++;
+        for (at = count; at > 0 && calls[at - 1].end - calls[at - 1].start < call->end - call->start; at--)
+            if (at < max) calls[at] = calls[at - 1];
+        if (at < max)
+        {
+            calls[at] = *call;
+            if (count < max) count++;
+        }
+    }
+    pthread_mutex_unlock( &slow_calls_mutex );
+    return count;
+}
+
+/* An x86 address by its module, as "exe+0x10e50f" (frame_pacing.c). */
+void wine_nx_prof_name_x86( unsigned int address, char *buf, size_t size )
+{
+    name_address( address, buf, size );
 }
 
 /* For the most frequent requests of the interval, the guest code they came

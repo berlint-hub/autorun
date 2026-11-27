@@ -33,12 +33,20 @@ extern unsigned int wine_nx_prof_frame_samples( unsigned long long from, unsigne
                                                 unsigned long long *chains, unsigned int max ) __attribute__((weak));
 extern void wine_nx_prof_sample_group( unsigned int kind, unsigned long long key, unsigned long long chain,
                                        char *buf, size_t size ) __attribute__((weak));
+/* And the server calls of 4 ms or more the presenting thread made in it,
+ * with the x86 code they came from by its module. */
+extern unsigned int wine_nx_prof_frame_server_calls( unsigned long long from, unsigned long long to,
+                                                     unsigned int tid, struct wine_nx_slow_call *calls,
+                                                     unsigned int max, unsigned int *total ) __attribute__((weak));
+extern void wine_nx_prof_name_x86( unsigned int address, char *buf, size_t size ) __attribute__((weak));
 
 /* A round of samples every 2 ms over at most four threads: 160 cover a frame
  * of 80 ms of all four, the newest part of a longer one. */
 #define FRAME_SAMPLES 160
 #define FRAME_SAMPLE_US 2000
 #define FRAME_GROUPS_SHOWN 3
+/* The longest server calls shown for a slow frame. */
+#define FRAME_CALLS_SHOWN 3
 
 struct frame_cost
 {
@@ -58,6 +66,8 @@ struct frame_cost
     unsigned int sample_tids[FRAME_SAMPLES];
     unsigned char sample_kinds[FRAME_SAMPLES];
     unsigned long long sample_keys[FRAME_SAMPLES], sample_chains[FRAME_SAMPLES];
+    unsigned int calls, calls_total;  /* the presenting thread's server calls of 4 ms or more */
+    struct wine_nx_slow_call call[FRAME_CALLS_SHOWN];
 };
 
 struct frame_counters
@@ -146,11 +156,18 @@ void wine_nx_frame_presented( unsigned int tid, unsigned long long present_100ns
             if (now.gl > last.gl) cost.gl_us = ticks_us( now.gl - last.gl );
             if (now.driver > last.driver) cost.driver_us = ticks_us( now.driver - last.driver );
             cost.faults = now.faults - last.faults;
-            /* Where the threads were, for a frame among the slowest. */
-            if (wine_nx_prof_frame_samples && last.tid == tid &&
-                (slowest_count < FRAMES_SLOWEST || cost.us > slowest[FRAMES_SLOWEST - 1].us))
-                cost.samples = wine_nx_prof_frame_samples( last.tick, now.tick, cost.sample_tids, cost.sample_kinds,
-                                                           cost.sample_keys, cost.sample_chains, FRAME_SAMPLES );
+            /* Where the threads were and what the presenting one waited for
+             * in the server, for a frame among the slowest. */
+            if (slowest_count < FRAMES_SLOWEST || cost.us > slowest[FRAMES_SLOWEST - 1].us)
+            {
+                if (wine_nx_prof_frame_samples && last.tid == tid)
+                    cost.samples = wine_nx_prof_frame_samples( last.tick, now.tick, cost.sample_tids,
+                                                               cost.sample_kinds, cost.sample_keys,
+                                                               cost.sample_chains, FRAME_SAMPLES );
+                if (wine_nx_prof_frame_server_calls)
+                    cost.calls = wine_nx_prof_frame_server_calls( last.tick, now.tick, tid, cost.call,
+                                                                  FRAME_CALLS_SHOWN, &cost.calls_total );
+            }
             /* Only with a GL thread: without one Mesa's finish returns at once. */
             if (now.gl) have_gl = 1;
             frames++;
@@ -247,6 +264,33 @@ static int put_ms( char *line, size_t size, unsigned int us )
     return snprintf( line, size, "%u.%u ms", us / 1000, us % 1000 / 100 );
 }
 
+/* On a line of its own after a slow frame's: the longest server calls its
+ * thread made in it, each with how it was served and the x86 code it came
+ * from ("exe+0x10e50f<exe+0x10d38c", the innermost first). */
+static int put_calls( char *line, size_t size, int used, const struct frame_cost *cost )
+{
+    unsigned int i, j;
+
+#define PUT(...) do { if (used > 0 && (size_t)used < size) used += snprintf( line + used, size - (size_t)used, __VA_ARGS__ ); } while (0)
+    PUT( "\n[FRAMES]  its server calls of 4 ms or more: %u", cost->calls_total );
+    for (i = 0; i < cost->calls; i++)
+    {
+        const struct wine_nx_slow_call *call = &cost->call[i];
+
+        PUT( "%s %s %u ms %s", i ? ";" : ",", call->name ? call->name : "?",
+             ticks_us( call->end - call->start ) / 1000, call->how );
+        for (j = 0; j < call->callers && wine_nx_prof_name_x86; j++)
+        {
+            char name[96];
+
+            wine_nx_prof_name_x86( call->caller[j], name, sizeof(name) );
+            PUT( "%s%s", j ? "<" : ", from ", name );
+        }
+    }
+#undef PUT
+    return used;
+}
+
 int wine_nx_frame_report( char *line, size_t size )
 {
     static unsigned int sorted[FRAMES_KEPT];
@@ -317,6 +361,7 @@ int wine_nx_frame_report( char *line, size_t size )
             if (other && used > 0 && (size_t)used < size) used += put_samples( line + used, size - (size_t)used, cost, other, who );
         }
         PUT( " present %u ms", cost->present_us / 1000 );
+        if (cost->calls) used = put_calls( line, size, used, cost );
     }
 #undef PUT_MS
 #undef PUT

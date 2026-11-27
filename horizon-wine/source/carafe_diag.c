@@ -352,8 +352,8 @@ static void reportFrames(void) {
 /* How evenly the frames came and what took the time in the slowest
  * (frame_pacing.h). */
 static void reportFramePacing(void) {
-    /* A line for the frames, and one for each of the slowest. */
-    static char lines[4096];
+    /* A line for the frames, and one or two for each of the slowest. */
+    static char lines[8192];
     if (wine_nx_frame_report(lines, sizeof(lines)) > 0) {
         char* line = lines;
         for (char* end; (end = strchr(line, '\n')) != NULL; line = end + 1) {

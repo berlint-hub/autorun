@@ -179,7 +179,7 @@ jobs:
                        check_popup_restore check_positioned_io check_prince_resolution check_qpc_base \
                        check_quartz_empty_categories check_raw_mouse check_render_overhead \
                        check_resource_forks check_runtime_symbols check_select_wait check_setup_boot \
-                       check_static_unix_libs check_swap_game check_swap_native check_swap_threads \
+                       check_slow_server_calls check_static_unix_libs check_swap_game check_swap_native check_swap_threads \
                        check_swap_ui check_thread_input check_user_apc check_window_destroy \
                        check_window_hooks check_window_list check_window_parent check_window_zorder \
                        check_wine_mono_payload check_wmvcore_backend check_wow64_thread_context \
