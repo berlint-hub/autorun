@@ -224,6 +224,15 @@ jobs:
             ./$test || { echo "::error::horizon-wine/tests/$test.c failed"; exit 1; }
           done
 
+      - name: Post-processing of an OpenGL frame
+        # FXAA and FSR's RCAS at a program's swap (source/gl_postfx.h), run
+        # over Mesa's llvmpipe in a compatibility context, as old games make.
+        run: |
+          sudo apt-get install -y --no-install-recommends libegl-dev libgl1-mesa-dri libegl-mesa0
+          cd horizon-wine
+          cc -std=gnu11 -Wall -Wextra -Werror -O1 -g -I source tests/gl_postfx.c -lEGL -lm -o "$RUNNER_TEMP/gl_postfx"
+          "$RUNNER_TEMP/gl_postfx"
+
       - name: Reports, thread waits and the orchestrator
         # Carafe's diagnostics (PORTING.md, stages 2 and 3): what the [WAITS],
         # [FEX] and [FRAMES] lines say, what a thread creation at the limit counts, the
@@ -254,7 +263,7 @@ jobs:
           for check in check_thread_creation_wait check_horizon_thread_tls check_horizon_fd_owner \
                        check_shader_affinity check_futex_exit check_orchestrator_setting check_server_pool \
                        check_horizon_suspend check_core_affinity check_yield_backoff check_fps_counter \
-                       check_fpslocker check_wine_mono \
+                       check_fpslocker check_wine_mono check_gl_postfx \
                        check_own_size_windows check_text_edit; do
             python3 tests/$check.py > "$RUNNER_TEMP/$check.log" 2>&1 || {
               echo "::error::horizon-wine/tests/$check.py failed: $(grep -m 4 -E 'error|Assertion|Error|never true|data race|failed' "$RUNNER_TEMP/$check.log" | tr '\n' ' ' | cut -c1-900)"

@@ -339,6 +339,21 @@ static void test_settings( const char *dir )
     assert( launcher_settings_write( &kv, &settings ) );
     assert( !strstr( kv.text, "upscaling=" ) && !strstr( kv.text, "upscaling-sharpness=" ) );
 
+    /* Anti-aliasing over an OpenGL game's frame: off unless the file says so. */
+    load_text( &kv, "anti-aliasing=FXAA\n" );
+    launcher_settings_read( &kv, &settings );
+    assert( settings.anti_aliasing == 1 );
+    load_text( &kv, "anti-aliasing=msaa\n" );
+    launcher_settings_read( &kv, &settings );
+    assert( settings.anti_aliasing == 0 );
+    settings.anti_aliasing = 1;
+    assert( launcher_settings_write( &kv, &settings ) && strstr( kv.text, "anti-aliasing=fxaa" ) );
+    settings.anti_aliasing = 0;
+    assert( launcher_settings_write( &kv, &settings ) && !strstr( kv.text, "anti-aliasing=" ) );
+    settings.anti_aliasing = 2;
+    assert( !launcher_settings_write( &kv, &settings ) );
+    settings.anti_aliasing = 0;
+
     snprintf( path, sizeof(path), "%s/game.wine-nx.txt", dir );
     load_text( &kv, "# written by hand\n" );
     memset( &settings, 0, sizeof(settings) );
