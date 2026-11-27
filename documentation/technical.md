@@ -310,7 +310,10 @@ it calls or waiting for it, and how long the GL thread and Zink's driver
 thread behind it (`gl`, `gdrv`) ran within the frame, and how many faults
 were handed to the program. With the profiler on it adds where the thread
 that presented was sampled within the frame, by module of the game, function
-of the runtime or system call, the three it was in most. A gap of
+of the runtime or system call (with the two calls a wait is made from), the
+three it was in most, and the same for the other thread sampled most in the
+frame, the one it may have waited for. Each slow frame has a line of its own,
+`[FRAMES] slow frame`. A gap of
 a second or more between frames is a loading screen or a menu and is counted
 apart. A slow frame mostly in `FEX translating` is code run for the first
 time, which FEX's disk cache (`FEX_DISKCACHE`) keeps for the next start.
