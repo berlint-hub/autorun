@@ -258,6 +258,7 @@ struct launcher_settings
     int lsfg_flow;
     int upscaling;
     int upscaling_sharpness;
+    int anti_aliasing;  /* drawn over an OpenGL program's frame at its swap (gl_postfx.h) */
     /* Whether the program's own keys apply over the shared ones: -1 they do
      * when it has a file of them, which is what a card written before this
      * setting existed means; 0 Autorun's keys alone, the file kept for when it
@@ -268,6 +269,7 @@ enum {
     LAUNCHER_FRAME_LIMIT_COUNT = 8,
     LAUNCHER_HUD_COUNT = 4,
     LAUNCHER_UPSCALING_COUNT = 3,
+    LAUNCHER_ANTI_ALIASING_COUNT = 2,
     LAUNCHER_SHARPNESS_COUNT = 6
 };
 static const int launcher_frame_limits[] = { 0, 30, 40, 45, 60, 75, 90, 120 };
@@ -281,6 +283,8 @@ static const char *const launcher_lsfg_flow_values[] = { "0.125", "0.25", "0.5" 
 static const char *const launcher_upscaling_labels[] = { "Off (Bilinear)", "FSR 1.0", "Integer" };
 static const char *const launcher_upscaling_values[] = { "off", "fsr", "integer" };
 static const char *const launcher_sharpness_labels[] = { "0%", "20%", "40%", "60%", "80%", "100%" };
+static const char *const launcher_anti_aliasing_labels[] = { "Off", "FXAA" };
+static const char *const launcher_anti_aliasing_values[] = { "off", "fxaa" };
 static const float launcher_sharpness_values[] = { 0.0f, 0.2f, 0.4f, 0.6f, 0.8f, 1.0f };
 
 static inline int launcher_dxvk_config( const struct launcher_settings *settings, char *out, size_t size )
@@ -588,6 +592,10 @@ static inline void launcher_settings_read( const struct launcher_kv *kv, struct 
         for (int i = 0; i < LAUNCHER_SHARPNESS_COUNT; i++)
             if (!strcasecmp( value, launcher_sharpness_labels[i] )) settings->upscaling_sharpness = i;
     }
+    settings->anti_aliasing = 0;
+    if (launcher_kv_get( kv, "anti-aliasing", value, sizeof(value) ))
+        for (int i = 0; i < LAUNCHER_ANTI_ALIASING_COUNT; i++)
+            if (!strcasecmp( value, launcher_anti_aliasing_values[i] )) settings->anti_aliasing = i;
 }
 
 /* Store settings, leaving out what matches the global settings. */
@@ -610,6 +618,7 @@ static inline int launcher_settings_write( struct launcher_kv *kv, const struct 
         settings->lsfg_flow < 0 || settings->lsfg_flow >= 3 ||
         settings->upscaling < 0 || settings->upscaling >= LAUNCHER_UPSCALING_COUNT ||
         settings->upscaling_sharpness < 0 || settings->upscaling_sharpness >= LAUNCHER_SHARPNESS_COUNT ||
+        settings->anti_aliasing < 0 || settings->anti_aliasing >= LAUNCHER_ANTI_ALIASING_COUNT ||
         settings->picture_mode < -1 || settings->picture_mode > 3 ||
         settings->mode_emulation < -1 || settings->mode_emulation > 1) return 0;
     return launcher_kv_set( kv, "title", settings->title[0] ? settings->title : NULL ) &&
@@ -661,7 +670,9 @@ static inline int launcher_settings_write( struct launcher_kv *kv, const struct 
            launcher_kv_set( kv, "upscaling", settings->upscaling ?
                             launcher_upscaling_values[settings->upscaling] : NULL ) &&
            launcher_kv_set( kv, "upscaling-sharpness", settings->upscaling == 1 && settings->upscaling_sharpness != 2 ?
-                            launcher_sharpness_labels[settings->upscaling_sharpness] : NULL );
+                            launcher_sharpness_labels[settings->upscaling_sharpness] : NULL ) &&
+           launcher_kv_set( kv, "anti-aliasing", settings->anti_aliasing ?
+                            launcher_anti_aliasing_values[settings->anti_aliasing] : NULL );
 }
 
 /* A game's Reset to defaults: every value its menus set goes back to its

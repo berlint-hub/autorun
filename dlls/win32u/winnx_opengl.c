@@ -32,6 +32,7 @@
 #include "../../horizon-wine/source/osk.h"
 #include "winnx_fps.h"
 #include "../../horizon-wine/source/fpslocker.h"
+#include "../../horizon-wine/source/gl_postfx.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(wgl);
 
@@ -250,6 +251,7 @@ struct nx_osk_gl
     int width, height;
     unsigned int generation;
     void *pixels;
+    struct gl_postfx postfx;  /* the program's own names for its post-processing */
 };
 static struct nx_osk_gl nx_osk_gl[8];
 static unsigned int nx_osk_gl_next;
@@ -570,6 +572,57 @@ struct nx_osk_target
 
 static void nx_osk_draw_gl( const struct nx_osk_target *target );
 
+/* An OpenGL program's post-processing (gl_postfx.h), from its settings
+ * (runtime.c): FXAA, and with Upscaling on FSR 1.0 FSR's sharpening (RCAS),
+ * over its frame at the swap, under the overlays. */
+static int nx_postfx_aa;
+static float nx_postfx_rcas;
+static struct gl_postfx_funcs nx_postfx_funcs;
+static int nx_postfx_loaded;  /* 1 loaded, -1 the driver lacks an entry point */
+
+void wine_nx_gl_postfx_configure( int anti_aliasing, int upscaling, float sharpness )
+{
+    nx_postfx_aa = anti_aliasing > 0 && anti_aliasing < GL_POSTFX_AA_COUNT ? anti_aliasing : GL_POSTFX_AA_OFF;
+    nx_postfx_rcas = upscaling == 1 ? gl_postfx_rcas_strength( sharpness ) : 0;
+}
+
+static BOOL nx_postfx_wanted( void )
+{
+    return nx_postfx_aa != GL_POSTFX_AA_OFF || nx_postfx_rcas > 0;
+}
+
+static void *nx_postfx_get( const char *name )
+{
+    return (void *)funcs->p_eglGetProcAddress( name );
+}
+
+/* With nx_osk_gl_lock held, the program's context current. */
+static void nx_postfx_draw( struct nx_osk_gl *osk, EGLint width, EGLint height )
+{
+    static BOOL logged;
+    char error[256];
+
+    if (!nx_postfx_loaded)
+    {
+        nx_postfx_loaded = gl_postfx_load( &nx_postfx_funcs, nx_postfx_get ) ? 1 : -1;
+        if (nx_postfx_loaded < 0) nx_log( "[NXGL] post-processing off: the OpenGL driver lacks what it needs" );
+    }
+    if (nx_postfx_loaded < 0) return;
+    if (gl_postfx_apply( &nx_postfx_funcs, &osk->postfx, width, height, nx_postfx_aa, nx_postfx_rcas,
+                         error, sizeof(error) ))
+    {
+        if (!logged)
+        {
+            logged = TRUE;
+            nx_log( "[NXGL] post-processing over the frame at its swap: %s%s%s, %dx%d",
+                    nx_postfx_aa == GL_POSTFX_AA_FXAA ? "FXAA" : "",
+                    nx_postfx_aa != GL_POSTFX_AA_OFF && nx_postfx_rcas > 0 ? " then " : "",
+                    nx_postfx_rcas > 0 ? "FSR sharpening (RCAS)" : "", (int)width, (int)height );
+        }
+    }
+    else if (error[0]) nx_log( "[NXGL] post-processing off for this context: %s", error );
+}
+
 static void nx_osk_draw_hook( void *data )
 {
     nx_osk_draw_gl( data );
@@ -597,7 +650,7 @@ static void nx_osk_draw( struct opengl_drawable *base )
                      wine_nx_cursor_state( &cursor_x, &cursor_y, &cursor_visible ) && cursor_visible;
     BOOL fps_on = &wine_nx_fps_counter && wine_nx_fps_counter;
 
-    if (!overlay_visible && !cursor_on && !fps_on) return;
+    if (!overlay_visible && !cursor_on && !fps_on && !nx_postfx_wanted()) return;
     if (!funcs->p_eglQuerySurface( egl->display, base->surface, EGL_WIDTH, &target.width ) ||
         !funcs->p_eglQuerySurface( egl->display, base->surface, EGL_HEIGHT, &target.height ) ||
         !(target.context = funcs->p_eglGetCurrentContext()))
@@ -626,16 +679,17 @@ static void nx_osk_draw_gl( const struct nx_osk_target *target )
     BOOL cursor_on = !overlay_visible && wine_nx_cursor_state && wine_nx_cursor_bitmap &&
                      wine_nx_cursor_state( &cursor_x, &cursor_y, &cursor_visible ) && cursor_visible;
     BOOL fps_on = &wine_nx_fps_counter && wine_nx_fps_counter;
+    BOOL postfx_on = nx_postfx_wanted();
     unsigned int i;
 
-    if (!overlay_visible && !cursor_on && !fps_on) return;
+    if (!overlay_visible && !cursor_on && !fps_on && !postfx_on) return;
     if (overlay_visible && !wine_nx_osk_frame( width, height, &frame ))
     {
         overlay_visible = FALSE;
         cursor_on = wine_nx_cursor_state && wine_nx_cursor_bitmap &&
                     wine_nx_cursor_state( &cursor_x, &cursor_y, &cursor_visible ) && cursor_visible;
     }
-    if (!overlay_visible && !cursor_on && !fps_on) return;
+    if (!overlay_visible && !cursor_on && !fps_on && !postfx_on) return;
 
     pthread_mutex_lock( &nx_osk_gl_lock );
     if (!__atomic_load_n( &p_glBlitFramebuffer, __ATOMIC_ACQUIRE ))
@@ -669,6 +723,8 @@ static void nx_osk_draw_gl( const struct nx_osk_target *target )
         memset( osk, 0, sizeof(*osk) );
         osk->context = context;
     }
+    /* The game's picture first; the overlays go over it untouched. */
+    if (postfx_on) nx_postfx_draw( osk, width, height );
 
     funcs->p_glGetIntegerv( GL_READ_FRAMEBUFFER_BINDING, &read_fb );
     funcs->p_glGetIntegerv( GL_DRAW_FRAMEBUFFER_BINDING, &draw_fb );

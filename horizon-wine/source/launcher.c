@@ -1813,7 +1813,7 @@ enum program_row
     ROW_START, ROW_FAVORITE, ROW_ARTWORK, ROW_FORWARDER, ROW_LOCATE, ROW_TITLE, ROW_ARGS, ROW_VERBOSE, ROW_PROFILE,
     ROW_WINDOWS, ROW_PICTURE, ROW_MODE_EMULATION, ROW_GL_OLD_EXTENSIONS, ROW_GL_THREAD, ROW_VIDEO_MEMORY, ROW_MEMORY, ROW_GRAPHICS_DRIVER, ROW_D3D9, ROW_VKD3D_VERSION, ROW_DXVK_VERSION, ROW_DXVK_OPTIONS, ROW_DXVK_HUD, ROW_FRAME_LIMIT, ROW_VSYNC,
     ROW_LSFG, ROW_LSFG_DLL, ROW_LSFG_PERFORMANCE, ROW_LSFG_FLOW,
-    ROW_UPSCALING, ROW_UPSCALING_SHARPNESS,
+    ROW_ANTI_ALIASING, ROW_UPSCALING, ROW_UPSCALING_SHARPNESS,
     ROW_INPUT, ROW_INPUT_END = ROW_INPUT + INPUT_ROW_COUNT - 1, ROW_BOX64, ROW_FEX, ROW_SYNC, ROW_SERVER_POOL, ROW_CPU, ROW_FEX_BUILD, ROW_FOUR_CORES, ROW_LARGE_ADDRESS, ROW_ORCHESTRATOR, ROW_LOCK_BOOST, ROW_LAZY_FILE_VIEWS,
     ROW_HIDE, ROW_LIBRARY, ROW_GAME_FIX, ROW_RESET_SETTINGS, ROW_OTHER_PROGRAM, ROW_EDIT_FILE, PROGRAM_ROWS
 };
@@ -2837,10 +2837,17 @@ static int program_menu_run( struct launcher *l, struct program *p, char *target
             row->on = p->settings.vsync;
             snprintf( row->value, sizeof(row->value), "%s", p->settings.vsync ? "Enabled" : "Disabled" );
 
+            ADD_ROW( ROW_ANTI_ALIASING, SECTION_GRAPHICS, "Anti-aliasing",
+                     "Smooths jagged edges over an OpenGL game's picture before it is shown. FXAA costs about a "
+                     "millisecond of the GPU a frame and softens the picture slightly." );
+            row->kind = UI_ROW_DROPDOWN;
+            snprintf( row->value, sizeof(row->value), "%s", launcher_anti_aliasing_labels[p->settings.anti_aliasing] );
+            row->choices = LAUNCHER_ANTI_ALIASING_COUNT;
+
             ADD_ROW( ROW_UPSCALING, SECTION_GRAPHICS, "Upscaling",
                      "How a Vulkan or DXVK game drawing fewer pixels than the screen is enlarged. FSR 1.0 is "
-                     "AMD's edge-aware upscaler with sharpening. Integer enlarges by whole steps with square "
-                     "pixels for pixel art, leaving wider black bars." );
+                     "AMD's edge-aware upscaler with sharpening; over an OpenGL game's picture it sharpens. "
+                     "Integer enlarges by whole steps with square pixels for pixel art, leaving wider black bars." );
             row->kind = UI_ROW_DROPDOWN;
             snprintf( row->value, sizeof(row->value), "%s", launcher_upscaling_labels[p->settings.upscaling] );
             row->choices = LAUNCHER_UPSCALING_COUNT;
@@ -2848,8 +2855,8 @@ static int program_menu_run( struct launcher *l, struct program *p, char *target
             if (p->settings.upscaling == 1)
             {
                 ADD_ROW( ROW_UPSCALING_SHARPNESS, SECTION_GRAPHICS, "FSR Sharpness",
-                         "How strongly FSR's second pass (RCAS) sharpens the enlarged picture. 0% leaves it "
-                         "as the first pass drew it." );
+                         "How strongly FSR's second pass (RCAS) sharpens the enlarged picture, or an OpenGL "
+                         "game's. 0% leaves it as the first pass drew it." );
                 row->kind = UI_ROW_DROPDOWN;
                 snprintf( row->value, sizeof(row->value), "%s", launcher_sharpness_labels[p->settings.upscaling_sharpness] );
                 row->choices = LAUNCHER_SHARPNESS_COUNT;
@@ -3339,6 +3346,24 @@ static int program_menu_run( struct launcher *l, struct program *p, char *target
             save_program_settings( l, p );
             break;
         }
+
+        case ROW_ANTI_ALIASING:
+            if (action == UI_ACTION_RESET) p->settings.anti_aliasing = 0;
+            else if (action == UI_ACTION_CHOOSE)
+            {
+                struct ui_row items[LAUNCHER_ANTI_ALIASING_COUNT] = {0};
+                int selected;
+
+                for (i = 0; i < LAUNCHER_ANTI_ALIASING_COUNT; i++)
+                    snprintf( items[i].label, sizeof(items[i].label), "%s", launcher_anti_aliasing_labels[i] );
+                selected = ui_settings_dropdown( ui, &list, items, LAUNCHER_ANTI_ALIASING_COUNT,
+                                                 p->settings.anti_aliasing );
+                if (selected < 0) break;
+                p->settings.anti_aliasing = selected;
+            }
+            else break;
+            save_program_settings( l, p );
+            break;
 
         case ROW_UPSCALING:
             if (action == UI_ACTION_RESET) p->settings.upscaling = 0;

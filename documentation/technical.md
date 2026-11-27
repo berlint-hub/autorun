@@ -299,6 +299,18 @@ setting, Carafe's server thread pool, which needs `sync=horizon`), and
 `[BUDGET]`, at the first server request after each 30 s, counts the threads
 in use against the limit, with the pool as `pool=threads/idle/waiting`; it
 does not need the profiler.
+An OpenGL game's picture can be post-processed at its swap, before the
+overlays are drawn over it (`horizon-wine/source/gl_postfx.h`, called from
+`dlls/win32u/winnx_opengl.c`): the game's Anti-aliasing setting runs FXAA
+(FXAA 3.11's quality algorithm, preset 12), and its Upscaling setting on FSR
+1.0 runs FSR's RCAS at the FSR Sharpness, counted as the Vulkan presentation
+counts it. The back buffer is copied into a texture of the surface's size and
+each pass draws a triangle over the whole surface in the game's own context;
+everything the passes bind, enable or mask is put back, and no GL error is
+raised or taken. With nxvk this runs on Mesa's GL thread, in the swap's hook.
+`[NXGL] post-processing over the frame at its swap` says which passes run.
+`tests/gl_postfx.c` runs the passes over Mesa's llvmpipe on the host.
+
 `[FRAMES]`, with every thread report and without the profiler, is the
 stutter: the median frame, the 99th percentile, the frames that took over
 twice the median (and 8 ms more) or over 100 ms, and for the three slowest
@@ -579,7 +591,7 @@ Autorun is built from these projects; each keeps its own copyright and license.
 | [HarfBuzz](https://harfbuzz.github.io) | HarfBuzz authors | MIT | Text shaping in the launcher |
 | [libpng](http://www.libpng.org), [zlib](https://zlib.net), [bzip2](https://sourceware.org/bzip2/) | Their authors | libpng, zlib, BSD-style | Program icons and compressed data |
 | [llvm-mingw](https://github.com/mstorsjo/llvm-mingw) | Martin Storsjö; LLVM and mingw-w64 authors | Apache-2.0 with LLVM exception, mingw-w64's licenses | Building Wine's and DXVK's Windows DLLs |
-| [FidelityFX Super Resolution 1](https://github.com/GPUOpen-Effects/FidelityFX-FSR) | Advanced Micro Devices | MIT | The Upscaling setting's FSR 1.0 (EASU and RCAS, `tools/fsr1`), which isrmicha brought to the launcher |
+| [FidelityFX Super Resolution 1](https://github.com/GPUOpen-Effects/FidelityFX-FSR) | Advanced Micro Devices | MIT | The Upscaling setting's FSR 1.0 (EASU and RCAS, `tools/fsr1`), which isrmicha brought to the launcher; RCAS also sharpens an OpenGL game's picture (`horizon-wine/source/gl_postfx.h`) |
 | [dolphin-nx](https://github.com/NaGaa95/dolphin-nx) | NaGaa95 | GPL-2.0-or-later | The launcher's look (icon grid, program menu, settings and themes) follows its launcher; Autorun's launcher is its own code |
 | [Carafe](https://github.com/carafe-nx/carafe) | The Carafe authors | LGPL-2.1-or-later for its runtime overlay and Autorun patches; GPL-3.0-or-later for the thread orchestrator (`horizon-wine/source/orchestrator.c`, `orchestrator_policy.c`, `orchestrator_policy.h`, its tests `tests/orchestrator.c` and `tools/orchestrator_replay.c`) and for the settings menu's texts in fourteen languages (`horizon-wine/tools/carafe-menu-texts.json`, which the menu's catalog is built with) | The in-game settings menu, the loading and error screens and the registry overlay (`horizon-wine/source/carafe_*.c`), the thread orchestrator behind the **Thread orchestrator** setting, DirectShow and Windows Media playback through FFmpeg (`source/media_unix.c`) and runtime fixes; what was taken and what is still to come is in [carafe/integration/PORTING.md](../carafe/integration/PORTING.md) |
 

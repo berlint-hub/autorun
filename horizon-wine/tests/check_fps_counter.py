@@ -84,7 +84,8 @@ assert 'static void nx_osk_draw_hook( void *data )\n{\n    nx_osk_draw_gl( data 
 draw = winnx[winnx.index('static void nx_osk_draw_gl( const struct nx_osk_target *target )\n{'):]
 draw = draw[:draw.index('\n}\n')]
 assert 'BOOL fps_on = &wine_nx_fps_counter && wine_nx_fps_counter;' in draw
-assert draw.count('if (!overlay_visible && !cursor_on && !fps_on) return;') == 2
+assert draw.count('if (!overlay_visible && !cursor_on && !fps_on && !postfx_on) return;') == 2
+assert 'if (!overlay_visible && !cursor_on && !fps_on && !nx_postfx_wanted()) return;' in setup
 assert 'if (!overlay_visible && !cursor_on) return;' not in draw
 fps = draw[draw.index('    if (fps_on)\n'):]
 assert re.match(r'    if \(fps_on\)\s*\{\s*nx_fps_count\(\);\s*if \(!overlay_visible\)\s*\{\s*'
