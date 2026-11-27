@@ -127,6 +127,73 @@ static void test_rcas( struct gl_postfx *fx )
     assert( !gl_postfx_apply( &f, fx, W, H, GL_POSTFX_AA_OFF, gl_postfx_rcas_strength( 0 ), error, sizeof(error) ) );
 }
 
+/* A game in a mode below the screen's draws its picture into the bottom-left
+ * corner of a surface of the screen's size: EASU enlarges it over the whole
+ * surface. A hard edge between two greys in a picture of half the size. */
+static void draw_corner_picture( void )
+{
+    /* What is outside the picture is the game's to leave: red, overwritten. */
+    f.Disable( GLPFX_SCISSOR_TEST );
+    glClearColor_( 1, 0, 0, 1 );
+    glClear_( GLPFX_COLOR_BUFFER_BIT );
+    f.Enable( GLPFX_SCISSOR_TEST );
+    glScissor_( 0, 0, W / 4, H / 2 );
+    glClearColor_( 0.2f, 0.2f, 0.2f, 1 );
+    glClear_( GLPFX_COLOR_BUFFER_BIT );
+    glScissor_( W / 4, 0, W / 4, H / 2 );
+    glClearColor_( 0.8f, 0.8f, 0.8f, 1 );
+    glClear_( GLPFX_COLOR_BUFFER_BIT );
+    f.Disable( GLPFX_SCISSOR_TEST );
+}
+
+static void test_easu( struct gl_postfx *fx )
+{
+    char error[512];
+    int viewport[4];
+
+    draw_corner_picture();
+    f.Viewport( 0, 0, W / 2, H / 2 );  /* the game's own */
+    assert( gl_postfx_apply_scaled( &f, fx, W, H, W / 2, H / 2, GL_POSTFX_AA_OFF, 1, 0, error, sizeof(error) ) );
+    if (error[0]) fprintf( stderr, "%s\n", error );
+    no_error();
+    f.GetIntegerv( GLPFX_VIEWPORT, viewport );
+    assert( viewport[0] == 0 && viewport[1] == 0 && viewport[2] == W / 2 && viewport[3] == H / 2 );
+    f.Viewport( 0, 0, W, H );
+    read_back();
+    printf( "EASU: columns 45-50 of the surface %u %u %u %u %u %u, from a picture of %dx%d\n",
+            pixels[H / 2][45][0], pixels[H / 2][46][0], pixels[H / 2][47][0], pixels[H / 2][48][0],
+            pixels[H / 2][49][0], pixels[H / 2][50][0], W / 2, H / 2 );
+    for (int y = 0; y < H; y++)
+        for (int x = 0; x < W; x++)
+        {
+            const unsigned char *p = pixels[y][x];
+
+            /* Every pixel of the surface is the picture's, grey, and every
+             * row alike: nothing red is left. */
+            assert( p[0] == p[1] && p[1] == p[2] && p[0] == pixels[0][x][0] );
+            /* Flat parts stay flat, and the edge stays within its two greys:
+             * EASU does not ring. */
+            if (x <= 46) assert( abs( p[0] - 51 ) <= 1 );
+            else if (x >= 49) assert( abs( p[0] - 204 ) <= 1 );
+            else assert( p[0] > 52 && p[0] < 203 );
+        }
+    assert( pixels[0][47][0] < pixels[0][48][0] );
+
+    /* With FXAA before it and RCAS after, into a texture of the surface's
+     * size between them. */
+    draw_corner_picture();
+    assert( gl_postfx_apply_scaled( &f, fx, W, H, W / 2, H / 2, GL_POSTFX_AA_FXAA, 1, gl_postfx_rcas_strength( 0.8f ),
+                                    error, sizeof(error) ) );
+    no_error();
+    assert( fx->width == W / 2 && fx->height == H / 2 && fx->mid_width == W / 2 && fx->up_width == W && fx->up_height == H );
+    read_back();
+    assert( pixels[H - 1][W - 1][0] == pixels[H - 1][W - 1][2] && pixels[H - 1][W - 1][1] == pixels[H - 1][W - 1][0] );
+    /* A picture of the surface's size is not enlarged: with nothing else to
+     * do, nothing is drawn. */
+    assert( !gl_postfx_apply_scaled( &f, fx, W, H, W, H, GL_POSTFX_AA_OFF, 1, 0, error, sizeof(error) ) );
+    assert( !gl_postfx_apply_scaled( &f, fx, W, H, W / 2, H / 2, GL_POSTFX_AA_OFF, 0, 0, error, sizeof(error) ) );
+}
+
 /* What a game leaves set at its swap comes back as it was. */
 static void test_state( struct gl_postfx *fx )
 {
@@ -262,9 +329,10 @@ int main( void )
 
     test_fxaa( &fx );
     test_rcas( &fx );
+    test_easu( &fx );
     test_state( &fx );
     test_names_and_sizes( &fx );
     glFinish_();
-    printf( "gl_postfx: FXAA, RCAS, the program's state and errors, names it deleted and a new size passed\n" );
+    printf( "gl_postfx: FXAA, EASU, RCAS, the program's state and errors, names it deleted and a new size passed\n" );
     return 0;
 }

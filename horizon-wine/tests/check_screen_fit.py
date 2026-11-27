@@ -56,6 +56,8 @@ int wine_nx_picture_mode __attribute__((weak));
 typedef EGLBoolean (*PFN_eglResizeSurfaceMESA)( EGLDisplay display, EGLSurface surface, EGLint width, EGLint height );
 static SIZE nx_screen_size = { 1280, 720 };
 static SIZE nx_screen_refused;
+static SIZE nx_easu_picture;
+static int nx_postfx_upscale;
 ''' + fit + r'''
 int main( void )
 {
@@ -116,6 +118,63 @@ int main( void )
     d.virtual_size = (SIZE){ 1024, 768 };
     nx_screen_fit( &d );
     assert( resizes == 6 && width == 1024 );
+    assert( !nx_easu_picture.cx );
+
+    /* FSR's upscaling: a mode below the screen's keeps a surface of the
+     * screen's size, its picture in the corner for EASU to enlarge. */
+    nx_postfx_upscale = 1;
+    d.virtual_size = (SIZE){ 800, 600 };
+    nx_screen_fit( &d );
+    assert( resizes == 7 && width == 1280 && height == 720 );
+    assert( nx_easu_picture.cx == 800 && nx_easu_picture.cy == 600 && strstr( last, "draws 800x600 into its corner" ) );
+    nx_screen_fit( &d );
+    assert( resizes == 7 && nx_easu_picture.cx == 800 );
+    /* One as wide as the screen and lower is enlarged too; one of its size,
+     * or larger either way, is not. */
+    d.virtual_size = (SIZE){ 1280, 600 };
+    nx_screen_fit( &d );
+    assert( resizes == 7 && nx_easu_picture.cx == 1280 && nx_easu_picture.cy == 600 );
+    d.virtual_size = (SIZE){ 1280, 720 };
+    nx_screen_fit( &d );
+    assert( resizes == 7 && !nx_easu_picture.cx );
+    d.virtual_size = (SIZE){ 1600, 1200 };
+    nx_screen_fit( &d );
+    assert( resizes == 8 && width == 1600 && !nx_easu_picture.cx );
+    /* Docked, on a screen of 1920x1080: a 720p mode drawn in its corner. */
+    d.monitor_size = (SIZE){ 1920, 1080 };
+    d.virtual_size = (SIZE){ 1280, 720 };
+    nx_screen_fit( &d );
+    assert( resizes == 9 && width == 1920 && height == 1080 && nx_easu_picture.cx == 1280 && nx_easu_picture.cy == 720 );
+    /* Refused: the surface stays as it is, and nothing is enlarged. */
+    d.monitor_size = (SIZE){ 1280, 720 };
+    d.virtual_size = (SIZE){ 640, 480 };
+    refuse = 1;
+    nx_screen_fit( &d );
+    assert( resizes == 10 && width == 1920 && !nx_easu_picture.cx );
+    nx_screen_fit( &d );
+    assert( resizes == 10 && !nx_easu_picture.cx );
+    refuse = 0;
+    /* The refused size is asked for again once another one was given. */
+    nx_postfx_upscale = 0;
+    d.virtual_size = (SIZE){ 800, 600 };
+    nx_screen_fit( &d );
+    assert( resizes == 11 && width == 800 && !nx_easu_picture.cx );
+    nx_postfx_upscale = 1;
+    nx_screen_fit( &d );
+    assert( resizes == 12 && width == 1280 && nx_easu_picture.cx == 800 );
+    /* Emulation on, or own size: none either. */
+    emulate_modeset = 1;
+    nx_screen_fit( &d );
+    assert( !nx_easu_picture.cx );
+    emulate_modeset = 0;
+    wine_nx_picture_mode = 3;
+    nx_screen_fit( &d );
+    assert( !nx_easu_picture.cx );
+    wine_nx_picture_mode = 0;
+    /* FSR off again: the surface takes the mode, as before. */
+    nx_postfx_upscale = 0;
+    nx_screen_fit( &d );
+    assert( resizes == 13 && width == 800 && !nx_easu_picture.cx );
     return 0;
 }
 '''
@@ -140,4 +199,5 @@ assert release.index('nwindowSetDimensions( nwindowGetDefault(), WINE_NX_FB_W, W
 # A finger lands where the picture is.
 ratios = sysparams[sysparams.index('static void source_virt_to_raw_ratios('):]
 assert ratios.index('if (!emulate_modeset && mode != 3) mode = 2;') < ratios.index('if (mode == 3)')
-print('screen surface at the program\'s mode: ok')
+assert 'nx_easu_picture.cx = nx_easu_picture.cy = 0;' in create
+print('screen surface at the program\'s mode, or at the screen\'s for FSR to enlarge: ok')

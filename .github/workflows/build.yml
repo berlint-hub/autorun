@@ -226,8 +226,8 @@ jobs:
           done
 
       - name: Post-processing of an OpenGL frame
-        # FXAA and FSR's RCAS at a program's swap (source/gl_postfx.h), run
-        # over Mesa's llvmpipe in a compatibility context, as old games make.
+        # FXAA and FSR's EASU and RCAS at a program's swap (source/gl_postfx.h),
+        # run over Mesa's llvmpipe in a compatibility context, as old games make.
         run: |
           sudo apt-get install -y --no-install-recommends libegl-dev libgl1-mesa-dri libegl-mesa0
           cd horizon-wine
@@ -264,7 +264,7 @@ jobs:
           for check in check_thread_creation_wait check_horizon_thread_tls check_horizon_fd_owner \
                        check_shader_affinity check_futex_exit check_orchestrator_setting check_server_pool \
                        check_horizon_suspend check_core_affinity check_yield_backoff check_fps_counter \
-                       check_fpslocker check_wine_mono check_gl_postfx \
+                       check_fpslocker check_wine_mono check_gl_postfx check_screen_fit \
                        check_own_size_windows check_text_edit; do
             python3 tests/$check.py > "$RUNNER_TEMP/$check.log" 2>&1 || {
               echo "::error::horizon-wine/tests/$check.py failed: $(grep -m 4 -E 'error|Assertion|Error|never true|data race|failed' "$RUNNER_TEMP/$check.log" | tr '\n' ' ' | cut -c1-900)"
