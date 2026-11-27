@@ -26,16 +26,18 @@ extern unsigned int wine_nx_shader_compiles __attribute__((weak));
 extern unsigned long long wine_nx_gl_wait_ns __attribute__((weak));
 extern unsigned long long carafe_native_thread_ticks( const char *name ) __attribute__((weak));
 extern unsigned int wine_nx_program_faults __attribute__((weak));
-/* The profiler's samples of the presenting thread within a slow frame
+/* The profiler's samples within a slow frame, of every thread it samples
  * (thread_profile.c), and what each is part of. */
-extern unsigned int wine_nx_prof_frame_samples( unsigned int tid, unsigned long long from, unsigned long long to,
-                                                unsigned char *kinds, unsigned long long *keys, unsigned int max )
-    __attribute__((weak));
-extern void wine_nx_prof_sample_group( unsigned int kind, unsigned long long key, char *buf, size_t size )
-    __attribute__((weak));
+extern unsigned int wine_nx_prof_frame_samples( unsigned long long from, unsigned long long to, unsigned int *tids,
+                                                unsigned char *kinds, unsigned long long *keys,
+                                                unsigned long long *chains, unsigned int max ) __attribute__((weak));
+extern void wine_nx_prof_sample_group( unsigned int kind, unsigned long long key, unsigned long long chain,
+                                       char *buf, size_t size ) __attribute__((weak));
 
-/* A sample every 2 ms: 64 cover a frame of 128 ms, the newest of a longer one. */
-#define FRAME_SAMPLES 64
+/* A round of samples every 2 ms over at most four threads: 160 cover a frame
+ * of 80 ms of all four, the newest part of a longer one. */
+#define FRAME_SAMPLES 160
+#define FRAME_SAMPLE_US 2000
 #define FRAME_GROUPS_SHOWN 3
 
 struct frame_cost
@@ -51,9 +53,11 @@ struct frame_cost
     unsigned int gl_us;       /* the GL thread running */
     unsigned int driver_us;   /* the driver's thread behind it running */
     unsigned int faults;      /* faults handed to the program */
-    unsigned int samples;     /* the profiler's of the presenting thread, the newest first */
+    unsigned int tid;         /* the thread that presented */
+    unsigned int samples;     /* the profiler's, of every thread, the newest first */
+    unsigned int sample_tids[FRAME_SAMPLES];
     unsigned char sample_kinds[FRAME_SAMPLES];
-    unsigned long long sample_keys[FRAME_SAMPLES];
+    unsigned long long sample_keys[FRAME_SAMPLES], sample_chains[FRAME_SAMPLES];
 };
 
 struct frame_counters
@@ -120,7 +124,7 @@ void wine_nx_frame_presented( unsigned int tid, unsigned long long present_100ns
     mutexLock( &frames_lock );
     if (have_last && now.tick > last.tick)
     {
-        struct frame_cost cost = { .us = ticks_us( now.tick - last.tick ) };
+        struct frame_cost cost = { .us = ticks_us( now.tick - last.tick ), .tid = tid };
 
         if (cost.us >= FRAME_GAP_US) gaps++;
         else
@@ -142,11 +146,11 @@ void wine_nx_frame_presented( unsigned int tid, unsigned long long present_100ns
             if (now.gl > last.gl) cost.gl_us = ticks_us( now.gl - last.gl );
             if (now.driver > last.driver) cost.driver_us = ticks_us( now.driver - last.driver );
             cost.faults = now.faults - last.faults;
-            /* Where the presenting thread was, for a frame among the slowest. */
+            /* Where the threads were, for a frame among the slowest. */
             if (wine_nx_prof_frame_samples && last.tid == tid &&
                 (slowest_count < FRAMES_SLOWEST || cost.us > slowest[FRAMES_SLOWEST - 1].us))
-                cost.samples = wine_nx_prof_frame_samples( tid, last.tick, now.tick, cost.sample_kinds,
-                                                           cost.sample_keys, FRAME_SAMPLES );
+                cost.samples = wine_nx_prof_frame_samples( last.tick, now.tick, cost.sample_tids, cost.sample_kinds,
+                                                           cost.sample_keys, cost.sample_chains, FRAME_SAMPLES );
             /* Only with a GL thread: without one Mesa's finish returns at once. */
             if (now.gl) have_gl = 1;
             frames++;
@@ -167,23 +171,27 @@ static int by_time( const void *a, const void *b )
     return x < y ? -1 : x > y;
 }
 
-/* The places the presenting thread was sampled in a slow frame, added up by
- * what they are part of (a module of the game, a function of the runtime, a
- * system call), the three it was in most, as the time each stands for. */
-static int put_samples( char *line, size_t size, const struct frame_cost *cost )
+/* The places thread tid was sampled in a slow frame, added up by what they
+ * are part of (a module of the game, a function of the runtime, a system call
+ * and what waits in it), the three it was in most, as the time each stands
+ * for. A round samples each thread once, so with all of the frame's samples
+ * at hand each stands for the frame's time over their number; past
+ * FRAME_SAMPLES only the last are, at the profiler's period. */
+static int put_samples( char *line, size_t size, const struct frame_cost *cost, unsigned int tid, const char *who )
 {
-    struct { char name[64]; unsigned int count; } groups[16], swap;
-    /* All the frame's samples stand for its time; past FRAME_SAMPLES only the
-     * last of them are kept, at their period. */
-    unsigned long long per_us = cost->samples < FRAME_SAMPLES ? cost->us / cost->samples : 2000;
-    unsigned int count = 0, i, j;
+    struct { char name[96]; unsigned int count; } groups[16], swap;
+    unsigned int count = 0, total = 0, i, j;
+    unsigned long long per_us;
     int used;
 
     for (i = 0; i < cost->samples; i++)
     {
-        char name[64];
+        char name[96];
 
-        wine_nx_prof_sample_group( cost->sample_kinds[i], cost->sample_keys[i], name, sizeof(name) );
+        if (cost->sample_tids[i] != tid) continue;
+        total++;
+        wine_nx_prof_sample_group( cost->sample_kinds[i], cost->sample_keys[i], cost->sample_chains[i], name,
+                                   sizeof(name) );
         for (j = 0; j < count && strcmp( groups[j].name, name ); j++) continue;
         if (j == count)
         {
@@ -193,6 +201,8 @@ static int put_samples( char *line, size_t size, const struct frame_cost *cost )
         }
         groups[j].count++;
     }
+    if (!total) return 0;
+    per_us = cost->samples < FRAME_SAMPLES ? cost->us / total : FRAME_SAMPLE_US;
     for (i = 1; i < count; i++)
         for (j = i; j > 0 && groups[j - 1].count < groups[j].count; j--)
         {
@@ -200,14 +210,35 @@ static int put_samples( char *line, size_t size, const struct frame_cost *cost )
             groups[j - 1] = groups[j];
             groups[j] = swap;
         }
-    used = snprintf( line, size, " its thread in" );
+    used = snprintf( line, size, " %s in", who );
     for (i = 0; i < count && i < FRAME_GROUPS_SHOWN && used > 0 && (size_t)used < size; i++)
         used += snprintf( line + used, size - (size_t)used, "%s %s %u ms", i ? "," : "", groups[i].name,
                           (unsigned int)(groups[i].count * per_us / 1000) );
     if (used > 0 && (size_t)used < size)
         used += snprintf( line + used, size - (size_t)used, " (%s%u samples),",
-                          cost->samples < FRAME_SAMPLES ? "" : "the last ", cost->samples );
+                          cost->samples < FRAME_SAMPLES ? "" : "the last ", total );
     return used;
+}
+
+/* The thread other than the presenting one sampled most in the frame: the
+ * one it may have waited for. 0 for none. */
+static unsigned int busiest_other( const struct frame_cost *cost )
+{
+    unsigned int best = 0, best_count = 0, i, j, count;
+
+    for (i = 0; i < cost->samples; i++)
+    {
+        unsigned int tid = cost->sample_tids[i];
+
+        if (tid == cost->tid || tid == best) continue;
+        for (j = count = 0; j < cost->samples; j++) count += cost->sample_tids[j] == tid;
+        if (count > best_count)
+        {
+            best = tid;
+            best_count = count;
+        }
+    }
+    return best;
 }
 
 /* As 12.3 ms. */
@@ -219,7 +250,8 @@ static int put_ms( char *line, size_t size, unsigned int us )
 int wine_nx_frame_report( char *line, size_t size )
 {
     static unsigned int sorted[FRAMES_KEPT];
-    struct frame_cost worst[FRAMES_SLOWEST];
+    /* Only the thread report calls it. */
+    static struct frame_cost worst[FRAMES_SLOWEST];
     unsigned int count, gap_count, stored, worst_count, median, high, stutters = 0, long_frames = 0, i;
     unsigned long long total_us;
     int fex, gl, used;
@@ -260,12 +292,12 @@ int wine_nx_frame_report( char *line, size_t size )
     PUT_MS( high );
     PUT( ", over twice the median %u, over 100 ms %u", stutters, long_frames );
     if (gap_count) PUT( ", gaps of a second or more %u", gap_count );
-    PUT( "; slowest" );
+    /* Each slow frame on a line of its own: a log line holds 1024 bytes. */
     for (i = 0; i < worst_count; i++)
     {
         const struct frame_cost *cost = &worst[i];
 
-        PUT( "%s ", i ? ";" : "" );
+        PUT( "\n[FRAMES] slow frame " );
         PUT_MS( cost->us );
         PUT( ":" );
         if (fex) PUT( " FEX translating %u ms (%u ms on all threads),", cost->fex_us / 1000, cost->fex_all_us / 1000 );
@@ -275,8 +307,15 @@ int wine_nx_frame_report( char *line, size_t size )
             PUT( " waiting for the GL thread %u ms (it ran %u ms, the driver's thread %u ms),", cost->gl_wait_us / 1000,
                  cost->gl_us / 1000, cost->driver_us / 1000 );
         if (cost->faults) PUT( " %u faults to the program,", cost->faults );
-        if (cost->samples && wine_nx_prof_sample_group && used > 0 && (size_t)used < size)
-            used += put_samples( line + used, size - (size_t)used, cost );
+        if (cost->samples && wine_nx_prof_sample_group)
+        {
+            unsigned int other = busiest_other( cost );
+            char who[24];
+
+            if (used > 0 && (size_t)used < size) used += put_samples( line + used, size - (size_t)used, cost, cost->tid, "its thread" );
+            snprintf( who, sizeof(who), "thread %u", other );
+            if (other && used > 0 && (size_t)used < size) used += put_samples( line + used, size - (size_t)used, cost, other, who );
+        }
         PUT( " present %u ms", cost->present_us / 1000 );
     }
 #undef PUT_MS

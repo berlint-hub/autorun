@@ -215,6 +215,7 @@ static struct nx_prof_bucket jit_pcs[NX_PROF_JIT_PCS];
 struct nx_prof_recent
 {
     uint64_t tick, key;
+    uint64_t chain;    /* a system call's wait chain, as the table of waits has it; 0 for none */
     unsigned int tid;
     uint8_t kind;
 };
@@ -1131,6 +1132,7 @@ static void record( struct nx_prof_target *target, const ThreadContext *ctx, int
     int native = in_runtime( pc ), svc = -1;
     unsigned int i, n = 0;
     enum nx_prof_kind kind;
+    struct nx_prof_recent *sample;
     uint64_t key;
 
     if (!translated && native && pc - runtime_base >= 4)
@@ -1143,14 +1145,12 @@ static void record( struct nx_prof_target *target, const ThreadContext *ctx, int
     target->samples++;
     target->kinds[kind]++;
     nx_prof_add( &target->tables[kind], key );
-    {
-        struct nx_prof_recent *sample = &recent_samples[recent_written++ % NX_PROF_RECENT];
-
-        sample->tick = armGetSystemTick();
-        sample->key = key;
-        sample->tid = target->tid;
-        sample->kind = (uint8_t)kind;
-    }
+    sample = &recent_samples[recent_written++ % NX_PROF_RECENT];
+    sample->tick = armGetSystemTick();
+    sample->key = key;
+    sample->chain = 0;
+    sample->tid = target->tid;
+    sample->kind = (uint8_t)kind;
     if (kind == NX_PROF_X86)
     {
         /* Who called the function running: which lock a spin loop is on, say. */
@@ -1179,7 +1179,10 @@ static void record( struct nx_prof_target *target, const ThreadContext *ctx, int
      * what is waited for: the two calls above it do (Mesa's glthread fence
      * and who finishes the queue, say). */
     if (kind == NX_PROF_SVC && n > 2)
-        nx_prof_add( &target->tables[NX_PROF_WAIT_CHAIN], nx_prof_pair_key( sites[2], sites[3] ) );
+    {
+        sample->chain = nx_prof_pair_key( sites[2], sites[3] );
+        nx_prof_add( &target->tables[NX_PROF_WAIT_CHAIN], sample->chain );
+    }
 }
 
 extern volatile int wine_nx_quit_requested __attribute__((weak));
@@ -1382,11 +1385,13 @@ static void name_site( uint32_t site, int guest, char *buf, size_t size )
     else name_native( site, buf, size );
 }
 
-/* The samples of thread tid taken after from and up to to (system ticks), the
- * newest first, at most max (frame_pacing.c, for a slow frame). Their kinds
- * are enum nx_prof_kind's, their keys the ones the profile's tables count. */
-unsigned int wine_nx_prof_frame_samples( unsigned int tid, unsigned long long from, unsigned long long to,
-                                         unsigned char *kinds, unsigned long long *keys, unsigned int max )
+/* The samples taken after from and up to to (system ticks), of every thread
+ * sampled, the newest first, at most max (frame_pacing.c, for a slow frame).
+ * Their kinds are enum nx_prof_kind's, their keys and a system call's wait
+ * chain the ones the profile's tables count. */
+unsigned int wine_nx_prof_frame_samples( unsigned long long from, unsigned long long to, unsigned int *tids,
+                                         unsigned char *kinds, unsigned long long *keys,
+                                         unsigned long long *chains, unsigned int max )
 {
     unsigned int count = 0, seen;
 
@@ -1397,21 +1402,38 @@ unsigned int wine_nx_prof_frame_samples( unsigned int tid, unsigned long long fr
         const struct nx_prof_recent *sample = &recent_samples[(recent_written - 1 - seen) % NX_PROF_RECENT];
 
         if (sample->tick <= from) break;
-        if (sample->tid != tid || sample->tick > to) continue;
+        if (sample->tick > to) continue;
+        tids[count] = sample->tid;
         kinds[count] = sample->kind;
+        chains[count] = sample->chain;
         keys[count++] = sample->key;
     }
     pthread_mutex_unlock( &profile_mutex );
     return count;
 }
 
+/* A runtime function's name without its offset: "function+0x40" adds up by
+ * function; a bare "+0x3e38a0" stays as it is. */
+static void name_function( uint64_t offset, char *buf, size_t size )
+{
+    char *plus;
+
+    name_native( offset, buf, size );
+    if ((plus = strrchr( buf, '+' )) && plus != buf)
+    {
+        *plus = 0;
+        if (plus[-1] == '~') plus[-1] = 0;
+    }
+}
+
 /* What a sample is part of, for adding up a slow frame: the module of guest
  * code or of an ARM64 PE ("jit" outside them, FEX's code), the runtime's
- * function, or the system call and the function that made it. */
-void wine_nx_prof_sample_group( unsigned int kind, unsigned long long key, char *buf, size_t size )
+ * function, or the system call with what waits in it, by the two calls of
+ * its wait chain ("svc0x1c<condvarWaitTimeout" without one). */
+void wine_nx_prof_sample_group( unsigned int kind, unsigned long long key, unsigned long long chain,
+                                char *buf, size_t size )
 {
-    char name[128];
-    char *plus;
+    char name[128], outer[128];
     void *base;
 
     switch (kind)
@@ -1422,17 +1444,19 @@ void wine_nx_prof_sample_group( unsigned int kind, unsigned long long key, char 
         else snprintf( buf, size, "%s", kind == NX_PROF_IMAGE ? "jit" : "x86 outside images" );
         return;
     case NX_PROF_NATIVE:
-        name_native( key, name, sizeof(name) );
-        break;
-    default:
-        name_native( key & 0xffffffffffull, name, sizeof(name) );
-        break;
+        name_function( key, buf, size );
+        return;
     }
-    /* "function+0x40" adds up by function; a bare "+0x3e38a0" stays as it is. */
-    if ((plus = strrchr( name, '+' )) && plus != name) *plus = 0;
-    if (plus && plus > name && plus[-1] == '~') plus[-1] = 0;
-    if (kind == NX_PROF_NATIVE) snprintf( buf, size, "%s", name );
-    else snprintf( buf, size, "svc%#llx<%s", key >> 40, name );
+    if (chain && (uint32_t)(chain >> 32) != NX_PROF_NO_SITE)
+    {
+        name_function( (uint32_t)(chain >> 32), name, sizeof(name) );
+        if ((uint32_t)chain != NX_PROF_NO_SITE) name_function( (uint32_t)chain, outer, sizeof(outer) );
+        else snprintf( outer, sizeof(outer), "-" );
+        snprintf( buf, size, "svc%#llx in %s<%s", key >> 40, name, outer );
+        return;
+    }
+    name_function( key & 0xffffffffffull, name, sizeof(name) );
+    snprintf( buf, size, "svc%#llx<%s", key >> 40, name );
 }
 
 /* Where every thread is standing, once nothing has moved for a while. A program

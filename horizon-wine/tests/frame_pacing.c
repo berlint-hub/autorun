@@ -32,28 +32,42 @@ static unsigned long long gl_ticks, driver_ticks;
 
 /* The profiler's samples: those of the next frame, for any thread. */
 static unsigned int prof_count, prof_calls;
-static unsigned char prof_kinds[80];
-static unsigned long long prof_keys[80];
-unsigned int wine_nx_prof_frame_samples( unsigned int tid, unsigned long long from, unsigned long long to,
-                                         unsigned char *kinds, unsigned long long *keys, unsigned int max )
+static unsigned int prof_tids[200];
+static unsigned char prof_kinds[200];
+static unsigned long long prof_keys[200], prof_chains[200];
+unsigned int wine_nx_prof_frame_samples( unsigned long long from, unsigned long long to, unsigned int *tids,
+                                         unsigned char *kinds, unsigned long long *keys,
+                                         unsigned long long *chains, unsigned int max )
 {
     unsigned int i;
 
-    (void)tid;
     assert( from < to );
     prof_calls++;
     for (i = 0; i < prof_count && i < max; i++)
     {
+        tids[i] = prof_tids[i];
         kinds[i] = prof_kinds[i];
         keys[i] = prof_keys[i];
+        chains[i] = prof_chains[i];
     }
     return i;
 }
 
-void wine_nx_prof_sample_group( unsigned int kind, unsigned long long key, char *buf, size_t size )
+void wine_nx_prof_sample_group( unsigned int kind, unsigned long long key, unsigned long long chain, char *buf,
+                                size_t size )
 {
     if (kind == 0) snprintf( buf, size, "%s", key < 0x1000000 ? "exe" : "gamex86.dll" );
+    else if (chain) snprintf( buf, size, "svc%#llx in server_call_unlocked<NtWaitForSingleObject", key >> 40 );
     else snprintf( buf, size, "svc%#llx<condvarWaitTimeout", key >> 40 );
+}
+
+static void sample( unsigned int at, unsigned int tid, unsigned char kind, unsigned long long key,
+                    unsigned long long chain )
+{
+    prof_tids[at] = tid;
+    prof_kinds[at] = kind;
+    prof_keys[at] = key;
+    prof_chains[at] = chain;
 }
 unsigned long long carafe_native_thread_ticks( const char *name )
 {
@@ -113,10 +127,10 @@ static void without_fex( void )
     frame( 4, 30, 20000 );
     assert( report() > 0 );
     contains( "[FRAMES] 23 in 0.5 s: median 16.7 ms, 99th percentile 120.0 ms," );
-    contains( "over twice the median 2, over 100 ms 1;" );
-    contains( "slowest 120.0 ms: card 30 ms, 2 shaders compiled in 45 ms, present 3 ms;" );
-    contains( "; 40.0 ms: card 0 ms, 0 shaders compiled in 0 ms, present 2 ms;" );
-    contains( "; 30.0 ms:" );
+    contains( "over twice the median 2, over 100 ms 1\n" );
+    contains( "\n[FRAMES] slow frame 120.0 ms: card 30 ms, 2 shaders compiled in 45 ms, present 3 ms\n" );
+    contains( "\n[FRAMES] slow frame 40.0 ms: card 0 ms, 0 shaders compiled in 0 ms, present 2 ms\n" );
+    contains( "\n[FRAMES] slow frame 30.0 ms:" );
     assert( !strstr( line, "FEX" ) );
     assert( !strstr( line, "gaps" ) );
 
@@ -132,8 +146,8 @@ static void without_fex( void )
     frame( 4, 16.7, 0 );
     assert( report() > 0 );
     contains( "[FRAMES] 2 in 0.0 s" );
-    contains( "gaps of a second or more 1;" );
-    contains( "slowest 16.7 ms:" );
+    contains( "gaps of a second or more 1\n" );
+    contains( "\n[FRAMES] slow frame 16.7 ms:" );
 }
 
 static void with_fex( void )
@@ -159,8 +173,8 @@ static void with_fex( void )
     fex_area.threads[0].jit_time += 7 * TICKS_PER_MS;
     frame( 20, 60, 0 );
     assert( report() > 0 );
-    contains( "slowest 80.0 ms: FEX translating 50 ms (60 ms on all threads), card 0 ms" );
-    contains( "; 60.0 ms: FEX translating 0 ms (7 ms on all threads)," );
+    contains( "slow frame 80.0 ms: FEX translating 50 ms (60 ms on all threads), card 0 ms" );
+    contains( "slow frame 60.0 ms: FEX translating 0 ms (7 ms on all threads)," );
 
     /* A broken area is left alone. */
     fex_area.header.thread_stats_size = 1;
@@ -199,9 +213,9 @@ static void with_gl_thread( void )
     wine_nx_program_faults += 3;
     frame( 4, 70, 0 );
     assert( report() > 0 );
-    contains( "slowest 70.0 ms: card 0 ms, 0 shaders compiled in 0 ms, waiting for the GL thread 50 ms "
-              "(it ran 45 ms, the driver's thread 30 ms), 3 faults to the program, present 0 ms;" );
-    contains( "; 16.7 ms: card 0 ms, 0 shaders compiled in 0 ms, waiting for the GL thread 0 ms (it ran 5 ms, "
+    contains( "slow frame 70.0 ms: card 0 ms, 0 shaders compiled in 0 ms, waiting for the GL thread 50 ms "
+              "(it ran 45 ms, the driver's thread 30 ms), 3 faults to the program, present 0 ms\n" );
+    contains( "slow frame 16.7 ms: card 0 ms, 0 shaders compiled in 0 ms, waiting for the GL thread 0 ms (it ran 5 ms, "
               "the driver's thread 2 ms), present 0 ms" );
     /* A GL thread that ended takes its time out of the sum: not a frame of
      * negative time. */
@@ -216,33 +230,33 @@ static void with_samples( void )
 {
     unsigned int i;
 
-    /* A frame of 80 ms the profiler sampled 40 times: 24 in the game's exe,
-     * 10 in its game DLL, 6 waiting in a condition variable. */
+    /* A frame of 80 ms the profiler sampled 40 times on each of its threads:
+     * the presenting one 24 times in the game's exe, 10 in its game DLL and 6
+     * waiting for an object, the async thread (24) 30 times in the exe, and a
+     * third (12) 5 times. */
     for (i = 0; i < 40; i++)
-    {
-        prof_kinds[i] = i < 34 ? 0 : 3;
-        prof_keys[i] = i < 24 ? 0x4a0000 : i < 34 ? 0x20010000 : 0x1cull << 40;
-    }
+        sample( i, 4, i < 34 ? 0 : 3, i < 24 ? 0x4a0000 : i < 34 ? 0x20010000 : 0x1cull << 40, i < 34 ? 0 : 0x1234 );
+    for (i = 40; i < 80; i++) sample( i, 24, i < 70 ? 0 : 3, i < 70 ? 0x4b0000 : 0x1cull << 40, 0 );
+    for (i = 80; i < 85; i++) sample( i, 12, 0, 0x4c0000, 0 );
     frame( 4, 16.7, 0 );
     frame( 4, 16.7, 0 );
-    prof_count = 40;
+    prof_count = 85;
     frame( 4, 80, 0 );
     prof_count = 0;
     assert( report() > 0 );
-    contains( "slowest 80.0 ms: card 0 ms, 0 shaders compiled in 0 ms, its thread in exe 48 ms, gamex86.dll 20 ms, "
-              "svc0x1c<condvarWaitTimeout 12 ms (40 samples), present 0 ms;" );
-    /* A frame longer than the samples kept: those it has, at 2 ms each. */
-    for (i = 0; i < 80; i++)
-    {
-        prof_kinds[i] = 0;
-        prof_keys[i] = 0x4a0000;
-    }
+    contains( "\n[FRAMES] slow frame 80.0 ms: card 0 ms, 0 shaders compiled in 0 ms, its thread in exe 48 ms, "
+              "gamex86.dll 20 ms, svc0x1c in server_call_unlocked<NtWaitForSingleObject 12 ms (40 samples), "
+              "thread 24 in exe 60 ms, svc0x1c<condvarWaitTimeout 20 ms (40 samples), present 0 ms\n" );
+    assert( !strstr( line, "thread 12" ) );
+    /* More samples than are kept: the last of them, at 2 ms each. */
+    for (i = 0; i < 200; i++) sample( i, 4, 0, 0x4a0000, 0 );
     frame( 4, 16.7, 0 );
-    prof_count = 80;
-    frame( 4, 300, 0 );
+    prof_count = 200;
+    frame( 4, 400, 0 );
     prof_count = 0;
     assert( report() > 0 );
-    contains( "slowest 300.0 ms: card 0 ms, 0 shaders compiled in 0 ms, its thread in exe 128 ms (the last 64 samples)," );
+    contains( "slow frame 400.0 ms: card 0 ms, 0 shaders compiled in 0 ms, its thread in exe 320 ms "
+              "(the last 160 samples), present 0 ms" );
     /* Only frames among the slowest ask for samples. */
     prof_calls = 0;
     frame( 4, 16.7, 0 );
@@ -262,8 +276,8 @@ static void many( void )
     assert( report() > 0 );
     contains( "[FRAMES] 4197 in " );
     contains( "median 8.3 ms" );
-    contains( "slowest 300.0 ms:" );
-    contains( "; 56.0 ms:" );
+    contains( "slow frame 300.0 ms:" );
+    contains( "slow frame 56.0 ms:" );
 }
 
 int main( void )

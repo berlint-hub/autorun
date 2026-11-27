@@ -18,7 +18,8 @@
  * thread was sampled within the frame. A gap of a
  * second or more is a loading screen or a menu, counted apart. */
 void wine_nx_frame_presented( unsigned int tid, unsigned long long present_100ns );
-/* Writes the line for the frames since the last one and starts counting
+/* Writes the line for the frames since the last one, and after it one line
+ * for each of the slowest ("\n[FRAMES] slow frame ..."), and starts counting
  * again. 0 when no frame was shown since. */
 int wine_nx_frame_report( char *line, size_t size );
 
